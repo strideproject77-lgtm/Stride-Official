@@ -1,3 +1,5 @@
+pub mod classes;
+
 //! DEX code_item structural reader. It exposes bounded instruction bytes; it is not a
 //! Dalvik interpreter and deliberately does not claim bytecode execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
