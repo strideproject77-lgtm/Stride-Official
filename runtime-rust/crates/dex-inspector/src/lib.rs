@@ -53,7 +53,9 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
 mod code_item_tests {
  use super::*;
  fn sample(units:u32,tries:u16)->Vec<u8>{
-  let mut b=vec![0u8;0x70+16+(units as usize)*2+if tries>0 {if units%2==1{2}else{0}+tries as usize*8}else{0}];
+  let padding = if tries > 0 && units % 2 == 1 { 2 } else { 0 };
+  let try_bytes = usize::from(tries) * 8;
+  let mut b=vec![0u8;0x70+16+(units as usize)*2+padding+try_bytes];
   let o=0x70;b[o..o+2].copy_from_slice(&4u16.to_le_bytes());b[o+6..o+8].copy_from_slice(&tries.to_le_bytes());b[o+12..o+16].copy_from_slice(&units.to_le_bytes());b
  }
  #[test] fn reads_code_item(){let b=sample(2,0);let c=read_code_item(&b,0x70).unwrap();assert_eq!(c.registers_size,4);assert_eq!(c.insns_size,2);assert_eq!(c.instructions.len(),4);}

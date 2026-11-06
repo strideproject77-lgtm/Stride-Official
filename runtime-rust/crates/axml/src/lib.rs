@@ -54,6 +54,6 @@ pub fn inspect_binary_xml(b:&[u8])->Result<XmlDocument,AxmlError>{
 #[cfg(test)] mod tests{
  use super::*;
  #[test]fn rejects_plain_xml(){assert_eq!(inspect_binary_xml(b"<manifest/>"),Err(AxmlError::InvalidMagic));}
- #[test]fn rejects_truncated_chunk(){let mut b=vec![3,0,8,0,16,0,0,0,1,0,8,0,20,0,0,0];assert_eq!(inspect_binary_xml(&b),Err(AxmlError::InvalidChunk));}
+ #[test]fn rejects_truncated_chunk(){let b=vec![3,0,8,0,16,0,0,0,1,0,8,0,20,0,0,0];assert_eq!(inspect_binary_xml(&b),Err(AxmlError::InvalidChunk));}
  #[test]fn accepts_empty_xml_container(){let b=[3,0,8,0,8,0,0,0];let d=inspect_binary_xml(&b).unwrap();assert_eq!(d.chunk_count,0);}
 }
