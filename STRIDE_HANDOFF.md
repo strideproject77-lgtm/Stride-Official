@@ -9,23 +9,27 @@ Build an iOS app that can run a growing, clearly documented set of Android APKs.
 ## Working location
 
 - Repository: https://github.com/strideproject77-lgtm/Stride-Official
-- Current branch: feat/dex-class-method-loader
-- Current branch head: c4037319c3722205e848128dbd3d8140a58efbf7
+- Continue on branch: feat/dex-class-method-loader
 - Changes are on the feature branch; they have not been merged to main.
-- Do not start from a fresh checkout or discard this branch when resuming.
+- Fetch the branch head when resuming; this handoff itself is committed after the code/UI/workflow commits.
+- Do not start from a fresh checkout or discard this branch.
 
 ## Work completed on this branch
 
 - Added Rust DEX class/method inventory parsing in runtime-rust/crates/dex-inspector/src/classes.rs.
   - Reads class definitions, encoded field/method lists, class descriptors, method names and prototypes.
   - Checks DEX table bounds, indexes, modified UTF-8 strings and referenced code_item boundaries.
-  - This is metadata parsing only; it does not verify or execute app code.
+  - Metadata parsing only; it does not verify or execute app code.
   - Unit tests were added but have not been run.
 - Exported the parser from runtime-rust/crates/dex-inspector/src/lib.rs.
 - Refreshed Sources/StrideApp/ContentView.swift.
   - Added APK/DEX counts, recent-package rows, package detail sheet and native ABI chips.
   - Added explicit runtime status labels. The UI does not claim APK execution.
   - ABI chips wrap for narrow screens.
+- Updated .github/workflows/ios-build.yml.
+  - Rust tests now run on ubuntu-latest for PRs and push/manual runs.
+  - macOS iOS build/IPA job is skipped on PRs and runs after Rust tests on main push or workflow_dispatch.
+  - The changed workflow has not yet run.
 - No Husk source files, code, tests, or assets were copied.
 
 ## Current app/runtime boundary
@@ -42,13 +46,12 @@ The Swift app imports APKs using ZIPFoundation, stores them under Documents/APKs
 
 ## CI and unsigned IPA status
 
-The current iOS workflow uses macos-15 for Rust tests, Swift tests, device-target build, and unsigned IPA packaging. Recent runs were cancelled before a runner was assigned; no build step ran. A feature-branch push does not trigger the current push rule, which targets main. A PR targeting main or workflow_dispatch can trigger the macOS workflow.
-
-Recommended workflow maintenance, not implemented yet:
-- Run Rust unit tests on ubuntu-latest for each PR/push.
-- Reserve macOS for Swift/iOS build and IPA packaging on main or an intentional manual dispatch.
-- Keep one final IPA run after code changes are complete; avoid repeated manual dispatches while a run is queued.
-- A queued macOS runner is a service-capacity issue when no runner/job steps are assigned; changing build commands does not fix that.
+The CI workflow has been split by runner:
+- PRs run Rust tests on Ubuntu; the macOS job is skipped.
+- Main pushes and manual workflow_dispatch run the Ubuntu Rust job first, then Swift/iOS tests, device-target build, and unsigned IPA packaging on macos-15.
+- Feature branch pushes do not trigger the current push rule. A PR targeting main should trigger the Rust-only check.
+- No new workflow run has been started from this branch yet.
+- Earlier macOS jobs were cancelled before a runner was assigned; no build step ran. A queued macOS runner is a service-capacity issue when no runner/job steps are assigned; changing build commands does not fix that.
 
 ## Known issues and limits
 
@@ -59,18 +62,18 @@ Recommended workflow maintenance, not implemented yet:
 - Native image planning does not map or execute ELF libraries.
 - No real-device end-to-end APK test exists.
 - UI changes have not been rendered or built in Xcode; verify them through the macOS workflow when runner capacity is available.
-- Current feature work is committed directly to the feature branch in several commits; keep future work on this branch until reviewed.
 
 ## Exact next steps
 
-1. Add a fast Ubuntu Rust CI job and move cargo test off the macOS IPA job. Trigger a PR for this feature branch, then fix any compile/test failures in the DEX parser.
-2. Design a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
-3. Extract classes*.dex from imported APKs in APKArchiveInspector and call the bridge. Show real class/method counts in the detail screen, with parse errors reported safely.
-4. Only after APK parsing is connected and tested, expand execution beyond integer opcodes: DEX verifier, types/objects, method calls and exceptions.
-5. Then implement a minimal ARM64 native ABI path (ELF mapping/relocations, Bionic shims and JNI) and a small Android framework surface, starting with real test APKs.
+1. Open a draft PR from feat/dex-class-method-loader to main so the new Ubuntu Rust job compiles and runs the parser tests. Fix any failures before merging.
+2. Review the SwiftUI screen in the resulting IPA when the macOS runner is available.
+3. Design a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
+4. Extract classes*.dex from imported APKs in APKArchiveInspector and call the bridge. Show real class/method counts in the detail screen, with parse errors reported safely.
+5. Only after APK parsing is connected and tested, expand execution beyond integer opcodes: DEX verifier, types/objects, method calls and exceptions.
+6. Then implement a minimal ARM64 native ABI path (ELF mapping/relocations, Bionic shims and JNI) and a small Android framework surface, starting with real test APKs.
 
 ## Resume checklist
 
-- Confirm branch feat/dex-class-method-loader still exists and is based on current main.
+- Confirm branch feat/dex-class-method-loader exists and compare it with current main.
 - Read this file before making another plan.
-- First code task: Ubuntu Rust CI plus parser CI validation; keep the macOS IPA runner for a deliberate final attempt.
+- First action: open the draft PR and run the Ubuntu Rust check; leave macOS for a deliberate IPA build attempt.
