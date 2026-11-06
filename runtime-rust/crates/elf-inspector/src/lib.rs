@@ -22,7 +22,8 @@ pub fn inspect_elf(bytes:&[u8])->Result<ElfProgramInfo,ElfError>{
   ElfClass::Elf64=>(u64v(bytes,24,order)?,u64v(bytes,32,order)?,u16v(bytes,52,order)?,u16v(bytes,54,order)?,u16v(bytes,56,order)?)
  };
  let min_ent=if class==ElfClass::Elf32{32}else{56};
- if ehsize<(if class==ElfClass::Elf32{52}else{64})||phentsize<min_ent{return Err(ElfError::InvalidHeader);}
+ if ehsize<(if class==ElfClass::Elf32{52}else{64})||ehsize as usize>bytes.len()||phentsize<min_ent||(phnum>0&&phoff<(ehsize as u64)){return Err(ElfError::InvalidHeader);}
+ if matches!((class,architecture),(ElfClass::Elf32,ElfArchitecture::Aarch64)|(ElfClass::Elf64,ElfArchitecture::Arm)){return Err(ElfError::InvalidHeader);}
  let start=usize::try_from(phoff).map_err(|_|ElfError::ProgramHeadersOutOfBounds)?;
  let total=(phentsize as usize).checked_mul(phnum as usize).ok_or(ElfError::ProgramHeadersOutOfBounds)?;
  let end=start.checked_add(total).filter(|e|*e<=bytes.len()).ok_or(ElfError::ProgramHeadersOutOfBounds)?;
@@ -34,7 +35,10 @@ pub fn inspect_elf(bytes:&[u8])->Result<ElfProgramInfo,ElfError>{
    ElfClass::Elf64=>(u32v(bytes,p,order)?,u32v(bytes,p+4,order)?,u64v(bytes,p+8,order)?,u64v(bytes,p+16,order)?,u64v(bytes,p+32,order)?,u64v(bytes,p+40,order)?,u64v(bytes,p+48,order)?)
   };
   if filesz>memsz||off.checked_add(filesz).filter(|v|*v<=bytes.len() as u64).is_none(){return Err(ElfError::InvalidSegment);}
-  if kind==1{segments.push(LoadSegment{file_offset:off,virtual_address:va,file_size:filesz,memory_size:memsz,flags,alignment:align});}
+  if kind==1 {
+   if align>1&&(!align.is_power_of_two()||va%align!=off%align){return Err(ElfError::InvalidSegment);}
+   segments.push(LoadSegment{file_offset:off,virtual_address:va,file_size:filesz,memory_size:memsz,flags,alignment:align});
+  }
   if kind==2{if dynamic.is_some(){return Err(ElfError::InvalidSegment);}dynamic=Some((off,filesz));}
  }
  let _=end;
@@ -55,7 +59,15 @@ pub struct ElfDynamicInfo { pub symbols:Vec<DynamicSymbol>, pub relocations:Vec<
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum DynamicError { MissingDynamicSegment, InvalidDynamicTable, MissingStringTable, MissingSymbolTable, InvalidStringTable, InvalidSymbolTable, InvalidHashTable, InvalidRelocationTable, UnsupportedSymbolEntrySize }
 fn vaddr_offset(info:&ElfProgramInfo,addr:u64,size:u64)->Result<usize,DynamicError>{
- for s in &info.segments {if addr>=s.virtual_address {let delta=addr-s.virtual_address;if delta.checked_add(size).map(|e|e<=s.file_size).unwrap_or(false){return usize::try_from(s.file_offset+delta).map_err(|_|DynamicError::InvalidDynamicTable);}}}
+ for s in &info.segments {
+  if addr>=s.virtual_address {
+   let delta=addr-s.virtual_address;
+   if delta.checked_add(size).map(|e|e<=s.file_size).unwrap_or(false) {
+    let offset=s.file_offset.checked_add(delta).ok_or(DynamicError::InvalidDynamicTable)?;
+    return usize::try_from(offset).map_err(|_|DynamicError::InvalidDynamicTable);
+   }
+  }
+ }
  Err(DynamicError::InvalidDynamicTable)
 }
 fn c_string(b:&[u8],start:usize,max:usize)->Result<String,DynamicError>{

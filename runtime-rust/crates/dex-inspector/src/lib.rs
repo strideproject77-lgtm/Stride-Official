@@ -121,7 +121,12 @@ pub fn decode_instructions(bytes:&[u8])->Result<Vec<DecodedInstruction>,DecodeEr
   else if matches!(op,0x26|0x2b|0x2c) {let delta=signed32(&units,pc+1)? as isize;let target=(pc as isize).checked_add(delta).ok_or(DecodeError::InvalidPayloadTarget)?;if target<0||target as usize>=units.len(){return Err(DecodeError::InvalidPayloadTarget);}payloads.push((target as usize,match op{0x2b=>InstructionKind::PackedSwitchPayload,0x2c=>InstructionKind::SparseSwitchPayload,_=>InstructionKind::ArrayDataPayload}));}
   decoded.push(DecodedInstruction{code_unit_offset:pc,opcode:op,width,kind:InstructionKind::Opcode});pc+=width;
  }
- for (source,delta) in branches {let target=(source as isize).checked_add(delta).ok_or(DecodeError::InvalidBranchTarget)?;if target<0||target as usize>=units.len(){return Err(DecodeError::InvalidBranchTarget);}}
+ for (source,delta) in branches {
+  let target=(source as isize).checked_add(delta).ok_or(DecodeError::InvalidBranchTarget)?;
+  if target<0||target as usize>=units.len(){return Err(DecodeError::InvalidBranchTarget);}
+  let target_kind=decoded.iter().find(|instruction|instruction.code_unit_offset==target as usize).map(|instruction|instruction.kind);
+  if target_kind!=Some(InstructionKind::Opcode){return Err(DecodeError::InvalidBranchTarget);}
+ }
  for (target,expected) in payloads {
   let found=decoded.iter().find(|i|i.code_unit_offset==target).map(|i|i.kind);
   if found!=Some(expected){return Err(DecodeError::InvalidPayloadTarget);}
@@ -137,5 +142,7 @@ mod decoder_tests {
  #[test] fn rejects_unknown_opcode(){assert_eq!(decode_instructions(&words(&[0x0073])),Err(DecodeError::InvalidOpcode(0x73)));}
  #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+ #[test] fn rejects_branch_into_instruction_operand(){assert_eq!(decode_instructions(&words(&[0x0129,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }

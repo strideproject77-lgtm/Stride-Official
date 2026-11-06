@@ -17,7 +17,7 @@ pub struct PlannedPage{pub image_offset:u64,pub protection:PageProtection}
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct NativeImagePlan{pub load_bias:u64,pub image_virtual_start:u64,pub image_size:u64,pub pages:Vec<PlannedPage>,pub segment_copies:Vec<SegmentCopy>,pub architecture:ElfArchitecture}
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
-pub enum LoadPlanError{NoLoadableSegments,InvalidPageSize,AddressOverflow,InvalidAlignment,SegmentOutsideImage,WritableExecutablePage,InvalidLoadBias}
+pub enum LoadPlanError{NoLoadableSegments,InvalidPageSize,AddressOverflow,InvalidAlignment,SegmentOutsideImage,WritableExecutablePage,InvalidLoadBias,InvalidSegment,ImageTooLarge}
 fn align_down(v:u64,a:u64)->u64{v&!(a-1)}
 fn align_up(v:u64,a:u64)->Result<u64,LoadPlanError>{v.checked_add(a-1).map(|x|x&!(a-1)).ok_or(LoadPlanError::AddressOverflow)}
 /// Produces a deterministic 16 KiB mapping plan. load_bias is added to ELF virtual addresses by the future mapper.
@@ -27,6 +27,7 @@ pub fn plan_native_image(info:&ElfProgramInfo,load_bias:u64)->Result<NativeImage
  if loads.is_empty(){return Err(LoadPlanError::NoLoadableSegments);}
  let(mut image_start,mut image_end)=(u64::MAX,0u64);
  for s in &loads{
+  if s.file_size>s.memory_size{return Err(LoadPlanError::InvalidSegment);}
   if s.alignment>1&&(!s.alignment.is_power_of_two()||s.virtual_address%s.alignment!=s.file_offset%s.alignment){return Err(LoadPlanError::InvalidAlignment);}
   let end=s.virtual_address.checked_add(s.memory_size).ok_or(LoadPlanError::AddressOverflow)?;
   image_start=image_start.min(align_down(s.virtual_address,IOS_PAGE_SIZE));
@@ -35,6 +36,7 @@ pub fn plan_native_image(info:&ElfProgramInfo,load_bias:u64)->Result<NativeImage
   s.virtual_address.checked_add(s.file_size).ok_or(LoadPlanError::AddressOverflow)?;
  }
  let image_size=image_end.checked_sub(image_start).ok_or(LoadPlanError::AddressOverflow)?;
+ if image_size/IOS_PAGE_SIZE > 262_144 {return Err(LoadPlanError::ImageTooLarge);}
  if load_bias.checked_add(image_start).is_none()||load_bias.checked_add(image_end).is_none(){return Err(LoadPlanError::InvalidLoadBias);}
  let mut page_map=BTreeMap::<u64,PageProtection>::new();
  let mut copies=Vec::with_capacity(loads.len());

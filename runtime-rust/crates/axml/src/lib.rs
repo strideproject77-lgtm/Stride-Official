@@ -82,6 +82,7 @@ pub fn parse_manifest(bytes:&[u8])->Result<ManifestMetadata,AxmlError>{
  let doc=inspect_binary_xml(bytes)?;let pool=doc.string_pool.ok_or(AxmlError::InvalidStringPool)?;
  let end=doc.file_size as usize;let mut p=8usize;let mut out=ManifestMetadata{package_name:None,version_name:None,version_code:None,min_sdk:None,target_sdk:None,permissions:Vec::new(),application_name:None,components:Vec::new(),launcher_activity:None};
  let mut stack:Vec<String>=Vec::new();let mut component_stack:Vec<Option<usize>>=Vec::new();
+ let mut intent_filters:Vec<(usize,bool,bool)>=Vec::new();
  while p<end {
   let kind=u16le(bytes,p)?;let size=u32le(bytes,p+4)? as usize;
   if kind==0x0102 {
@@ -97,23 +98,23 @@ pub fn parse_manifest(bytes:&[u8])->Result<ManifestMetadata,AxmlError>{
     let an=string_at(&pool,u32le(bytes,a+4)?)?.ok_or(AxmlError::InvalidStringIndex)?;
     if let Some(value)=typed_attr(bytes,a,&pool)?{attrs.insert(an,value);}
    }
-   let parent=stack.last().map(String::as_str).unwrap_or("");
    let mut component_index=None;
    match name.as_str() {
     "manifest"=>{out.package_name=attrs.get("package").cloned();out.version_name=attrs.get("versionName").cloned();out.version_code=attrs.get("versionCode").and_then(|v|v.parse().ok());},
     "uses-sdk"=>{out.min_sdk=attrs.get("minSdkVersion").and_then(|v|v.parse().ok());out.target_sdk=attrs.get("targetSdkVersion").and_then(|v|v.parse().ok());},
     "uses-permission"|"uses-permission-sdk-23"|"uses-permission-sdk-m"=>{if let Some(v)=attrs.get("name"){if !out.permissions.contains(v){out.permissions.push(v.clone());}}},
     "application"=>{out.application_name=attrs.get("name").cloned();},
+    "intent-filter"=>{if let Some(Some(idx))=component_stack.last(){intent_filters.push((*idx,false,false));}},
     "activity"|"activity-alias"|"service"|"receiver"|"provider"=>{
      if let Some(n)=attrs.get("name") {
       let idx=out.components.len();out.components.push(ManifestComponent{kind:name.clone(),name:n.clone(),exported:attrs.get("exported").map(|v|v=="true"),has_launcher_intent:false});component_index=Some(idx);
      }
     },
     "action" if attrs.get("name").map(String::as_str)==Some("android.intent.action.MAIN")=>{
-      if let Some(Some(idx))=component_stack.iter().rev().find(|v|v.is_some()){out.components[*idx].has_launcher_intent=true;}
+      if let Some(filter)=intent_filters.last_mut(){filter.1=true;}
     },
     "category" if attrs.get("name").map(String::as_str)==Some("android.intent.category.LAUNCHER")=>{
-      if let Some(Some(idx))=component_stack.iter().rev().find(|v|v.is_some()){out.components[*idx].has_launcher_intent=true;}
+      if let Some(filter)=intent_filters.last_mut(){filter.2=true;}
     },
     _=>{}
    }
@@ -125,6 +126,11 @@ pub fn parse_manifest(bytes:&[u8])->Result<ManifestMetadata,AxmlError>{
    let name=string_at(&pool,u32le(bytes,p+20)?)?.ok_or(AxmlError::InvalidStringIndex)?;
    if stack.pop().as_deref()!=Some(name.as_str()){return Err(AxmlError::InvalidChunk);}
    component_stack.pop();
+   if name=="intent-filter" {
+    if let Some((idx,has_main,has_launcher))=intent_filters.pop(){
+     if has_main&&has_launcher{out.components[idx].has_launcher_intent=true;}
+    }
+   }
   }
   p+=size;
  }
