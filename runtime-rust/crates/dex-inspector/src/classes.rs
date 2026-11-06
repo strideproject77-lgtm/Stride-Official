@@ -1,0 +1,270 @@
+//! Bounds-checked discovery of DEX classes and encoded methods.
+//! This is metadata parsing only; it does not verify or execute Android code.
+
+use crate::{read_code_item, CodeItemError};
+
+const HEADER: usize = 0x70;
+const NO_INDEX: u32 = u32::MAX;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClassReadError {
+    TruncatedHeader,
+    InvalidMagic,
+    InvalidFileSize,
+    InvalidHeader,
+    InvalidTable,
+    InvalidIndex,
+    InvalidClassData,
+    InvalidUleb128,
+    InvalidCodeItem,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodDefinition {
+    pub method_index: u32,
+    pub access_flags: u32,
+    pub code_offset: u32,
+    pub is_direct: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassDefinition {
+    pub class_index: u32,
+    pub access_flags: u32,
+    pub superclass_index: Option<u32>,
+    pub static_field_count: u32,
+    pub instance_field_count: u32,
+    pub direct_method_count: u32,
+    pub virtual_method_count: u32,
+    pub methods: Vec<MethodDefinition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassInventory {
+    pub classes: Vec<ClassDefinition>,
+}
+
+fn u16le(b: &[u8], o: usize) -> Result<u16, ClassReadError> {
+    let s = b.get(o..o.checked_add(2).ok_or(ClassReadError::InvalidTable)?)
+        .ok_or(ClassReadError::InvalidTable)?;
+    Ok(u16::from_le_bytes([s[0], s[1]]))
+}
+
+fn u32le(b: &[u8], o: usize) -> Result<u32, ClassReadError> {
+    let s = b.get(o..o.checked_add(4).ok_or(ClassReadError::InvalidTable)?)
+        .ok_or(ClassReadError::InvalidTable)?;
+    Ok(u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+}
+
+fn table(b: &[u8], count: u32, offset: u32, item_size: usize) -> Result<std::ops::Range<usize>, ClassReadError> {
+    let n = usize::try_from(count).map_err(|_| ClassReadError::InvalidTable)?;
+    let start = usize::try_from(offset).map_err(|_| ClassReadError::InvalidTable)?;
+    if n > 1_000_000 { return Err(ClassReadError::InvalidTable); }
+    if n == 0 { return if start <= b.len() { Ok(start..start) } else { Err(ClassReadError::InvalidTable) }; }
+    if start < HEADER || start % 4 != 0 { return Err(ClassReadError::InvalidTable); }
+    let end = start.checked_add(n.checked_mul(item_size).ok_or(ClassReadError::InvalidTable)?)
+        .filter(|e| *e <= b.len()).ok_or(ClassReadError::InvalidTable)?;
+    Ok(start..end)
+}
+
+fn uleb(b: &[u8], p: &mut usize) -> Result<u32, ClassReadError> {
+    let mut value = 0u32;
+    for i in 0..5usize {
+        let byte = *b.get(*p).ok_or(ClassReadError::InvalidClassData)?;
+        *p += 1;
+        if i == 4 && byte & 0xf0 != 0 { return Err(ClassReadError::InvalidUleb128); }
+        value |= u32::from(byte & 0x7f) << (i * 7);
+        if byte & 0x80 == 0 { return Ok(value); }
+    }
+    Err(ClassReadError::InvalidUleb128)
+}
+
+fn delta_index(previous: u32, delta: u32, count: u32) -> Result<u32, ClassReadError> {
+    let value = previous.checked_add(delta).ok_or(ClassReadError::InvalidIndex)?;
+    if value >= count { return Err(ClassReadError::InvalidIndex); }
+    Ok(value)
+}
+
+fn class_data(
+    b: &[u8], offset: u32, class_index: u32, fields: &std::ops::Range<usize>,
+    methods: &std::ops::Range<usize>, field_count: u32, method_count: u32,
+) -> Result<ClassDefinition, ClassReadError> {
+    let mut p = usize::try_from(offset).map_err(|_| ClassReadError::InvalidClassData)?;
+    if p < HEADER || p >= b.len() { return Err(ClassReadError::InvalidClassData); }
+    let static_fields = uleb(b, &mut p)?;
+    let instance_fields = uleb(b, &mut p)?;
+    let direct_methods = uleb(b, &mut p)?;
+    let virtual_methods = uleb(b, &mut p)?;
+    if u64::from(static_fields) + u64::from(instance_fields) > b.len() as u64
+        || u64::from(direct_methods) + u64::from(virtual_methods) > b.len() as u64 {
+        return Err(ClassReadError::InvalidClassData);
+    }
+
+    for count in [static_fields, instance_fields] {
+        let mut idx = 0;
+        for _ in 0..count {
+            idx = delta_index(idx, uleb(b, &mut p)?, field_count)?;
+            let _flags = uleb(b, &mut p)?;
+            let at = fields.start.checked_add(idx as usize * 8).ok_or(ClassReadError::InvalidIndex)?;
+            if at >= fields.end || u32::from(u16le(b, at)?) != class_index {
+                return Err(ClassReadError::InvalidIndex);
+            }
+        }
+    }
+
+    let mut found = Vec::new();
+    for (count, is_direct) in [(direct_methods, true), (virtual_methods, false)] {
+        let mut idx = 0;
+        for _ in 0..count {
+            idx = delta_index(idx, uleb(b, &mut p)?, method_count)?;
+            let flags = uleb(b, &mut p)?;
+            let code = uleb(b, &mut p)?;
+            let at = methods.start.checked_add(idx as usize * 8).ok_or(ClassReadError::InvalidIndex)?;
+            if at >= methods.end || u32::from(u16le(b, at)?) != class_index {
+                return Err(ClassReadError::InvalidIndex);
+            }
+            if code != 0 {
+                read_code_item(b, code).map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
+            }
+            found.push(MethodDefinition { method_index: idx, access_flags: flags, code_offset: code, is_direct });
+        }
+    }
+    Ok(ClassDefinition {
+        class_index, access_flags: 0, superclass_index: None,
+        static_field_count: static_fields, instance_field_count: instance_fields,
+        direct_method_count: direct_methods, virtual_method_count: virtual_methods,
+        methods: found,
+    })
+}
+
+/// Reads class definitions and their encoded fields/methods after validating DEX table bounds.
+pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
+    if bytes.len() < HEADER { return Err(ClassReadError::TruncatedHeader); }
+    if bytes.get(0..4) != Some(&b"dex\n"[..])
+        || !bytes.get(4..7).is_some_and(|v| v.iter().all(u8::is_ascii_digit))
+        || bytes[7] != 0 {
+        return Err(ClassReadError::InvalidMagic);
+    }
+    let size = usize::try_from(u32le(bytes, 0x20)?).map_err(|_| ClassReadError::InvalidFileSize)?;
+    if size < HEADER || size > bytes.len() { return Err(ClassReadError::InvalidFileSize); }
+    let b = &bytes[..size];
+    if u32le(b, 0x24)? as usize != HEADER || u32le(b, 0x28)? != 0x1234_5678 {
+        return Err(ClassReadError::InvalidHeader);
+    }
+
+    let string_count = u32le(b, 0x38)?;
+    let type_count = u32le(b, 0x40)?;
+    let proto_count = u32le(b, 0x48)?;
+    let field_count = u32le(b, 0x50)?;
+    let method_count = u32le(b, 0x58)?;
+    let class_count = u32le(b, 0x60)?;
+    let strings = table(b, string_count, u32le(b, 0x3c)?, 4)?;
+    let types = table(b, type_count, u32le(b, 0x44)?, 4)?;
+    let protos = table(b, proto_count, u32le(b, 0x4c)?, 12)?;
+    let fields = table(b, field_count, u32le(b, 0x54)?, 8)?;
+    let methods = table(b, method_count, u32le(b, 0x5c)?, 8)?;
+    let defs = table(b, class_count, u32le(b, 0x64)?, 32)?;
+
+    for i in 0..type_count as usize {
+        if u32le(b, types.start + i * 4)? >= string_count { return Err(ClassReadError::InvalidIndex); }
+    }
+    for i in 0..proto_count as usize {
+        let at = protos.start + i * 12;
+        if u32le(b, at)? >= string_count || u32le(b, at + 4)? >= type_count {
+            return Err(ClassReadError::InvalidIndex);
+        }
+    }
+    for i in 0..field_count as usize {
+        let at = fields.start + i * 8;
+        if u32::from(u16le(b, at)?) >= type_count
+            || u32::from(u16le(b, at + 2)?) >= type_count
+            || u32le(b, at + 4)? >= string_count { return Err(ClassReadError::InvalidIndex); }
+    }
+    for i in 0..method_count as usize {
+        let at = methods.start + i * 8;
+        if u32::from(u16le(b, at)?) >= type_count
+            || u32::from(u16le(b, at + 2)?) >= proto_count
+            || u32le(b, at + 4)? >= string_count { return Err(ClassReadError::InvalidIndex); }
+    }
+
+    let mut classes = Vec::with_capacity(class_count as usize);
+    for i in 0..class_count as usize {
+        let at = defs.start + i * 32;
+        let id = u32le(b, at)?;
+        let flags = u32le(b, at + 4)?;
+        let super_id = u32le(b, at + 8)?;
+        let data_off = u32le(b, at + 24)?;
+        if id >= type_count || (super_id != NO_INDEX && super_id >= type_count) {
+            return Err(ClassReadError::InvalidIndex);
+        }
+        let mut class = if data_off == 0 {
+            ClassDefinition {
+                class_index: id, access_flags: 0, superclass_index: None,
+                static_field_count: 0, instance_field_count: 0,
+                direct_method_count: 0, virtual_method_count: 0, methods: Vec::new(),
+            }
+        } else {
+            class_data(b, data_off, id, &fields, &methods, field_count, method_count)?
+        };
+        class.access_flags = flags;
+        class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
+        classes.push(class);
+    }
+    let _ = strings;
+    Ok(ClassInventory { classes })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(method_owner: u16) -> Vec<u8> {
+        let strings = 0x70usize;
+        let types = strings + 4;
+        let protos = types + 8;
+        let methods = protos + 12;
+        let defs = methods + 8;
+        let data = defs + 32;
+        let class_data = [0, 0, 1, 0, 0, 1, 0];
+        let mut b = vec![0; data + class_data.len()];
+        b[..8].copy_from_slice(b"dex\n039\0");
+        b[0x20..0x24].copy_from_slice(&(b.len() as u32).to_le_bytes());
+        b[0x24..0x28].copy_from_slice(&(HEADER as u32).to_le_bytes());
+        b[0x28..0x2c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
+        for (at, n, off) in [(0x38,1u32,strings),(0x40,2,types),(0x48,1,protos),(0x58,1,methods),(0x60,1,defs)] {
+            b[at..at+4].copy_from_slice(&n.to_le_bytes());
+            b[at+4..at+8].copy_from_slice(&(off as u32).to_le_bytes());
+        }
+        b[types..types+8].fill(0);
+        b[protos..protos+8].fill(0);
+        b[methods..methods+2].copy_from_slice(&method_owner.to_le_bytes());
+        b[methods+2..methods+8].fill(0);
+        b[defs..defs+4].fill(0);
+        b[defs+8..defs+12].copy_from_slice(&NO_INDEX.to_le_bytes());
+        b[defs+24..defs+28].copy_from_slice(&(data as u32).to_le_bytes());
+        b[data..].copy_from_slice(&class_data);
+        b
+    }
+
+    #[test]
+    fn reads_class_and_method_metadata() {
+        let inventory = inspect_classes(&sample(0)).unwrap();
+        let class = &inventory.classes[0];
+        assert_eq!(class.class_index, 0);
+        assert_eq!(class.direct_method_count, 1);
+        assert_eq!(class.methods[0].method_index, 0);
+        assert_eq!(class.methods[0].code_offset, 0);
+    }
+
+    #[test]
+    fn rejects_a_method_owned_by_another_class() {
+        assert_eq!(inspect_classes(&sample(1)), Err(ClassReadError::InvalidIndex));
+    }
+
+    #[test]
+    fn rejects_invalid_declared_file_size() {
+        let mut b = sample(0);
+        b[0x20..0x24].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(inspect_classes(&b), Err(ClassReadError::InvalidFileSize));
+    }
+}
