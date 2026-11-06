@@ -8,19 +8,22 @@ The milestones below are implementation gates, not compatibility claims.
 - [x] APK ZIP structure inspection
 - [x] Explicit runtime capability reporting
 - [x] Safe ELF identification primitives in Rust
-- [ ] CI build and unit-test validation
+- [x] CI build and Rust unit-test validation
 
 ## Package and executable analysis
-- [ ] Android binary XML manifest decoder
-- [ ] Package metadata, SDK level, permissions, components, and ABI inventory
-- [ ] DEX header, map-list, and instruction validation
-- [ ] ELF program-header, dynamic-section, relocation, and symbol analysis
+- [x] DEX header and map-list bounds inspection
+- [x] DEX code_item boundary reader (instruction decoding still pending)
+- [x] Android binary XML chunk and string-pool structural decoder
+- [x] ELF program-header, PT_LOAD and PT_DYNAMIC range inspection
+- [ ] Resolve manifest strings into package metadata, SDK level, permissions and components
+- [ ] DEX opcode-width decoder, verifier and control-flow analysis
+- [ ] ELF dynamic tags, symbol tables, hash tables and relocation records
 
 ## Runtime implementation
 - [ ] Android process and memory model
 - [ ] ARM32 / ARM64 instruction execution or translation strategy
 - [ ] Bionic-compatible libc and linker boundary
-- [ ] JNI object, method, and native registration bridge
+- [ ] JNI object, method and native registration bridge
 - [ ] DEX interpreter and runtime services
 - [ ] Android framework compatibility services
 - [ ] Graphics, input, audio, and lifecycle integration
