@@ -1,0 +1,43 @@
+name: Stride
+options:
+  bundleIdPrefix: com.strideproject
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    TARGETED_DEVICE_FAMILY: "1"
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: 0.9.19
+targets:
+  Stride:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources/StrideApp
+    dependencies:
+      - package: ZIPFoundation
+        product: ZIPFoundation
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride
+        INFOPLIST_KEY_CFBundleDisplayName: Stride
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: Automatic
+  StrideTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/StrideTests
+    dependencies:
+      - target: Stride
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride.tests
