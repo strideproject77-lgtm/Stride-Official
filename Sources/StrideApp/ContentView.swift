@@ -556,13 +556,14 @@ private struct FlowABIList: View {
     let raised: Color
 
     var body: some View {
-        HStack(spacing: 8) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 85), alignment: .leading)], alignment: .leading, spacing: 8) {
             ForEach(values, id: \.self) { value in
                 Text(value)
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .foregroundStyle(accent)
                     .padding(.horizontal, 11)
                     .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .background(raised, in: Capsule())
             }
         }
