@@ -89,15 +89,16 @@ pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicI
   let buckets=u32v(bytes,o,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
   let symoff=u32v(bytes,o+4,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
   let bloom=u32v(bytes,o+8,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
+  if buckets>1_000_000||bloom>1_000_000||symoff>1_000_000{return Err(DynamicError::InvalidHashTable);}
   let word=if is64{8usize}else{4usize};
   let bucket_off=o.checked_add(16).and_then(|v|v.checked_add(bloom.checked_mul(word)?)).ok_or(DynamicError::InvalidHashTable)?;
   let chain_off=bucket_off.checked_add(buckets.checked_mul(4).ok_or(DynamicError::InvalidHashTable)?).ok_or(DynamicError::InvalidHashTable)?;
-  let mut max=symoff;
+  let mut max=symoff;let mut total_chain_steps=0usize;
   for i in 0..buckets {
    let first=u32v(bytes,bucket_off+i*4,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
    if first==0{continue;}if first<symoff{return Err(DynamicError::InvalidHashTable);}
    let mut idx=first;let mut steps=0usize;
-   loop {let ci=idx-symoff;let co=chain_off.checked_add(ci*4).ok_or(DynamicError::InvalidHashTable)?;let word=u32v(bytes,co,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)?;max=max.max(idx+1);steps+=1;if word&1!=0{break;}idx+=1;if steps>1_000_000{return Err(DynamicError::InvalidHashTable);}}
+   loop {let ci=idx-symoff;let co=chain_off.checked_add(ci*4).ok_or(DynamicError::InvalidHashTable)?;let word=u32v(bytes,co,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)?;max=max.max(idx+1);steps+=1;total_chain_steps+=1;if word&1!=0{break;}idx+=1;if steps>1_000_000||total_chain_steps>1_000_000{return Err(DynamicError::InvalidHashTable);}}
   }max
  } else {return Err(DynamicError::InvalidHashTable)};
  if sym_count>1_000_000{return Err(DynamicError::InvalidSymbolTable);}
@@ -123,6 +124,7 @@ pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicI
   for i in 0..(size as usize/width){let q=off+i*width;
    let (r_offset,r_info,add)=if is64{(u64v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)?,u64v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)?,if rela{Some(u64v(bytes,q+16,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as i64)}else{None})}else{(u32v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as u64,u32v(bytes,q+4,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as u64,if rela{Some(u32v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as i32 as i64)}else{None})};
    let (si,ty)=if is64{((r_info>>32) as u32,r_info as u32)}else{((r_info>>8) as u32,(r_info&0xff) as u32)};
+   if si as usize>=sym_count{return Err(DynamicError::InvalidRelocationTable);}
    relocations.push(Relocation{kind,offset:r_offset,symbol_index:si,relocation_type:ty,addend:add});
   }Ok(())
  };
