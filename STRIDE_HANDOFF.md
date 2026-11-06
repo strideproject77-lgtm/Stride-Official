@@ -20,7 +20,7 @@ Build an iOS app that can run a growing, clearly documented set of Android APKs.
   - Reads class definitions, encoded field/method lists, class descriptors, method names and prototypes.
   - Checks DEX table bounds, indexes, modified UTF-8 strings and referenced code_item boundaries.
   - Metadata parsing only; it does not verify or execute app code.
-  - Unit tests were added but have not been run.
+  - Unit tests are included and passed in PR workflow run #19.
 - Exported the parser from runtime-rust/crates/dex-inspector/src/lib.rs.
 - Refreshed Sources/StrideApp/ContentView.swift.
   - Added APK/DEX counts, recent-package rows, package detail sheet and native ABI chips.
@@ -29,7 +29,8 @@ Build an iOS app that can run a growing, clearly documented set of Android APKs.
 - Updated .github/workflows/ios-build.yml.
   - Rust tests now run on ubuntu-latest for PRs and push/manual runs.
   - macOS iOS build/IPA job is skipped on PRs and runs after Rust tests on main push or workflow_dispatch.
-  - The changed workflow has not yet run.
+  - The changed workflow passed the Ubuntu Rust job in PR run #19; the later handoff-only commit should be checked for the latest PR status.
+- The PR run skipped the macOS job as intended.
 - No Husk source files, code, tests, or assets were copied.
 
 ## Current app/runtime boundary
@@ -55,19 +56,20 @@ The CI workflow has been split by runner:
 
 ## Known issues and limits
 
-- The new Rust DEX class/method parser has not been compiled or tested in CI.
+- The DEX class/method parser compiled and passed its Rust tests in CI run #19.
 - The parser is not wired to APKArchiveInspector or the iOS UI.
 - Method inventory does not load classes, resolve Android framework calls, or execute methods.
 - The integer interpreter supports only a tiny primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
 - No real-device end-to-end APK test exists.
 - UI changes have not been rendered or built in Xcode; verify them through the macOS workflow when runner capacity is available.
+- CI run #18 also exposed an old native-loader test failure: address overflow returned InvalidAlignment first. The validation order was fixed in the next commit; run #19 passed.
 
 ## Exact next steps
 
-1. Open a draft PR from feat/dex-class-method-loader to main so the new Ubuntu Rust job compiles and runs the parser tests. Fix any failures before merging.
-2. Review the SwiftUI screen in the resulting IPA when the macOS runner is available.
-3. Design a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
+1. PR #1 is open as a draft and run #19 passed the Ubuntu Rust job. Review the latest check after this handoff update; fix any new failures before merging.
+2. At the next deliberate macOS run, build the updated SwiftUI screen and unsigned IPA; inspect it before making more UI claims.
+3. Implement a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
 4. Extract classes*.dex from imported APKs in APKArchiveInspector and call the bridge. Show real class/method counts in the detail screen, with parse errors reported safely.
 5. Only after APK parsing is connected and tested, expand execution beyond integer opcodes: DEX verifier, types/objects, method calls and exceptions.
 6. Then implement a minimal ARM64 native ABI path (ELF mapping/relocations, Bionic shims and JNI) and a small Android framework surface, starting with real test APKs.
@@ -76,4 +78,4 @@ The CI workflow has been split by runner:
 
 - Confirm branch feat/dex-class-method-loader exists and compare it with current main.
 - Read this file before making another plan.
-- First action: open the draft PR and run the Ubuntu Rust check; leave macOS for a deliberate IPA build attempt.
+- First code action: build the Rust-to-Swift DEX inventory bridge; keep macOS for a deliberate IPA build attempt.
