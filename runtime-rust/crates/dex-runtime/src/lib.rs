@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn executes_constant_add_and_return() {
         // const/4 v0, 7; const/4 v1, 5; add-int v2, v0, v1; return v2
-        let code = [0x7012, 0x5012, 0x0090, 0x0200, 0x020f];
+        let code = [0x7012, 0x5112, 0x0290, 0x0100, 0x020f];
         let result = execute_integer_method(&code, 3, &[], 20).unwrap();
         assert_eq!(result.value, ReturnValue::Int(12));
         assert_eq!(result.steps, 4);
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn rejects_branch_into_operand() {
-        let code = [0x0128, 0x000e]; // goto +1 points at return's code unit
+        let code = [0x0228, 0x0013, 0x000e]; // goto +2 targets the const/16 operand
         assert_eq!(
             execute_integer_method(&code, 0, &[], 10),
             Err(VmError::InvalidBranchTarget)
