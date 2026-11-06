@@ -1,0 +1,9 @@
+[package]
+name = "stride-native-loader"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+[dependencies]
+stride-elf-inspector = { path = "../elf-inspector" }
+[lib]
+crate-type = ["rlib"]
