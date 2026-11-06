@@ -1,7 +1,7 @@
-pub mod classes;
-
 //! DEX code_item structural reader. It exposes bounded instruction bytes; it is not a
 //! Dalvik interpreter and deliberately does not claim bytecode execution.
+
+pub mod classes;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodeItemError { Truncated, InvalidOffset, InstructionDataOutOfBounds, InvalidTryPadding, TryItemsOutOfBounds }
 
