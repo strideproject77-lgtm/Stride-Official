@@ -11,7 +11,7 @@ Stride is an independent native iOS project exploring a practical Android applic
 
 ## Current status
 
-The repository has been initialized. Android application execution is not implemented yet. The current foundation provides a native iOS shell, APK archive inspection, an explicit runtime boundary, and safe ELF identification and program-header inspection, DEX code-item boundary inspection, and Android binary XML string-pool decoding. Execution support will only be claimed after an actual APK runs through the runtime on a supported physical device.
+The repository has been initialized. Android application execution is not implemented yet. The current foundation provides a native iOS shell, APK archive inspection, an explicit runtime boundary, and safe ELF identification and program-header inspection, DEX code-item and instruction-stream decoding, Android binary XML string-pool and manifest metadata decoding, and ELF dynamic-symbol/relocation inspection. Execution support will only be claimed after an actual APK runs through the runtime on a supported physical device.
 
 ## Architecture
 

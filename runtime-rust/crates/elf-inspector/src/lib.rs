@@ -40,3 +40,100 @@ pub fn inspect_elf(bytes:&[u8])->Result<ElfProgramInfo,ElfError>{
  let _=end;
  Ok(ElfProgramInfo{identity:ElfIdentity{class,architecture},byte_order:order,entry,segments,dynamic_segment:dynamic})
 }
+
+
+// ELF dynamic-table, dynamic-symbol and relocation inspection. All addresses are
+// translated through file-backed PT_LOAD ranges; this does not map or execute code.
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum RelocationKind { Rel, Rela, PltRel, PltRela }
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub struct DynamicSymbol { pub index:u32, pub name:String, pub value:u64, pub size:u64, pub binding:u8, pub symbol_type:u8, pub section_index:u16 }
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub struct Relocation { pub kind:RelocationKind, pub offset:u64, pub symbol_index:u32, pub relocation_type:u32, pub addend:Option<i64> }
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub struct ElfDynamicInfo { pub symbols:Vec<DynamicSymbol>, pub relocations:Vec<Relocation>, pub dynamic_tags:Vec<(i64,u64)> }
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum DynamicError { MissingDynamicSegment, InvalidDynamicTable, MissingStringTable, MissingSymbolTable, InvalidStringTable, InvalidSymbolTable, InvalidHashTable, InvalidRelocationTable, UnsupportedSymbolEntrySize }
+fn vaddr_offset(info:&ElfProgramInfo,addr:u64,size:u64)->Result<usize,DynamicError>{
+ for s in &info.segments {if addr>=s.virtual_address {let delta=addr-s.virtual_address;if delta.checked_add(size).map(|e|e<=s.file_size).unwrap_or(false){return usize::try_from(s.file_offset+delta).map_err(|_|DynamicError::InvalidDynamicTable);}}}
+ Err(DynamicError::InvalidDynamicTable)
+}
+fn c_string(b:&[u8],start:usize,max:usize)->Result<String,DynamicError>{
+ let end=start.checked_add(max).filter(|e|*e<=b.len()).ok_or(DynamicError::InvalidStringTable)?;
+ let rel=b[start..end].iter().position(|x|*x==0).ok_or(DynamicError::InvalidStringTable)?;
+ Ok(String::from_utf8_lossy(&b[start..start+rel]).into_owned())
+}
+/// Reads DT_* metadata, dynamic symbols (using DT_HASH or DT_GNU_HASH), and REL/RELA tables.
+pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicInfo,DynamicError>{
+ let (dyn_off,dyn_size)=info.dynamic_segment.ok_or(DynamicError::MissingDynamicSegment)?;
+ let is64=info.identity.class==ElfClass::Elf64;let ent=if is64{16usize}else{8usize};
+ if dyn_size%(ent as u64)!=0{return Err(DynamicError::InvalidDynamicTable);}
+ let mut tags=Vec::new();let mut p=usize::try_from(dyn_off).map_err(|_|DynamicError::InvalidDynamicTable)?;
+ let dend=p.checked_add(dyn_size as usize).filter(|e|*e<=bytes.len()).ok_or(DynamicError::InvalidDynamicTable)?;
+ while p+ent<=dend {
+  let (tag,val)=if is64{(u64v(bytes,p,info.byte_order).map_err(|_|DynamicError::InvalidDynamicTable)? as i64,u64v(bytes,p+8,info.byte_order).map_err(|_|DynamicError::InvalidDynamicTable)?)}else{(u32v(bytes,p,info.byte_order).map_err(|_|DynamicError::InvalidDynamicTable)? as i32 as i64,u32v(bytes,p+4,info.byte_order).map_err(|_|DynamicError::InvalidDynamicTable)? as u64)};
+  p+=ent;if tag==0{break;}tags.push((tag,val));
+ }
+ let get=|tag:i64|tags.iter().find(|x|x.0==tag).map(|x|x.1);
+ let str_addr=get(5).ok_or(DynamicError::MissingStringTable)?;let str_size=get(10).ok_or(DynamicError::MissingStringTable)?;
+ let str_off=vaddr_offset(info,str_addr,str_size).map_err(|_|DynamicError::InvalidStringTable)?;
+ let str_end=str_off.checked_add(str_size as usize).filter(|e|*e<=bytes.len()).ok_or(DynamicError::InvalidStringTable)?;
+ let strings=&bytes[str_off..str_end];
+ let sym_addr=get(6).ok_or(DynamicError::MissingSymbolTable)?;let sym_ent=get(11).unwrap_or(if is64{24}else{16}) as usize;
+ if sym_ent<(if is64{24}else{16}){return Err(DynamicError::UnsupportedSymbolEntrySize);}
+ let sym_count=if let Some(hash)=get(4){
+  let o=vaddr_offset(info,hash,8).map_err(|_|DynamicError::InvalidHashTable)?;
+  u32v(bytes,o+4,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize
+ } else if let Some(hash)=get(0x6ffffef5){
+  let o=vaddr_offset(info,hash,16).map_err(|_|DynamicError::InvalidHashTable)?;
+  let buckets=u32v(bytes,o,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
+  let symoff=u32v(bytes,o+4,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
+  let bloom=u32v(bytes,o+8,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
+  let word=if is64{8usize}else{4usize};
+  let bucket_off=o.checked_add(16).and_then(|v|v.checked_add(bloom.checked_mul(word)?)).ok_or(DynamicError::InvalidHashTable)?;
+  let chain_off=bucket_off.checked_add(buckets.checked_mul(4).ok_or(DynamicError::InvalidHashTable)?).ok_or(DynamicError::InvalidHashTable)?;
+  let mut max=symoff;
+  for i in 0..buckets {
+   let first=u32v(bytes,bucket_off+i*4,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)? as usize;
+   if first==0{continue;}if first<symoff{return Err(DynamicError::InvalidHashTable);}
+   let mut idx=first;let mut steps=0usize;
+   loop {let ci=idx-symoff;let co=chain_off.checked_add(ci*4).ok_or(DynamicError::InvalidHashTable)?;let word=u32v(bytes,co,info.byte_order).map_err(|_|DynamicError::InvalidHashTable)?;max=max.max(idx+1);steps+=1;if word&1!=0{break;}idx+=1;if steps>1_000_000{return Err(DynamicError::InvalidHashTable);}}
+  }max
+ } else {return Err(DynamicError::InvalidHashTable)};
+ if sym_count>1_000_000{return Err(DynamicError::InvalidSymbolTable);}
+ let sym_bytes=(sym_count as u64).checked_mul(sym_ent as u64).ok_or(DynamicError::InvalidSymbolTable)?;
+ let sym_off=vaddr_offset(info,sym_addr,sym_bytes).map_err(|_|DynamicError::InvalidSymbolTable)?;
+ let mut symbols=Vec::with_capacity(sym_count);
+ for i in 0..sym_count {
+  let q=sym_off+i*sym_ent;
+  let (name,value,size,info_byte,shndx)=if is64{
+   (u32v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?,u64v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?,u64v(bytes,q+16,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?,*bytes.get(q+4).ok_or(DynamicError::InvalidSymbolTable)?,u16v(bytes,q+6,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?)
+  }else{
+   (u32v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?,u32v(bytes,q+4,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)? as u64,u32v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)? as u64,*bytes.get(q+12).ok_or(DynamicError::InvalidSymbolTable)?,u16v(bytes,q+14,info.byte_order).map_err(|_|DynamicError::InvalidSymbolTable)?)
+  };
+  let name=if name==0{String::new()}else{let n=name as usize;if n>=strings.len(){return Err(DynamicError::InvalidStringTable);}c_string(strings,n,strings.len()-n)?};
+  symbols.push(DynamicSymbol{index:i as u32,name,value,size,binding:info_byte>>4,symbol_type:info_byte&0xf,section_index:shndx});
+ }
+ let mut relocations=Vec::new();
+ let mut parse_reloc=|addr:u64,size:u64,kind:RelocationKind|->Result<(),DynamicError>{
+  if size==0{return Ok(());}let rela=matches!(kind,RelocationKind::Rela|RelocationKind::PltRela);
+  let width=match (is64,rela){(true,true)=>24,(true,false)=>16,(false,true)=>12,(false,false)=>8};
+  let min=width as u64;if size%min!=0{return Err(DynamicError::InvalidRelocationTable);}
+  let off=vaddr_offset(info,addr,size).map_err(|_|DynamicError::InvalidRelocationTable)?;
+  for i in 0..(size as usize/width){let q=off+i*width;
+   let (r_offset,r_info,add)=if is64{(u64v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)?,u64v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)?,if rela{Some(u64v(bytes,q+16,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as i64)}else{None})}else{(u32v(bytes,q,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as u64,u32v(bytes,q+4,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as u64,if rela{Some(u32v(bytes,q+8,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as i32 as i64)}else{None})};
+   let (si,ty)=if is64{((r_info>>32) as u32,r_info as u32)}else{((r_info>>8) as u32,(r_info&0xff) as u32)};
+   relocations.push(Relocation{kind,offset:r_offset,symbol_index:si,relocation_type:ty,addend:add});
+  }Ok(())
+ };
+ if let (Some(a),Some(s))=(get(17),get(18)){parse_reloc(a,s,RelocationKind::Rel)?;}
+ if let (Some(a),Some(s))=(get(7),get(8)){parse_reloc(a,s,RelocationKind::Rela)?;}
+ if let (Some(a),Some(s))=(get(23),get(2)){let k=if get(20)==Some(7){RelocationKind::PltRela}else{RelocationKind::PltRel};parse_reloc(a,s,k)?;}
+ Ok(ElfDynamicInfo{symbols,relocations,dynamic_tags:tags})
+}
+
+#[cfg(test)]
+mod dynamic_tests {
+ use super::*;
+ #[test] fn rejects_missing_dynamic_segment(){let i=ElfProgramInfo{identity:ElfIdentity{class:ElfClass::Elf64,architecture:ElfArchitecture::Aarch64},byte_order:ElfByteOrder::Little,entry:0,segments:vec![],dynamic_segment:None};assert_eq!(inspect_elf_dynamic(&[],&i),Err(DynamicError::MissingDynamicSegment));}
+}

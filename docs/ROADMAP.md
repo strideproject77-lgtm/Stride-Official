@@ -15,9 +15,9 @@ The milestones below are implementation gates, not compatibility claims.
 - [x] DEX code_item boundary reader (instruction decoding still pending)
 - [x] Android binary XML chunk and string-pool structural decoder
 - [x] ELF program-header, PT_LOAD and PT_DYNAMIC range inspection
-- [ ] Resolve manifest strings into package metadata, SDK level, permissions and components
-- [ ] DEX opcode-width decoder, verifier and control-flow analysis
-- [ ] ELF dynamic tags, symbol tables, hash tables and relocation records
+- [x] Resolve manifest strings into package metadata, SDK level, permissions and components
+- [x] DEX opcode-width decoder and bounded branch/payload target checks (full verifier pending)
+- [x] ELF dynamic tags, SysV/GNU hash symbol bounds, dynamic symbols and REL/RELA relocation records (loading/applying pending)
 
 ## Runtime implementation
 - [ ] Android process and memory model

@@ -62,3 +62,80 @@ mod code_item_tests {
  #[test] fn rejects_truncated_instructions(){let mut b=sample(3,0);b.truncate(b.len()-2);assert_eq!(read_code_item(&b,0x70),Err(CodeItemError::InstructionDataOutOfBounds));}
  #[test] fn rejects_missing_try_items(){let b=sample(2,1);let mut b=b;b.truncate(b.len()-1);assert_eq!(read_code_item(&b,0x70),Err(CodeItemError::TryItemsOutOfBounds));}
 }
+
+
+// Dalvik instruction stream decoding. This is structural decoding only: no verifier,
+// interpreter, JIT, or application execution is provided by this module.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstructionKind { Opcode, PackedSwitchPayload, SparseSwitchPayload, ArrayDataPayload }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DecodedInstruction { pub code_unit_offset: usize, pub opcode: u8, pub width: usize, pub kind: InstructionKind }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecodeError { OddByteLength, TruncatedInstruction, InvalidOpcode(u8), InvalidPayload, InvalidBranchTarget, InvalidPayloadTarget }
+
+fn unit_at(units:&[u16], at:usize)->Result<u16,DecodeError>{units.get(at).copied().ok_or(DecodeError::TruncatedInstruction)}
+fn signed32(units:&[u16], at:usize)->Result<i32,DecodeError>{
+ let lo=unit_at(units,at)? as u32; let hi=unit_at(units,at+1)? as u32;
+ Ok(((hi<<16)|lo) as i32)
+}
+fn opcode_width(op:u8)->Option<usize>{
+ Some(match op {
+  0x00|0x01|0x04|0x07|0x0a..=0x12|0x1d|0x1e|0x21|0x27|0x28|
+  0x7b..=0x8f|0xb0..=0xcf => 1,
+  0x02|0x05|0x08|0x13|0x15|0x16|0x19|0x1a|0x1c|0x1f|0x20|0x22|0x23|
+  0x29|0x2d..=0x31|0x32..=0x3d|0x44..=0x6d|0x7b..=0x8f|0x90..=0xaf|
+  0xd0..=0xe2|0xfe|0xff => 2,
+  0x03|0x06|0x09|0x14|0x17|0x1b|0x24|0x25|0x26|0x2a|0x2b|0x2c|
+  0x6e..=0x72|0x74..=0x78|0xfc|0xfd => 3,
+  0x18 => 5,
+  0xfa|0xfb => 4,
+  _ => return None,
+ })
+}
+
+/// Decodes every code unit in a DEX instruction stream, validating instruction widths,
+/// switch/array payload extents, and relative branch destinations.
+pub fn decode_instructions(bytes:&[u8])->Result<Vec<DecodedInstruction>,DecodeError>{
+ if bytes.len()%2!=0{return Err(DecodeError::OddByteLength);}
+ let units:Vec<u16>=bytes.chunks_exact(2).map(|c|u16::from_le_bytes([c[0],c[1]])).collect();
+ let mut decoded=Vec::new(); let mut payloads=Vec::new(); let mut branches=Vec::new(); let mut pc=0usize;
+ while pc<units.len(){
+  let first=units[pc]; let op=(first&0xff) as u8;
+  if op==0 && first>>8!=0 {
+   let ident=first>>8; let width=match ident {
+    1=>{let n=unit_at(&units,pc+1)? as usize;4usize.checked_add(n.checked_mul(2).ok_or(DecodeError::InvalidPayload)?).ok_or(DecodeError::InvalidPayload)?},
+    2=>{let n=unit_at(&units,pc+1)? as usize;2usize.checked_add(n.checked_mul(4).ok_or(DecodeError::InvalidPayload)?).ok_or(DecodeError::InvalidPayload)?},
+    3=>{let element=unit_at(&units,pc+1)? as usize;if !matches!(element,1|2|4|8){return Err(DecodeError::InvalidPayload);}let lo=unit_at(&units,pc+2)? as u32;let hi=unit_at(&units,pc+3)? as u32;let count=((hi<<16)|lo) as usize;let data=count.checked_mul(element).ok_or(DecodeError::InvalidPayload)?;4usize.checked_add(data.checked_add(1).ok_or(DecodeError::InvalidPayload)?/2).ok_or(DecodeError::InvalidPayload)?},
+    _=>return Err(DecodeError::InvalidPayload)
+   };
+   if width>units.len()-pc{return Err(DecodeError::TruncatedInstruction);}
+   let kind=match ident{1=>InstructionKind::PackedSwitchPayload,2=>InstructionKind::SparseSwitchPayload,_=>InstructionKind::ArrayDataPayload};
+   payloads.push((pc,kind));decoded.push(DecodedInstruction{code_unit_offset:pc,opcode:0,width,kind});pc+=width;continue;
+  }
+  let width=opcode_width(op).ok_or(DecodeError::InvalidOpcode(op))?;
+  if width>units.len()-pc{return Err(DecodeError::TruncatedInstruction);}
+  if op==0x28 {let d=(first as u8 as i8) as isize;branches.push((pc,d));}
+  else if op==0x29 {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
+  else if op==0x2a {branches.push((pc,signed32(&units,pc+1)? as isize));}
+  else if (0x32..=0x3d).contains(&op) {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
+  else if matches!(op,0x26|0x2b|0x2c) {let delta=signed32(&units,pc+1)? as isize;let target=(pc as isize).checked_add(delta).ok_or(DecodeError::InvalidPayloadTarget)?;if target<0||target as usize>=units.len(){return Err(DecodeError::InvalidPayloadTarget);}payloads.push((target as usize,match op{0x2b=>InstructionKind::PackedSwitchPayload,0x2c=>InstructionKind::SparseSwitchPayload,_=>InstructionKind::ArrayDataPayload}));}
+  decoded.push(DecodedInstruction{code_unit_offset:pc,opcode:op,width,kind:InstructionKind::Opcode});pc+=width;
+ }
+ for (source,delta) in branches {let target=(source as isize).checked_add(delta).ok_or(DecodeError::InvalidBranchTarget)?;if target<0||target as usize>=units.len(){return Err(DecodeError::InvalidBranchTarget);}}
+ for (target,expected) in payloads {
+  let found=decoded.iter().find(|i|i.code_unit_offset==target).map(|i|i.kind);
+  if found!=Some(expected){return Err(DecodeError::InvalidPayloadTarget);}
+ }
+ Ok(decoded)
+}
+
+#[cfg(test)]
+mod decoder_tests {
+ use super::*;
+ fn words(v:&[u16])->Vec<u8>{v.iter().flat_map(|x|x.to_le_bytes()).collect()}
+ #[test] fn decodes_mixed_widths(){let d=decode_instructions(&words(&[0x0012,0x0013,0x0001,0x000e])).unwrap();assert_eq!(d.iter().map(|x|x.width).collect::<Vec<_>>(),vec![1,2,1]);}
+ #[test] fn rejects_unknown_opcode(){assert_eq!(decode_instructions(&words(&[0x0073])),Err(DecodeError::InvalidOpcode(0x73)));}
+ #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
+ #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0x0028,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+ #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
+}
