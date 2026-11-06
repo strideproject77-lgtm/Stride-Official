@@ -228,7 +228,8 @@ mod tests {
         let class_data = [0, 0, 1, 0, 0, 1, 0];
         let mut b = vec![0; data + class_data.len()];
         b[..8].copy_from_slice(b"dex\n039\0");
-        b[0x20..0x24].copy_from_slice(&(b.len() as u32).to_le_bytes());
+        let file_size = b.len() as u32;
+        b[0x20..0x24].copy_from_slice(&file_size.to_le_bytes());
         b[0x24..0x28].copy_from_slice(&(HEADER as u32).to_le_bytes());
         b[0x28..0x2c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
         for (at, n, off) in [(0x38,1u32,strings),(0x40,2,types),(0x48,1,protos),(0x58,1,methods),(0x60,1,defs)] {
