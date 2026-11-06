@@ -22,6 +22,8 @@ pub enum ClassReadError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MethodDefinition {
     pub method_index: u32,
+    pub name: String,
+    pub prototype: String,
     pub access_flags: u32,
     pub code_offset: u32,
     pub is_direct: bool,
@@ -30,6 +32,7 @@ pub struct MethodDefinition {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassDefinition {
     pub class_index: u32,
+    pub descriptor: String,
     pub access_flags: u32,
     pub superclass_index: Option<u32>,
     pub static_field_count: u32,
@@ -85,9 +88,93 @@ fn delta_index(previous: u32, delta: u32, count: u32) -> Result<u32, ClassReadEr
     Ok(value)
 }
 
+
+fn dex_string(
+    b: &[u8], strings: &std::ops::Range<usize>, string_count: u32, index: u32,
+) -> Result<String, ClassReadError> {
+    if index >= string_count { return Err(ClassReadError::InvalidIndex); }
+    let at = strings.start.checked_add(index as usize * 4).ok_or(ClassReadError::InvalidIndex)?;
+    let data_offset = usize::try_from(u32le(b, at)?).map_err(|_| ClassReadError::InvalidClassData)?;
+    if data_offset < HEADER || data_offset >= b.len() { return Err(ClassReadError::InvalidClassData); }
+    let mut p = data_offset;
+    let utf16_length = usize::try_from(uleb(b, &mut p)?).map_err(|_| ClassReadError::InvalidClassData)?;
+    if utf16_length > b.len() { return Err(ClassReadError::InvalidClassData); }
+    let mut units = Vec::with_capacity(utf16_length);
+    loop {
+        let first = *b.get(p).ok_or(ClassReadError::InvalidClassData)?;
+        p += 1;
+        if first == 0 { break; }
+        let unit = if first <= 0x7f {
+            u16::from(first)
+        } else if first & 0xe0 == 0xc0 {
+            let second = *b.get(p).ok_or(ClassReadError::InvalidClassData)?;
+            p += 1;
+            if second & 0xc0 != 0x80 { return Err(ClassReadError::InvalidClassData); }
+            let value = (u16::from(first & 0x1f) << 6) | u16::from(second & 0x3f);
+            if value != 0 && value < 0x80 { return Err(ClassReadError::InvalidClassData); }
+            value
+        } else if first & 0xf0 == 0xe0 {
+            let second = *b.get(p).ok_or(ClassReadError::InvalidClassData)?;
+            let third = *b.get(p + 1).ok_or(ClassReadError::InvalidClassData)?;
+            p += 2;
+            if second & 0xc0 != 0x80 || third & 0xc0 != 0x80 {
+                return Err(ClassReadError::InvalidClassData);
+            }
+            let value = (u16::from(first & 0x0f) << 12)
+                | (u16::from(second & 0x3f) << 6) | u16::from(third & 0x3f);
+            if value < 0x800 { return Err(ClassReadError::InvalidClassData); }
+            value
+        } else {
+            return Err(ClassReadError::InvalidClassData);
+        };
+        units.push(unit);
+        if units.len() > utf16_length { return Err(ClassReadError::InvalidClassData); }
+    }
+    if units.len() != utf16_length { return Err(ClassReadError::InvalidClassData); }
+    Ok(String::from_utf16_lossy(&units))
+}
+
+fn type_descriptor(
+    b: &[u8], strings: &std::ops::Range<usize>, types: &std::ops::Range<usize>,
+    string_count: u32, type_count: u32, type_index: u32,
+) -> Result<String, ClassReadError> {
+    if type_index >= type_count { return Err(ClassReadError::InvalidIndex); }
+    let at = types.start.checked_add(type_index as usize * 4).ok_or(ClassReadError::InvalidIndex)?;
+    dex_string(b, strings, string_count, u32le(b, at)?)
+}
+
+fn proto_signature(
+    b: &[u8], strings: &std::ops::Range<usize>, types: &std::ops::Range<usize>,
+    protos: &std::ops::Range<usize>, string_count: u32, type_count: u32, proto_index: u32,
+) -> Result<String, ClassReadError> {
+    if proto_index as usize >= protos.len() / 12 { return Err(ClassReadError::InvalidIndex); }
+    let at = protos.start + proto_index as usize * 12;
+    let return_type = u32le(b, at + 4)?;
+    let parameters_offset = u32le(b, at + 8)?;
+    let mut signature = String::from("(");
+    if parameters_offset != 0 {
+        let list = usize::try_from(parameters_offset).map_err(|_| ClassReadError::InvalidClassData)?;
+        if list < HEADER || list % 4 != 0 { return Err(ClassReadError::InvalidClassData); }
+        let count = usize::try_from(u32le(b, list)?).map_err(|_| ClassReadError::InvalidClassData)?;
+        if count > 1_000_000 || list.checked_add(4).and_then(|v| v.checked_add(count.checked_mul(2)?))
+            .filter(|end| *end <= b.len()).is_none() {
+            return Err(ClassReadError::InvalidClassData);
+        }
+        for i in 0..count {
+            let type_index = u32::from(u16le(b, list + 4 + i * 2)?);
+            signature.push_str(&type_descriptor(b, strings, types, string_count, type_count, type_index)?);
+        }
+    }
+    signature.push(')');
+    signature.push_str(&type_descriptor(b, strings, types, string_count, type_count, return_type)?);
+    Ok(signature)
+}
+
 fn class_data(
     b: &[u8], offset: u32, class_index: u32, fields: &std::ops::Range<usize>,
-    methods: &std::ops::Range<usize>, field_count: u32, method_count: u32,
+    methods: &std::ops::Range<usize>, strings: &std::ops::Range<usize>,
+    types: &std::ops::Range<usize>, protos: &std::ops::Range<usize>,
+    field_count: u32, method_count: u32, string_count: u32, type_count: u32,
 ) -> Result<ClassDefinition, ClassReadError> {
     let mut p = usize::try_from(offset).map_err(|_| ClassReadError::InvalidClassData)?;
     if p < HEADER || p >= b.len() { return Err(ClassReadError::InvalidClassData); }
@@ -126,11 +213,17 @@ fn class_data(
             if code != 0 {
                 read_code_item(b, code).map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
             }
-            found.push(MethodDefinition { method_index: idx, access_flags: flags, code_offset: code, is_direct });
+            let proto_index = u32::from(u16le(b, at + 2)?);
+            let name_index = u32le(b, at + 4)?;
+            let name = dex_string(b, strings, string_count, name_index)?;
+            let prototype = proto_signature(b, strings, types, protos, string_count, type_count, proto_index)?;
+            found.push(MethodDefinition {
+                method_index: idx, name, prototype, access_flags: flags, code_offset: code, is_direct
+            });
         }
     }
     Ok(ClassDefinition {
-        class_index, access_flags: 0, superclass_index: None,
+        class_index, descriptor: String::new(), access_flags: 0, superclass_index: None,
         static_field_count: static_fields, instance_field_count: instance_fields,
         direct_method_count: direct_methods, virtual_method_count: virtual_methods,
         methods: found,
@@ -199,13 +292,17 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         }
         let mut class = if data_off == 0 {
             ClassDefinition {
-                class_index: id, access_flags: 0, superclass_index: None,
+                class_index: id, descriptor: String::new(), access_flags: 0, superclass_index: None,
                 static_field_count: 0, instance_field_count: 0,
                 direct_method_count: 0, virtual_method_count: 0, methods: Vec::new(),
             }
         } else {
-            class_data(b, data_off, id, &fields, &methods, field_count, method_count)?
+            class_data(
+                b, data_off, id, &fields, &methods, &strings, &types, &protos,
+                field_count, method_count, string_count, type_count,
+            )?
         };
+        class.descriptor = type_descriptor(b, &strings, &types, string_count, type_count, id)?;
         class.access_flags = flags;
         class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
         classes.push(class);
@@ -220,30 +317,36 @@ mod tests {
 
     fn sample(method_owner: u16) -> Vec<u8> {
         let strings = 0x70usize;
-        let types = strings + 4;
+        let types = strings + 8;
         let protos = types + 8;
         let methods = protos + 12;
         let defs = methods + 8;
         let data = defs + 32;
         let class_data = [0, 0, 1, 0, 0, 1, 0];
-        let mut b = vec![0; data + class_data.len()];
+        let string_data = [3, b'L', b'x', b';', 0, 3, b'f', b'o', b'o', 0];
+        let mut b = vec![0; data + class_data.len() + string_data.len()];
         b[..8].copy_from_slice(b"dex\n039\0");
         let file_size = b.len() as u32;
         b[0x20..0x24].copy_from_slice(&file_size.to_le_bytes());
         b[0x24..0x28].copy_from_slice(&(HEADER as u32).to_le_bytes());
         b[0x28..0x2c].copy_from_slice(&0x1234_5678u32.to_le_bytes());
-        for (at, n, off) in [(0x38,1u32,strings),(0x40,2,types),(0x48,1,protos),(0x58,1,methods),(0x60,1,defs)] {
+        for (at, n, off) in [(0x38,2u32,strings),(0x40,2,types),(0x48,1,protos),(0x58,1,methods),(0x60,1,defs)] {
             b[at..at+4].copy_from_slice(&n.to_le_bytes());
             b[at+4..at+8].copy_from_slice(&(off as u32).to_le_bytes());
         }
+        let string_data_at = data + class_data.len();
+        b[strings..strings+4].copy_from_slice(&(string_data_at as u32).to_le_bytes());
+        b[strings+4..strings+8].copy_from_slice(&((string_data_at + 5) as u32).to_le_bytes());
         b[types..types+8].fill(0);
         b[protos..protos+8].fill(0);
         b[methods..methods+2].copy_from_slice(&method_owner.to_le_bytes());
-        b[methods+2..methods+8].fill(0);
+        b[methods+2..methods+4].fill(0);
+        b[methods+4..methods+8].copy_from_slice(&1u32.to_le_bytes());
         b[defs..defs+4].fill(0);
         b[defs+8..defs+12].copy_from_slice(&NO_INDEX.to_le_bytes());
         b[defs+24..defs+28].copy_from_slice(&(data as u32).to_le_bytes());
-        b[data..].copy_from_slice(&class_data);
+        b[data..data+class_data.len()].copy_from_slice(&class_data);
+        b[data+class_data.len()..].copy_from_slice(&string_data);
         b
     }
 
@@ -252,8 +355,11 @@ mod tests {
         let inventory = inspect_classes(&sample(0)).unwrap();
         let class = &inventory.classes[0];
         assert_eq!(class.class_index, 0);
+        assert_eq!(class.descriptor, "Lx;");
         assert_eq!(class.direct_method_count, 1);
         assert_eq!(class.methods[0].method_index, 0);
+        assert_eq!(class.methods[0].name, "foo");
+        assert_eq!(class.methods[0].prototype, "()Lx;");
         assert_eq!(class.methods[0].code_offset, 0);
     }
 
