@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn rejects_branch_into_operand() {
-        let code = [0x0228, 0x0013, 0x000e]; // goto +2 targets the const/16 operand
+        let code = [0x0228, 0x0013, 0x0000, 0x000e]; // goto +2 targets the const/16 operand
         assert_eq!(
             execute_integer_method(&code, 0, &[], 10),
             Err(VmError::InvalidBranchTarget)
