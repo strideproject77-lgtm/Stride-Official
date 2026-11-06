@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# Keep only the newest main-branch build pending; avoid a queue of stale IPA builds.
+concurrency:
+  group: stride-ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build unsigned iOS IPA
@@ -32,6 +37,15 @@ jobs:
 
       - name: Run Rust unit tests
         run: cargo test --manifest-path runtime-rust/Cargo.toml
+
+      - name: Run Swift unit tests
+        run: |
+          xcodebuild test \
+            -project Stride.xcodeproj \
+            -scheme Stride \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            -derivedDataPath "$RUNNER_TEMP/StrideTestDerivedData" \
+            CODE_SIGNING_ALLOWED=NO
 
       - name: Build for physical iOS devices
         run: |
