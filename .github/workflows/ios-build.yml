@@ -10,14 +10,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: stride-ios-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   build:
-    name: Build native iOS app
+    name: Build unsigned iOS IPA
     runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - name: Checkout main revision
         uses: actions/checkout@v4
@@ -33,14 +30,39 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build for iOS Simulator
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path runtime-rust/Cargo.toml
+
+      - name: Build for physical iOS devices
         run: |
           xcodebuild \
             -project Stride.xcodeproj \
             -scheme Stride \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/StrideDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Run Rust unit tests
-        run: cargo test --manifest-path runtime-rust/Cargo.toml
+      - name: Package unsigned IPA
+        run: |
+          APP_PATH="$RUNNER_TEMP/StrideDerivedData/Build/Products/Release-iphoneos/Stride.app"
+          test -d "$APP_PATH"
+          plutil -lint "$APP_PATH/Info.plist"
+          STAGING="$RUNNER_TEMP/stride-ipa"
+          mkdir -p "$STAGING/Payload"
+          cp -R "$APP_PATH" "$STAGING/Payload/Stride.app"
+          cd "$STAGING"
+          /usr/bin/zip -qry "$GITHUB_WORKSPACE/Stride-unsigned.ipa" Payload
+          test -s "$GITHUB_WORKSPACE/Stride-unsigned.ipa"
+          unzip -l "$GITHUB_WORKSPACE/Stride-unsigned.ipa"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stride-unsigned-IPA
+          path: Stride-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
