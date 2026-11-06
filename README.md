@@ -11,14 +11,14 @@ Stride is an independent native iOS project exploring a practical Android applic
 
 ## Current status
 
-The repository has been initialized. Android application execution is not implemented yet. The current foundation provides a native iOS shell, APK archive inspection, an explicit runtime boundary, and safe ELF identification and program-header inspection, DEX code-item and instruction-stream decoding, Android binary XML string-pool and manifest metadata decoding, and ELF dynamic-symbol/relocation inspection. Execution support will only be claimed after an actual APK runs through the runtime on a supported physical device.
+The native iOS shell, APK archive intake, Android binary XML manifest metadata extraction, DEX structural decoding, and ELF dynamic metadata inspection are in place. A first bounded Dalvik integer interpreter now executes a documented subset of primitive DEX instructions in isolated tests. It is not ART, does not load classes or APK methods, and does not yet support objects, strings, exceptions, JNI, Android framework calls, or native libraries. No Android APK execution is currently claimed.
 
 ## Architecture
 
 - **StrideApp** — native iOS user interface and app lifecycle.
 - **APK intake** — package import, archive inspection, and validation.
-- **Runtime boundary** — execution contracts and capability reporting.
-- **RuntimeRust** — isolated low-level components where Rust offers a concrete advantage.
+- **Runtime boundary** — explicit execution contracts and capability reporting.
+- **RuntimeRust** — DEX execution primitives and low-level binary components where Rust offers a concrete advantage.
 
 ## Development
 
