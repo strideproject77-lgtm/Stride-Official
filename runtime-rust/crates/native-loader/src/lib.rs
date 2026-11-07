@@ -28,12 +28,14 @@ pub fn plan_native_image(info:&ElfProgramInfo,load_bias:u64)->Result<NativeImage
  let(mut image_start,mut image_end)=(u64::MAX,0u64);
  for s in &loads{
   if s.file_size>s.memory_size{return Err(LoadPlanError::InvalidSegment);}
-  if s.alignment>1&&(!s.alignment.is_power_of_two()||s.virtual_address%s.alignment!=s.file_offset%s.alignment){return Err(LoadPlanError::InvalidAlignment);}
+  // Validate all address arithmetic before alignment so overflow is reported
+  // deterministically even when the overflowing address is also misaligned.
   let end=s.virtual_address.checked_add(s.memory_size).ok_or(LoadPlanError::AddressOverflow)?;
-  image_start=image_start.min(align_down(s.virtual_address,IOS_PAGE_SIZE));
-  image_end=image_end.max(align_up(end,IOS_PAGE_SIZE)?);
   s.file_offset.checked_add(s.file_size).ok_or(LoadPlanError::AddressOverflow)?;
   s.virtual_address.checked_add(s.file_size).ok_or(LoadPlanError::AddressOverflow)?;
+  if s.alignment>1&&(!s.alignment.is_power_of_two()||s.virtual_address%s.alignment!=s.file_offset%s.alignment){return Err(LoadPlanError::InvalidAlignment);}
+  image_start=image_start.min(align_down(s.virtual_address,IOS_PAGE_SIZE));
+  image_end=image_end.max(align_up(end,IOS_PAGE_SIZE)?);
  }
  let image_size=image_end.checked_sub(image_start).ok_or(LoadPlanError::AddressOverflow)?;
  if image_size/IOS_PAGE_SIZE > 262_144 {return Err(LoadPlanError::ImageTooLarge);}
