@@ -21,7 +21,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Improved the SwiftUI APK library/detail experience in Sources/StrideApp/ContentView.swift. It shows APK and DEX counts, recent packages, details, ABI chips, and explicit runtime limitations. The screen has not yet been visually checked in Xcode.
 - Split CI so Ubuntu runs Rust checks for pull requests and pushes; the macOS job runs only on main and feat/dex-class-method-loader pushes and builds an unsigned device IPA. Simulator tests are currently omitted because the hosted runner could not connect to/download its Simulator runtime.
 - Added runtime-rust/crates/dex-ffi as a workspace crate. It exports a C ABI that accepts one DEX byte buffer and returns class/method counts with explicit error codes. Added the C header at runtime-rust/crates/dex-ffi/include/stride_dex_ffi.h. FFI tests cover null pointers and malformed DEX input.
-- The FFI is not yet linked into the iOS app; APKArchiveInspector still only inspects ZIP entries.
+- Built the FFI for iOS device and simulator, packaged an XCFramework, linked it with XcodeGen, and added a Swift wrapper at Sources/StrideApp/Runtime/StrideDexInventory.swift. APKArchiveInspector still does not call that wrapper.
 - No Husk source, code, tests, or assets were copied.
 
 ## Current boundary
@@ -40,14 +40,14 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 - PR run #19 passed the Ubuntu Rust tests after the DEX parser/native-loader fix.
 - Runs #23 and #24 exposed unavailable simulator support on the hosted Mac. Workflow commit 913a9f3 removed simulator download/device-test steps; macOS CI now builds the physical-device target and packages an unsigned IPA.
 - PR workflow run #38 passed the Ubuntu Rust tests, including the new FFI tests; its macOS job was skipped as designed for pull requests.
-- Push run #37 passed Rust but the iOS compile failed because 11 SwiftUI .tracking modifiers require iOS 16 while the app targets iOS 15. Commit f4cd66a replaced them with iOS 15-compatible .kerning modifiers. Check the next push run to verify the device build and IPA artifact upload.
+- Push runs #37 and #41 exposed iOS 15 availability issues in SwiftUI letter spacing. Commits f4cd66a and 38906f4 fixed them. Push run #51 passed Rust, built the Rust XCFramework, linked and compiled the Swift wrapper, built the iOS device app, and uploaded an unsigned IPA artifact (562 KB; expires 2026-11-21): https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/42361734733.
 - PR #1 is draft and must remain unmerged until checks and review are complete.
 
 ## Known issues
 
-- The DEX inventory and new FFI crate passed Rust CI in runs #38 and #43.
-- The DEX FFI only returns class/method counts; it is not linked into Swift and does not execute code.
-- The UI compiled in the successful iOS 15 physical-device build in run #43, but has not been visually checked in Simulator or on an iPhone.
+- The DEX inventory and FFI crate passed Rust CI in runs #38, #43, and #51; device/simulator Rust compilation and Swift linkage passed in run #51.
+- The DEX FFI returns class/method counts and is linked through a Swift wrapper, but APKArchiveInspector does not call it yet. It does not execute code.
+- The UI compiled in the successful iOS 15 physical-device build in run #51, but has not been visually checked in Simulator or on an iPhone.
 - The interpreter supports only a small primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
 - No real-device APK launch test exists.
@@ -66,14 +66,13 @@ This is the chosen delivery strategy: ship a small complete execution slice firs
 
 ## Next steps
 
-1. Keep run #43 as the last verified IPA build. Check any newer workflow run before relying on its result; do not merge PR #1 until review.
-2. Add macOS CI steps that build the Rust static library for iOS device and simulator targets. Link the library into the generated Xcode project and verify the Swift app builds.
-3. Add a Swift wrapper around stride_dex_inventory_counts. Extract classes*.dex from imported APKs and report class/method counts and parse errors in the package detail sheet.
-4. Add valid DEX fixtures to exercise the C ABI through Swift before claiming the app uses Rust parsing.
+1. Run #51 built the current unsigned IPA successfully; retain artifact Stride-unsigned-IPA from that run. Do not merge PR #1 until review.
+2. Connect APKArchiveInspector to StrideDexInventory.inspect. Stream each classes*.dex entry with a documented per-entry memory cap; show total class/method counts and parse failures in the package detail sheet.
+3. Add a valid DEX fixture to Swift inspection tests and verify successful counts, malformed DEX handling, and oversized entry reporting.
 5. Expand execution in measured stages: verifier and type model, objects/method calls/exceptions, ARM64 ELF loading, Bionic/JNI, then a small Android framework surface. Test each stage against a real APK cohort.
 
 ## Resume checklist
 
-- Confirm current branch head and latest workflow run.
-- Re-read this handoff, especially CI status and known issues.
-- Recheck the branch head and workflow list. Continue with macOS Rust target builds and Xcode linking.
+- Confirm branch feat/dex-class-method-loader and current workflow status.
+- Read the compatibility roadmap above and choose the Snake fixture APK identity before implementing more execution behavior.
+- First code task: wire APKArchiveInspector to the already-linked Rust DEX wrapper.
