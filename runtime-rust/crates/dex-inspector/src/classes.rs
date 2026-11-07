@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn rejects_out_of_range_register_operand_in_defined_method() {
-        let (bytes, _) = sample_with_code(0x1012); // const/4 references v1, but only v0 exists
+        let (bytes, _) = sample_with_code(0x0112); // const/4 references v1, but only v0 exists
         assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
     }
 
