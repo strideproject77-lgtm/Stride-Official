@@ -2,7 +2,7 @@ name: iOS Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/dex-class-method-loader]
   pull_request:
     branches: [main]
   workflow_dispatch:
