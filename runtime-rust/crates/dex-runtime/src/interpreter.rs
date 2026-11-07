@@ -8,11 +8,11 @@ use crate::types::{
     Value, RegisterFile, int_to_long, int_to_float, int_to_double, long_to_int,
     long_to_float, long_to_double, float_to_int, float_to_long, float_to_double,
     double_to_int, double_to_long, double_to_float, int_to_byte, int_to_char,
-    int_to_short,
+    int_to_short, cmp_long, cmpl_float, cmpg_float, cmpl_double, cmpg_double,
 };
 use crate::heap::ManagedHeap;
 use crate::hierarchy::ClassHierarchy;
-use crate::exceptions::TryBlock;
+use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 
@@ -21,7 +21,7 @@ pub enum ExecutionStopReason {
     ReturnedVoid,
     ReturnedValue(Value),
     StepLimitExceeded,
-    UncaughtException(String),
+    UncaughtException(ThrownException),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,7 +77,8 @@ impl<'a> ArtVm<'a> {
         arguments: &[Value],
         step_limit: usize,
     ) -> Result<InterpreterReport, String> {
-        self.execute_internal(method_id, arguments, step_limit, 0)
+        let mut trace = RuntimeStackTrace::new();
+        self.execute_internal(method_id, arguments, step_limit, 0, &mut trace)
     }
 
     fn execute_internal(
@@ -86,6 +87,7 @@ impl<'a> ArtVm<'a> {
         arguments: &[Value],
         step_limit: usize,
         call_depth: usize,
+        trace: &mut RuntimeStackTrace,
     ) -> Result<InterpreterReport, String> {
         if call_depth > 128 {
             return Err("Call depth limit exceeded (128 frames)".into());
@@ -297,12 +299,16 @@ impl<'a> ArtVm<'a> {
                     rf.write_long(a8, bits as i64).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
-                0x1a => { // const-string vAA, string@BBBB
-                    let str_idx = code_units[pc + 1] as usize;
+                0x1a | 0x1b => { // const-string, const-string/jumbo
+                    let str_idx = if op == 0x1a {
+                        code_units[pc + 1] as usize
+                    } else {
+                        (code_units[pc + 1] as usize) | ((code_units[pc + 2] as usize) << 16)
+                    };
                     let text = self.strings.get(str_idx).cloned().unwrap_or_default();
                     let str_id = self.heap.allocate_string(&text).map_err(|e| format!("{:?}", e))?;
                     rf.write_object(a8, str_id).map_err(|e| format!("Invalid reg {}", e))?;
-                    pc += 2;
+                    pc += if op == 0x1a { 2 } else { 3 };
                 }
                 0x1d => { // monitor-enter vAA
                     let obj = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
@@ -313,6 +319,44 @@ impl<'a> ArtVm<'a> {
                     let obj = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     self.monitors.monitor_exit(obj, 1).map_err(|e| format!("{:?}", e))?;
                     pc += 1;
+                }
+                0x1f => { // check-cast vAA, type@BBBB
+                    let obj_id = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    if obj_id != 0 {
+                        let type_idx = code_units[pc + 1] as usize;
+                        let target_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
+                        let actual_obj = self.heap.get(obj_id).map_err(|e| format!("{:?}", e))?;
+                        if !self.hierarchy.is_assignable_from(&target_type, actual_obj.class_descriptor()) {
+                            let npe_id = self.heap.allocate_instance("Ljava/lang/ClassCastException;").map_err(|e| format!("{:?}", e))?;
+                            return Ok(InterpreterReport {
+                                stop_reason: ExecutionStopReason::UncaughtException(ThrownException {
+                                    exception_object: npe_id,
+                                    class_descriptor: "Ljava/lang/ClassCastException;".into(),
+                                    message: Some(format!("Cannot cast {} to {}", actual_obj.class_descriptor(), target_type)),
+                                    stack_trace: trace.clone(),
+                                }),
+                                steps_executed: steps,
+                            });
+                        }
+                    }
+                    pc += 2;
+                }
+                0x20 => { // instance-of vA, vB, type@CCCC
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let matches = if obj_id == 0 {
+                        0
+                    } else {
+                        let type_idx = code_units[pc + 1] as usize;
+                        let target_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
+                        let actual_obj = self.heap.get(obj_id).map_err(|e| format!("{:?}", e))?;
+                        if self.hierarchy.is_assignable_from(&target_type, actual_obj.class_descriptor()) {
+                            1
+                        } else {
+                            0
+                        }
+                    };
+                    rf.write_int(a4, matches).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
                 }
                 0x21 => { // array-length vA, vB
                     let arr_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
@@ -335,6 +379,51 @@ impl<'a> ArtVm<'a> {
                     rf.write_object(a4, id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
+                0x27 => { // throw vAA
+                    let ex_id = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    if ex_id == 0 {
+                        let npe_id = self.heap.allocate_instance("Ljava/lang/NullPointerException;").map_err(|e| format!("{:?}", e))?;
+                        return Ok(InterpreterReport {
+                            stop_reason: ExecutionStopReason::UncaughtException(ThrownException {
+                                exception_object: npe_id,
+                                class_descriptor: "Ljava/lang/NullPointerException;".into(),
+                                message: Some("throw with null exception".into()),
+                                stack_trace: trace.clone(),
+                            }),
+                            steps_executed: steps,
+                        });
+                    }
+                    let obj = self.heap.get(ex_id).map_err(|e| format!("{:?}", e))?;
+                    let ex_desc = obj.class_descriptor().to_owned();
+
+                    // Check if current method has a matching catch block covering PC
+                    let mut caught_pc = None;
+                    for block in &method.try_blocks {
+                        if block.covers(pc) {
+                            if let Some(target) = block.find_handler(&ex_desc, |t, s| self.hierarchy.is_assignable_from(t, s)) {
+                                caught_pc = Some(target);
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Some(target) = caught_pc {
+                        pending_exception = Some(ex_id);
+                        pc = target;
+                        continue;
+                    } else {
+                        trace.push_frame(&method.class_descriptor, &method.name, &method.prototype, pc);
+                        return Ok(InterpreterReport {
+                            stop_reason: ExecutionStopReason::UncaughtException(ThrownException {
+                                exception_object: ex_id,
+                                class_descriptor: ex_desc,
+                                message: None,
+                                stack_trace: trace.clone(),
+                            }),
+                            steps_executed: steps,
+                        });
+                    }
+                }
                 0x28 => { // goto +AA
                     let delta = (first >> 8) as u8 as i8 as isize;
                     pc = (pc as isize + delta) as usize;
@@ -342,6 +431,100 @@ impl<'a> ArtVm<'a> {
                 0x29 => { // goto/16 +AAAA
                     let delta = code_units[pc + 1] as i16 as isize;
                     pc = (pc as isize + delta) as usize;
+                }
+                0x2a => { // goto/32 +AAAAAAAA
+                    let lo = code_units[pc + 1] as u32;
+                    let hi = code_units[pc + 2] as u32;
+                    let delta = ((hi << 16) | lo) as i32 as isize;
+                    pc = (pc as isize + delta) as usize;
+                }
+                0x2b => { // packed-switch vAA, +BBBBBBBB
+                    let val = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    let lo = code_units[pc + 1] as u32;
+                    let hi = code_units[pc + 2] as u32;
+                    let offset = ((hi << 16) | lo) as i32 as isize;
+                    let payload_pc = (pc as isize + offset) as usize;
+                    if payload_pc + 4 <= code_units.len() && code_units[payload_pc] == 0x0100 {
+                        let size = code_units[payload_pc + 1] as usize;
+                        let first_key = ((code_units[payload_pc + 3] as u32) << 16 | (code_units[payload_pc + 2] as u32)) as i32;
+                        let key_offset = val - first_key;
+                        if key_offset >= 0 && (key_offset as usize) < size {
+                            let target_idx = payload_pc + 4 + (key_offset as usize) * 2;
+                            if target_idx + 1 < code_units.len() {
+                                let tlo = code_units[target_idx] as u32;
+                                let thi = code_units[target_idx + 1] as u32;
+                                let target_delta = ((thi << 16) | tlo) as i32 as isize;
+                                pc = (pc as isize + target_delta) as usize;
+                                continue;
+                            }
+                        }
+                    }
+                    pc += 3;
+                }
+                0x2c => { // sparse-switch vAA, +BBBBBBBB
+                    let val = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    let lo = code_units[pc + 1] as u32;
+                    let hi = code_units[pc + 2] as u32;
+                    let offset = ((hi << 16) | lo) as i32 as isize;
+                    let payload_pc = (pc as isize + offset) as usize;
+                    let mut branched = false;
+                    if payload_pc + 2 <= code_units.len() && code_units[payload_pc] == 0x0200 {
+                        let size = code_units[payload_pc + 1] as usize;
+                        let keys_start = payload_pc + 2;
+                        let targets_start = keys_start + size * 2;
+                        for i in 0..size {
+                            let klo = code_units[keys_start + i * 2] as u32;
+                            let khi = code_units[keys_start + i * 2 + 1] as u32;
+                            let k = ((khi << 16) | klo) as i32;
+                            if k == val {
+                                let tlo = code_units[targets_start + i * 2] as u32;
+                                let thi = code_units[targets_start + i * 2 + 1] as u32;
+                                let target_delta = ((thi << 16) | tlo) as i32 as isize;
+                                pc = (pc as isize + target_delta) as usize;
+                                branched = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !branched {
+                        pc += 3;
+                    }
+                }
+                0x1f..=0x23 if op >= 0x2d => { // comparisons: cmpl-float, cmpg-float, cmpl-double, cmpg-double, cmp-long
+                    match op {
+                        0x2d => { // cmpl-float
+                            let second = code_units[pc + 1];
+                            let b = rf.read_float((second & 0xff) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            let c = rf.read_float((second >> 8) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a8, cmpl_float(b, c)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x2e => { // cmpg-float
+                            let second = code_units[pc + 1];
+                            let b = rf.read_float((second & 0xff) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            let c = rf.read_float((second >> 8) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a8, cmpg_float(b, c)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x2f => { // cmpl-double
+                            let second = code_units[pc + 1];
+                            let b = rf.read_double((second & 0xff) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            let c = rf.read_double((second >> 8) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a8, cmpl_double(b, c)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x30 => { // cmpg-double
+                            let second = code_units[pc + 1];
+                            let b = rf.read_double((second & 0xff) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            let c = rf.read_double((second >> 8) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a8, cmpg_double(b, c)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x31 => { // cmp-long
+                            let second = code_units[pc + 1];
+                            let b = rf.read_long((second & 0xff) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            let c = rf.read_long((second >> 8) as u16).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a8, cmp_long(b, c)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        _ => {}
+                    }
+                    pc += 2;
                 }
                 0x32..=0x37 => { // if-test vA, vB, +CCCC
                     let lhs = rf.read_int(a4).map_err(|e| format!("Invalid reg {}", e))?;
@@ -380,6 +563,26 @@ impl<'a> ArtVm<'a> {
                     rf.write_int(a8, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
+                0x45 => { // aget-wide
+                    let second = code_units[pc + 1];
+                    let arr_reg = (second & 0xff) as u16;
+                    let idx_reg = (second >> 8) as u16;
+                    let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let val = self.heap.get_array_element(arr_id, idx).map_err(|e| format!("{:?}", e))?;
+                    rf.write_long(a8, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x46 => { // aget-object
+                    let second = code_units[pc + 1];
+                    let arr_reg = (second & 0xff) as u16;
+                    let idx_reg = (second >> 8) as u16;
+                    let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let val = self.heap.get_array_element(arr_id, idx).map_err(|e| format!("{:?}", e))?;
+                    rf.write_object(a8, val.as_object().unwrap_or(0)).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
                 0x4b | 0x4e..=0x51 => { // aput, aput-boolean/byte/char/short
                     let second = code_units[pc + 1];
                     let arr_reg = (second & 0xff) as u16;
@@ -388,6 +591,102 @@ impl<'a> ArtVm<'a> {
                     let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
                     let val = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     self.heap.set_array_element(arr_id, idx, Value::Int(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x4c => { // aput-wide
+                    let second = code_units[pc + 1];
+                    let arr_reg = (second & 0xff) as u16;
+                    let idx_reg = (second >> 8) as u16;
+                    let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let val = rf.read_long(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    self.heap.set_array_element(arr_id, idx, Value::Long(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x4d => { // aput-object
+                    let second = code_units[pc + 1];
+                    let arr_reg = (second & 0xff) as u16;
+                    let idx_reg = (second >> 8) as u16;
+                    let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
+                    let val = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    self.heap.set_array_element(arr_id, idx, Value::Object(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x52 | 0x55..=0x58 => { // iget, iget-boolean/byte/char/short
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
+                    rf.write_int(a4, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x53 => { // iget-wide
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
+                    rf.write_long(a4, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x54 => { // iget-object
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
+                    rf.write_object(a4, val.as_object().unwrap_or(0)).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x59 | 0x5c..=0x5f => { // iput, iput-boolean/byte/char/short
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = rf.read_int(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    self.heap.set_instance_field(obj_id, &field_name, Value::Int(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x5a => { // iput-wide
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = rf.read_long(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    self.heap.set_instance_field(obj_id, &field_name, Value::Long(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x5b => { // iput-object
+                    let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let val = rf.read_object(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    self.heap.set_instance_field(obj_id, &field_name, Value::Object(val)).map_err(|e| format!("{:?}", e))?;
+                    pc += 2;
+                }
+                0x60..=0x66 => { // sget variants
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
+                    let key = (method.class_descriptor.clone(), field_name);
+                    let val = self.static_fields.get(&key).copied().unwrap_or(Value::Int(0));
+                    if op == 0x61 {
+                        rf.write_long(a8, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
+                    } else if op == 0x62 {
+                        rf.write_object(a8, val.as_object().unwrap_or(0)).map_err(|e| format!("Invalid reg {}", e))?;
+                    } else {
+                        rf.write_int(a8, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
+                    }
+                    pc += 2;
+                }
+                0x67..=0x6d => { // sput variants
+                    let field_idx = code_units[pc + 1] as usize;
+                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
+                    let key = (method.class_descriptor.clone(), field_name);
+                    let val = if op == 0x68 {
+                        Value::Long(rf.read_long(a8).map_err(|e| format!("Invalid reg {}", e))?)
+                    } else if op == 0x69 {
+                        Value::Object(rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?)
+                    } else {
+                        Value::Int(rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?)
+                    };
+                    self.static_fields.insert(key, val);
                     pc += 2;
                 }
                 0x90..=0x9a => { // int binary arithmetic
@@ -410,6 +709,28 @@ impl<'a> ArtVm<'a> {
                         _ => ((lhs as u32) >> (rhs & 0x1f)) as i32,
                     };
                     rf.write_int(a8, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x9b..=0xa5 => { // long binary arithmetic
+                    let second = code_units[pc + 1];
+                    let b = (second & 0xff) as u16;
+                    let c = (second >> 8) as u16;
+                    let lhs = rf.read_long(b).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_long(c).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0x9b => lhs.wrapping_add(rhs),
+                        0x9c => lhs.wrapping_sub(rhs),
+                        0x9d => lhs.wrapping_mul(rhs),
+                        0x9e => if rhs == 0 { return Err("Division by zero".into()); } else { lhs.wrapping_div(rhs) },
+                        0x9f => if rhs == 0 { return Err("Remainder by zero".into()); } else { lhs.wrapping_rem(rhs) },
+                        0xa0 => lhs & rhs,
+                        0xa1 => lhs | rhs,
+                        0xa2 => lhs ^ rhs,
+                        0xa3 => lhs << (rhs & 0x3f),
+                        0xa4 => lhs >> (rhs & 0x3f),
+                        _ => ((lhs as u64) >> (rhs & 0x3f)) as i64,
+                    };
+                    rf.write_long(a8, res).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
                 0xd0..=0xd7 => { // binop/lit16
@@ -464,7 +785,7 @@ impl<'a> ArtVm<'a> {
                     }
                     pc += 1;
                 }
-                0x6e | 0x70 | 0x71 | 0x74 | 0x76 | 0x77 => { // Method invoke
+                0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 => { // Method invoke family
                     let target_method_id = code_units[pc + 1];
                     let is_range = op >= 0x74;
                     let count = if is_range { a8 as usize } else { ((first >> 12) & 0x0f) as usize };
@@ -492,8 +813,20 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // Check for native method invocation
+                    if let Some(target) = self.methods.get(&target_method_id) {
+                        if let Some(native_handler) = self.jni.find(&target.class_descriptor, &target.name, &target.prototype) {
+                            let handler_clone = native_handler.clone();
+                            let mut env = crate::jni::JniEnv::new(self.heap);
+                            let native_res = handler_clone(&mut env, &args).map_err(|e| format!("{:?}", e))?;
+                            pending_result = native_res;
+                            pc += 3;
+                            continue;
+                        }
+                    }
+
                     let remaining = step_limit.saturating_sub(steps);
-                    let sub_report = self.execute_internal(target_method_id, &args, remaining, call_depth + 1)?;
+                    let sub_report = self.execute_internal(target_method_id, &args, remaining, call_depth + 1, trace)?;
                     steps += sub_report.steps_executed;
 
                     match sub_report.stop_reason {
@@ -503,9 +836,9 @@ impl<'a> ArtVm<'a> {
                         ExecutionStopReason::ReturnedVoid => {
                             pending_result = None;
                         }
-                        ExecutionStopReason::UncaughtException(uncaught_msg) => {
+                        ExecutionStopReason::UncaughtException(uncaught_ex) => {
                             return Ok(InterpreterReport {
-                                stop_reason: ExecutionStopReason::UncaughtException(uncaught_msg),
+                                stop_reason: ExecutionStopReason::UncaughtException(uncaught_ex),
                                 steps_executed: steps,
                             });
                         }
@@ -593,6 +926,56 @@ mod tests {
         assert_eq!(
             report.stop_reason,
             ExecutionStopReason::ReturnedValue(Value::Int(3))
+        );
+    }
+
+    #[test]
+    fn art_vm_executes_packed_switch() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let mut methods = HashMap::new();
+
+        // PC 0: const/4 v0, 2 (0x2012)
+        // PC 1: packed-switch v0, +4 (0x002b, 0x0004, 0x0000) -> jumps to PC 1+4 = 5
+        // PC 4: return v0 (0x000f) - default
+        // PC 5: payload: ident 0x0100, size 3, first_key 1 (0x0001, 0x0000), targets: +3 (to PC 4+3=7), +4 (to PC 4+4=8), +5
+        // PC 15: const/4 v0, 42; return v0
+        let code = vec![
+            0x2012, // const/4 v0, 2
+            0x002b, 0x0004, 0x0000, // packed-switch v0, +4 (offset from PC 1 is 4 -> PC 5)
+            0x000f, // return v0 (if fallthrough)
+            // Payload at PC 5:
+            0x0100, // ident
+            0x0003, // size = 3 (keys: 1, 2, 3)
+            0x0001, 0x0000, // first_key = 1
+            0x0007, 0x0000, // target for key 1: PC 1+7 = 8
+            0x000a, 0x0000, // target for key 2: PC 1+10 = 11
+            0x000d, 0x0000, // target for key 3: PC 1+13 = 14
+            // PC 11:
+            0x0013, 999, // const/16 v0, 999
+            0x000f, // return v0
+        ];
+
+        methods.insert(
+            3,
+            MethodCode {
+                class_descriptor: "Ltest/Switch;".into(),
+                name: "testSwitch".into(),
+                prototype: "()I".into(),
+                code_units: code,
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: Vec::new(),
+            },
+        );
+
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        let report = vm.execute_method(3, &[], 20).unwrap();
+        assert_eq!(
+            report.stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(999))
         );
     }
 }
