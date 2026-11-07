@@ -208,8 +208,9 @@ pub fn validate_register_operands(
             0x53 | 0x5a | 0x61 | 0x68 => check_wide(a4)?,
             // Unary wide operations/conversions (12x).
             0x7d | 0x7e | 0x80 => { check_wide(a4)?; check_wide(b4)?; }
-            0x81 | 0x83 | 0x88 | 0x89 | 0x8b => check_wide(a4)?,
-            0x84 | 0x85 | 0x87 | 0x8a | 0x8c => check_wide(b4)?,
+            0x81 | 0x83 | 0x88 | 0x89 => check_wide(a4)?,
+            0x84 | 0x85 | 0x8a | 0x8c => check_wide(b4)?,
+            0x86 | 0x8b => { check_wide(a4)?; check_wide(b4)?; }
             // Long binary arithmetic: A and B are wide; C is wide except shifts.
             0x9b..=0xa2 => {
                 let second = unit_at(&units, pc + 1)?;
