@@ -393,6 +393,74 @@ impl<'a> ArtVm<'a> {
                     rf.write_object(a4, id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
+                0x24 => { // filled-new-array {vC, vD, vE, vF, vG}, type@BBBB
+                    let type_idx = code_units[pc + 1] as usize;
+                    let count = ((first >> 12) & 0x0f) as usize;
+                    let packed = code_units[pc + 2];
+                    let candidate_regs = [
+                        packed & 0x0f,
+                        (packed >> 4) & 0x0f,
+                        (packed >> 8) & 0x0f,
+                        (packed >> 12) & 0x0f,
+                        ((first >> 8) & 0x0f) as u16,
+                    ];
+                    let elem_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "[I".into());
+                    let arr_id = self.heap.allocate_array(&elem_type, count as i32).map_err(|e| format!("{:?}", e))?;
+                    for (i, &reg) in candidate_regs[..count].iter().enumerate() {
+                        let v = rf.read_int(reg).map_err(|e| format!("Invalid reg {}", e))?;
+                        self.heap.set_array_element(arr_id, i as i32, Value::Int(v)).map_err(|e| format!("{:?}", e))?;
+                    }
+                    pending_result = Some(Value::Object(arr_id));
+                    pc += 3;
+                }
+                0x25 => { // filled-new-array/range {vCCCC .. vNNNN}, type@BBBB
+                    let count = a8 as usize;
+                    let type_idx = code_units[pc + 1] as usize;
+                    let start_reg = code_units[pc + 2];
+                    let elem_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "[I".into());
+                    let arr_id = self.heap.allocate_array(&elem_type, count as i32).map_err(|e| format!("{:?}", e))?;
+                    for i in 0..count {
+                        let reg = start_reg + i as u16;
+                        let v = rf.read_int(reg).map_err(|e| format!("Invalid reg {}", e))?;
+                        self.heap.set_array_element(arr_id, i as i32, Value::Int(v)).map_err(|e| format!("{:?}", e))?;
+                    }
+                    pending_result = Some(Value::Object(arr_id));
+                    pc += 3;
+                }
+                0x26 => { // fill-array-data vAA, +BBBBBBBB
+                    let arr_id = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    let lo = code_units[pc + 1] as u32;
+                    let hi = code_units[pc + 2] as u32;
+                    let delta = ((hi << 16) | lo) as i32 as isize;
+                    let payload_pc = (pc as isize + delta) as usize;
+                    if payload_pc + 4 <= code_units.len() && code_units[payload_pc] == 0x0300 {
+                        let elem_width = code_units[payload_pc + 1] as usize;
+                        let size_lo = code_units[payload_pc + 2] as u32;
+                        let size_hi = code_units[payload_pc + 3] as u32;
+                        let size = ((size_hi << 16) | size_lo) as usize;
+                        let data_start = payload_pc + 4;
+                        if elem_width == 1 {
+                            for i in 0..size {
+                                let word = code_units[data_start + i / 2];
+                                let b = if i % 2 == 0 { (word & 0xff) as u8 } else { (word >> 8) as u8 } as i8 as i32;
+                                let _ = self.heap.set_array_element(arr_id, i as i32, Value::Int(b));
+                            }
+                        } else if elem_width == 2 {
+                            for i in 0..size {
+                                let w = code_units[data_start + i] as i16 as i32;
+                                let _ = self.heap.set_array_element(arr_id, i as i32, Value::Int(w));
+                            }
+                        } else if elem_width == 4 {
+                            for i in 0..size {
+                                let wlo = code_units[data_start + i * 2] as u32;
+                                let whi = code_units[data_start + i * 2 + 1] as u32;
+                                let val = ((whi << 16) | wlo) as i32;
+                                let _ = self.heap.set_array_element(arr_id, i as i32, Value::Int(val));
+                            }
+                        }
+                    }
+                    pc += 3;
+                }
                 0x27 => { // throw vAA
                     let ex_id = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     if ex_id == 0 {
@@ -784,19 +852,190 @@ impl<'a> ArtVm<'a> {
                     rf.write_int(a8, res).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
-                0x7b..=0x8f => { // conversions
-                    let val = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                0x7b..=0x8f => { // conversions and unary operations
                     match op {
-                        0x7b => rf.write_int(a4, -val).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x7c => rf.write_int(a4, !val).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x81 => rf.write_long(a4, int_to_long(val)).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x82 => rf.write_float(a4, int_to_float(val)).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x83 => rf.write_double(a4, int_to_double(val)).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x8d => rf.write_int(a4, int_to_byte(val)).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x8e => rf.write_int(a4, int_to_char(val)).map_err(|e| format!("Invalid reg {}", e))?,
-                        0x8f => rf.write_int(a4, int_to_short(val)).map_err(|e| format!("Invalid reg {}", e))?,
+                        0x7b => { // neg-int
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, -v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x7c => { // not-int
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, !v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x7d => { // neg-long
+                            let v = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_long(a4, -v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x7e => { // not-long
+                            let v = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_long(a4, !v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x7f => { // neg-float
+                            let v = rf.read_float(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_float(a4, -v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x80 => { // neg-double
+                            let v = rf.read_double(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_double(a4, -v).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x81 => { // int-to-long
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_long(a4, int_to_long(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x82 => { // int-to-float
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_float(a4, int_to_float(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x83 => { // int-to-double
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_double(a4, int_to_double(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x84 => { // long-to-int
+                            let v = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, long_to_int(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x85 => { // long-to-float
+                            let v = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_float(a4, long_to_float(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x86 => { // long-to-double
+                            let v = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_double(a4, long_to_double(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x87 => { // float-to-int
+                            let v = rf.read_float(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, float_to_int(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x88 => { // float-to-long
+                            let v = rf.read_float(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_long(a4, float_to_long(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x89 => { // float-to-double
+                            let v = rf.read_float(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_double(a4, float_to_double(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8a => { // double-to-int
+                            let v = rf.read_double(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, double_to_int(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8b => { // double-to-long
+                            let v = rf.read_double(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_long(a4, double_to_long(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8c => { // double-to-float
+                            let v = rf.read_double(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_float(a4, double_to_float(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8d => { // int-to-byte
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, int_to_byte(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8e => { // int-to-char
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, int_to_char(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
+                        0x8f => { // int-to-short
+                            let v = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                            rf.write_int(a4, int_to_short(v)).map_err(|e| format!("Invalid reg {}", e))?;
+                        }
                         _ => {}
                     }
+                    pc += 1;
+                }
+                0xa6..=0xaa => { // float 3-register binary arithmetic
+                    let second = code_units[pc + 1];
+                    let b = (second & 0xff) as u16;
+                    let c = (second >> 8) as u16;
+                    let lhs = rf.read_float(b).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_float(c).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xa6 => lhs + rhs,
+                        0xa7 => lhs - rhs,
+                        0xa8 => lhs * rhs,
+                        0xa9 => lhs / rhs,
+                        _ => lhs % rhs,
+                    };
+                    rf.write_float(a8, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0xab..=0xaf => { // double 3-register binary arithmetic
+                    let second = code_units[pc + 1];
+                    let b = (second & 0xff) as u16;
+                    let c = (second >> 8) as u16;
+                    let lhs = rf.read_double(b).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_double(c).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xab => lhs + rhs,
+                        0xac => lhs - rhs,
+                        0xad => lhs * rhs,
+                        0xae => lhs / rhs,
+                        _ => lhs % rhs,
+                    };
+                    rf.write_double(a8, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0xb0..=0xba => { // int /2addr
+                    let lhs = rf.read_int(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xb0 => lhs.wrapping_add(rhs),
+                        0xb1 => lhs.wrapping_sub(rhs),
+                        0xb2 => lhs.wrapping_mul(rhs),
+                        0xb3 => if rhs == 0 { return Err("Division by zero".into()); } else { lhs.wrapping_div(rhs) },
+                        0xb4 => if rhs == 0 { return Err("Remainder by zero".into()); } else { lhs.wrapping_rem(rhs) },
+                        0xb5 => lhs & rhs,
+                        0xb6 => lhs | rhs,
+                        0xb7 => lhs ^ rhs,
+                        0xb8 => lhs << (rhs & 0x1f),
+                        0xb9 => lhs >> (rhs & 0x1f),
+                        _ => ((lhs as u32) >> (rhs & 0x1f)) as i32,
+                    };
+                    rf.write_int(a4, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 1;
+                }
+                0xbb..=0xc5 => { // long /2addr
+                    let lhs = rf.read_long(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xbb => lhs.wrapping_add(rhs),
+                        0xbc => lhs.wrapping_sub(rhs),
+                        0xbd => lhs.wrapping_mul(rhs),
+                        0xbe => if rhs == 0 { return Err("Division by zero".into()); } else { lhs.wrapping_div(rhs) },
+                        0xbf => if rhs == 0 { return Err("Remainder by zero".into()); } else { lhs.wrapping_rem(rhs) },
+                        0xc0 => lhs & rhs,
+                        0xc1 => lhs | rhs,
+                        0xc2 => lhs ^ rhs,
+                        0xc3 => lhs << (rhs & 0x3f),
+                        0xc4 => lhs >> (rhs & 0x3f),
+                        _ => ((lhs as u64) >> (rhs & 0x3f)) as i64,
+                    };
+                    rf.write_long(a4, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 1;
+                }
+                0xc6..=0xca => { // float /2addr
+                    let lhs = rf.read_float(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_float(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xc6 => lhs + rhs,
+                        0xc7 => lhs - rhs,
+                        0xc8 => lhs * rhs,
+                        0xc9 => lhs / rhs,
+                        _ => lhs % rhs,
+                    };
+                    rf.write_float(a4, res).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 1;
+                }
+                0xcb..=0xcf => { // double /2addr
+                    let lhs = rf.read_double(a4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let rhs = rf.read_double(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    let res = match op {
+                        0xcb => lhs + rhs,
+                        0xcc => lhs - rhs,
+                        0xcd => lhs * rhs,
+                        0xce => lhs / rhs,
+                        _ => lhs % rhs,
+                    };
+                    rf.write_double(a4, res).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 1;
                 }
                 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 => { // Method invoke family
@@ -1013,6 +1252,91 @@ mod tests {
         assert_eq!(
             report.stop_reason,
             ExecutionStopReason::ReturnedValue(Value::Int(999))
+        );
+    }
+
+    #[test]
+    fn art_vm_executes_2addr_and_conversions() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let mut methods = HashMap::new();
+
+        // v0 = 10, v1 = 5
+        // add-int/2addr v0, v1 -> v0 = 15 (0x10b0)
+        // int-to-long v2, v0 (0x0281)
+        // return-wide v2 (0x0210)
+        let code = vec![
+            0x0013, 10, // const/16 v0, 10
+            0x0113, 5,  // const/16 v1, 5
+            0x10b0,     // add-int/2addr v0, v1
+            0x0281,     // int-to-long v2, v0
+            0x0210,     // return-wide v2
+        ];
+
+        methods.insert(
+            4,
+            MethodCode {
+                class_descriptor: "Ltest/Math2Addr;".into(),
+                name: "test2Addr".into(),
+                prototype: "()J".into(),
+                code_units: code,
+                registers_size: 4,
+                ins_size: 0,
+                try_blocks: Vec::new(),
+            },
+        );
+
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        let report = vm.execute_method(4, &[], 20).unwrap();
+        assert_eq!(
+            report.stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Long(15))
+        );
+    }
+
+    #[test]
+    fn art_vm_executes_filled_new_array() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let mut methods = HashMap::new();
+        let strings = vec!["[I".to_string()];
+
+        // v0 = 42, v1 = 99
+        // filled-new-array {v0, v1}, type@0 (0x2024, 0x0000, 0x0010)
+        // move-result-object v2 (0x020c)
+        // aget v3, v2, v1_idx(0) (0x0344, 0x0002) -> with v0 as index
+        let code = vec![
+            0x0013, 42, // const/16 v0, 42
+            0x0113, 99, // const/16 v1, 99
+            0x2024, 0x0000, 0x0010, // filled-new-array {v0, v1}, type@0
+            0x020c, // move-result-object v2
+            0x0012, // const/4 v0, 0 (index 0)
+            0x0344, 0x0002, // aget v3, v2, v0
+            0x030f, // return v3
+        ];
+
+        methods.insert(
+            5,
+            MethodCode {
+                class_descriptor: "Ltest/FilledArray;".into(),
+                name: "testFilledArray".into(),
+                prototype: "()I".into(),
+                code_units: code,
+                registers_size: 4,
+                ins_size: 0,
+                try_blocks: Vec::new(),
+            },
+        );
+
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
+        let report = vm.execute_method(5, &[], 20).unwrap();
+        assert_eq!(
+            report.stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(42))
         );
     }
 }
