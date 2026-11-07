@@ -22,7 +22,8 @@ final class APKInspectionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
 
         XCTAssertThrowsError(try APKLibraryStore().importPackage(from: url)) { error in
-            guard case APKLibraryImportError.unsupportedFile = error else {
+            guard let importError = error as? APKLibraryImportError,
+                  case .unsupportedFile = importError else {
                 return XCTFail("Expected unsupportedFile, got: \(error)")
             }
         }
