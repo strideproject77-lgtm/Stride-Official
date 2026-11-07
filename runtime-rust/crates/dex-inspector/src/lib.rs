@@ -6,7 +6,7 @@ pub mod classes;
 pub enum CodeItemError {
     Truncated, InvalidOffset, InstructionDataOutOfBounds, InvalidTryPadding,
     TryItemsOutOfBounds, InvalidTryRange, InvalidHandlerList, InvalidHandlerOffset,
-    InvalidHandlerAddress,
+    InvalidHandlerAddress, InvalidInstructions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +106,7 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
     let insns_bytes=usize::try_from(insns_size).ok().and_then(|n|n.checked_mul(2)).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let insns_end=insns_start.checked_add(insns_bytes).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let decoded = decode_instructions(&bytes[insns_start..insns_end])
-        .map_err(|_| CodeItemError::InvalidHandlerAddress)?;
+        .map_err(|_| CodeItemError::InvalidInstructions)?;
     let instruction_boundaries: Vec<usize> = decoded.iter()
         .filter(|instruction| instruction.kind == InstructionKind::Opcode)
         .map(|instruction| instruction.code_unit_offset)
@@ -163,12 +163,13 @@ mod code_item_tests {
   let o=0x70;
   b[o+6..o+8].copy_from_slice(&1u16.to_le_bytes());
   b[o+12..o+16].copy_from_slice(&2u32.to_le_bytes());
+  b[o+16..o+18].copy_from_slice(&0x0013u16.to_le_bytes()); // const/16 occupies both code units
   let tr=o+16+4;
   b[tr..tr+4].copy_from_slice(&0u32.to_le_bytes());
-  b[tr+4..tr+6].copy_from_slice(&1u16.to_le_bytes());
+  b[tr+4..tr+6].copy_from_slice(&2u16.to_le_bytes());
   b[tr+6..tr+8].copy_from_slice(&1u16.to_le_bytes());
-  // Handler list: one handler, one typed catch (type 0 -> address 1).
-  b[tr+8..tr+12].copy_from_slice(&[1,1,0,1]);
+  // Handler list: one handler, one typed catch (type 0 -> address 0).
+  b[tr+8..tr+12].copy_from_slice(&[1,1,0,0]);
   assert!(read_code_item(&b,0x70).is_ok());
 
   let mut bad_range=b.clone();
@@ -455,7 +456,7 @@ mod decoder_tests {
  }
  #[test] fn validates_wide_register_pairs(){
   // move-wide v0, v1 is valid in a two-register frame.
-  assert_eq!(validate_register_operands(&words(&[0x1004,0x000e]),2),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x1004,0x000e]),4),Ok(()));
   // The destination pair v1/v2 exceeds the frame.
   assert_eq!(validate_register_operands(&words(&[0x1104,0x000e]),2),Err(DecodeError::InvalidRegister));
   // move-result-wide requires two destination registers.
