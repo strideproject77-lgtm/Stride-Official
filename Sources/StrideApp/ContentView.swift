@@ -65,10 +65,10 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("STRIDE")
                     .font(.system(size: 19, weight: .black, design: .rounded))
-                    .tracking(2.4)
+                    .kerning(2.4)
                 Text("ANDROID COMPATIBILITY")
                     .font(.system(size: 8, weight: .bold))
-                    .tracking(1.4)
+                    .kerning(1.4)
                     .foregroundStyle(muted)
             }
             Spacer()
@@ -100,13 +100,13 @@ struct ContentView: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text("RECENT PACKAGES")
                         .font(.system(size: 11, weight: .bold))
-                        .tracking(1.4)
+                        .kerning(1.4)
                         .foregroundStyle(muted)
                     Spacer()
                     if !library.packages.isEmpty {
                         Button("VIEW ALL") { selectedTab = 1 }
                             .font(.system(size: 10, weight: .bold))
-                            .tracking(1)
+                            .kerning(1)
                             .foregroundStyle(accent)
                             .buttonStyle(.plain)
                     }
@@ -157,12 +157,12 @@ struct ContentView: View {
                     Circle().fill(accent).frame(width: 6, height: 6)
                     Text("PACKAGE ANALYSIS")
                         .font(.system(size: 10, weight: .bold))
-                        .tracking(1.6)
+                        .kerning(1.6)
                         .foregroundStyle(accent)
                 }
                 Text("Know what’s\ninside every APK.")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .tracking(-0.7)
+                    .kerning(-0.7)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("Inspect package structure now. Build toward native Android compatibility, one verified layer at a time.")
                     .font(.subheadline)
@@ -207,7 +207,7 @@ struct ContentView: View {
                     .monospacedDigit()
                 Text(title)
                     .font(.system(size: 8, weight: .bold))
-                    .tracking(0.8)
+                    .kerning(0.8)
                     .foregroundStyle(muted)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -295,7 +295,7 @@ struct ContentView: View {
             Spacer(minLength: 6)
             Text(state)
                 .font(.system(size: 8, weight: .heavy))
-                .tracking(0.5)
+                .kerning(0.5)
                 .foregroundStyle(color)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 6)
@@ -413,7 +413,7 @@ private struct APKRow: View {
                     .lineLimit(1)
                 Text("ARCHIVE INSPECTED")
                     .font(.system(size: 8, weight: .bold))
-                    .tracking(0.8)
+                    .kerning(0.8)
                     .foregroundStyle(accent.opacity(0.9))
             }
             Spacer(minLength: 4)
@@ -443,7 +443,7 @@ private struct APKDetailSheet: View {
             HStack {
                 Text("PACKAGE DETAILS")
                     .font(.system(size: 10, weight: .bold))
-                    .tracking(1.5)
+                    .kerning(1.5)
                     .foregroundStyle(muted)
                 Spacer()
                 Button { dismiss() } label: {
@@ -493,7 +493,7 @@ private struct APKDetailSheet: View {
                     VStack(alignment: .leading, spacing: 11) {
                         Text("NATIVE ARCHITECTURES")
                             .font(.system(size: 9, weight: .bold))
-                            .tracking(1.2)
+                            .kerning(1.2)
                             .foregroundStyle(muted)
                         if item.inspection.nativeABIs.isEmpty {
                             Text("No native libraries detected")
