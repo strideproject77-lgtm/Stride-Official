@@ -35,7 +35,7 @@ jobs:
     if: github.event_name != 'pull_request'
     needs: rust-tests
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -51,12 +51,28 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Install iOS Simulator runtime
+        run: xcodebuild -downloadPlatform iOS
+
+      - name: Select an available iPhone simulator
+        shell: bash
+        run: |
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/available-simulators.json"
+          SIMULATOR_UDID="$(python3 -c 'import json,sys; data=json.load(open(sys.argv[1])); devices=[d for group in data["devices"].values() for d in group if d.get("isAvailable") and d.get("name","").startswith("iPhone")]; print(devices[0]["udid"] if devices else "")' "$RUNNER_TEMP/available-simulators.json")"
+          if [ -z "$SIMULATOR_UDID" ]; then
+            echo "No available iPhone simulator after installing the iOS runtime."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using iPhone simulator: $SIMULATOR_UDID"
+          echo "STRIDE_SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
+
       - name: Run Swift unit tests
         run: |
           xcodebuild test \
             -project Stride.xcodeproj \
             -scheme Stride \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+            -destination "platform=iOS Simulator,id=$STRIDE_SIMULATOR_UDID" \
             -derivedDataPath "$RUNNER_TEMP/StrideTestDerivedData" \
             CODE_SIGNING_ALLOWED=NO
 
