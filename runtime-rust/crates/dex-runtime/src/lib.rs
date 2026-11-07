@@ -311,6 +311,7 @@ pub fn execute_integer_method_with_fields(
 ) -> Result<ExecutionReport, VmError> {
     execute_integer_method_internal(
         code_units, register_count, initial_registers, step_limit, fields,
+        &mut DexObjectStore::default(), &DexVirtualDispatch::default(),
         &HashMap::new(), 0, false,
     )
 }
