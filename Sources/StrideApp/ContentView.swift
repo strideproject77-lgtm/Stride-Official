@@ -104,11 +104,13 @@ struct ContentView: View {
                         .foregroundStyle(muted)
                     Spacer()
                     if !library.packages.isEmpty {
-                        Button("VIEW ALL") { selectedTab = 1 }
-                            .font(.system(size: 10, weight: .bold))
-                            .kerning(1)
-                            .foregroundStyle(accent)
-                            .buttonStyle(.plain)
+                        Button { selectedTab = 1 } label: {
+                            Text("VIEW ALL")
+                                .font(.system(size: 10, weight: .bold))
+                                .kerning(1)
+                                .foregroundStyle(accent)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 if library.packages.isEmpty {
