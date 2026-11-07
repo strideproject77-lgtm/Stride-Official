@@ -18,6 +18,7 @@ pub enum LinkError {
     ClassNotFound(String),
     MethodNotFound { class: String, name: String, prototype: String },
     FieldNotFound { class: String, name: String, field_type: String },
+    UnsupportedFieldType(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +31,13 @@ pub struct ResolvedMethod {
 pub struct ResolvedField {
     pub class: ClassDefinition,
     pub field: FieldDefinition,
+}
+
+impl ResolvedField {
+    /// True only for primitive descriptors represented by the i32 field store.
+    pub fn supports_integer_storage(&self) -> bool {
+        matches!(self.field.field_type.as_str(), "I" | "Z" | "B" | "C" | "S")
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +93,16 @@ impl ClassRegistry {
 
     /// Resolves a field_id against the exact declaring class. Inherited fields and
     /// framework fields intentionally remain unresolved until class-path support exists.
+    pub fn resolve_integer_field_reference(
+        &self, dex_index: usize, field_index: usize,
+    ) -> Result<ResolvedField, LinkError> {
+        let resolved = self.resolve_field_reference(dex_index, field_index)?;
+        if !resolved.supports_integer_storage() {
+            return Err(LinkError::UnsupportedFieldType(resolved.field.field_type.clone()));
+        }
+        Ok(resolved)
+    }
+
     pub fn resolve_field_reference(
         &self, dex_index: usize, field_index: usize,
     ) -> Result<ResolvedField, LinkError> {
@@ -538,6 +556,7 @@ mod tests {
         assert_eq!(instance_field.field.name, "lives");
         assert!(!instance_field.field.is_static);
         assert_eq!(registry.resolve_field_reference(dex, 9), Err(LinkError::InvalidFieldIndex));
+        assert!(registry.resolve_integer_field_reference(dex, 0).unwrap().supports_integer_storage());
         assert_eq!(registry.resolve_declared_field("Lgame/Main;", "score", "J"),
             Err(LinkError::FieldNotFound { class: "Lgame/Main;".into(), name: "score".into(), field_type: "J".into() }));
     }
@@ -552,6 +571,16 @@ mod tests {
         ));
     }
 
+
+    #[test]
+    fn integer_field_store_isolated_by_object_identity() {
+        let mut fields = IntegerFieldStore::default();
+        fields.set_instance(7, 2, 11);
+        fields.set_instance(8, 2, 22);
+        assert_eq!(fields.get_instance(7, 2), Some(11));
+        assert_eq!(fields.get_instance(8, 2), Some(22));
+        assert_eq!(fields.get_instance(9, 2), None);
+    }
 
     #[test]
     fn executes_integer_instance_and_static_field_access() {
