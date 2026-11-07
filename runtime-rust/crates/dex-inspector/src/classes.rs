@@ -481,7 +481,7 @@ mod tests {
         assert_eq!(parameter_word_count("([JLjava/lang/Object;)V"), Ok(2));
         assert_eq!(parameter_word_count("(Q)V"), Err(ClassReadError::InvalidRegisterLayout));
         assert_eq!(validate_register_layout(4, 4, 0x08, "(JD)V"), Ok(()));
-        assert_eq!(validate_register_layout(4, 5, 0, "(JD)V"), Ok(()));
+        assert_eq!(validate_register_layout(5, 5, 0, "(JD)V"), Ok(()));
         assert_eq!(validate_register_layout(4, 4, 0, "(JD)V"), Err(ClassReadError::InvalidRegisterLayout));
     }
 
