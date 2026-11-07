@@ -1,8 +1,105 @@
 //! A deliberately small, bounds-checked Dalvik integer interpreter.
 //!
-//! This is an execution primitive, not ART: it supports a documented subset of
-//! register moves, integer constants, integer arithmetic, branches, and returns.
-//! It does not load APKs, resolve classes, perform JNI, or execute native code.
+//! This is an execution primitive, not ART. It supports a limited integer opcode
+//! subset and a metadata-only class/method registry. It does not provide Android
+//! framework classes, inheritance dispatch, JNI, or native library execution.
+
+use std::collections::{HashMap, HashSet};
+use stride_dex_inspector::{
+    ClassDefinition, ClassInventory, FieldReference, MethodDefinition, MethodReference,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkError {
+    DuplicateClass(String),
+    InvalidDexIndex,
+    InvalidMethodIndex,
+    ClassNotFound(String),
+    MethodNotFound { class: String, name: String, prototype: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMethod {
+    pub class: ClassDefinition,
+    pub method: MethodDefinition,
+}
+
+#[derive(Debug, Clone)]
+struct DexSymbolTables {
+    methods: Vec<MethodReference>,
+    fields: Vec<FieldReference>,
+}
+
+/// Exact-owner metadata registry. Registration is atomic and rejects duplicate
+/// class descriptors; it does not yet implement superclass or virtual dispatch.
+#[derive(Debug, Default)]
+pub struct ClassRegistry {
+    classes: HashMap<String, ClassDefinition>,
+    dex_tables: Vec<DexSymbolTables>,
+}
+
+impl ClassRegistry {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn register_dex(&mut self, inventory: ClassInventory) -> Result<usize, LinkError> {
+        let mut incoming = HashSet::new();
+        for class in &inventory.classes {
+            if self.classes.contains_key(&class.descriptor)
+                || !incoming.insert(class.descriptor.clone()) {
+                return Err(LinkError::DuplicateClass(class.descriptor.clone()));
+            }
+        }
+        let dex_index = self.dex_tables.len();
+        for class in inventory.classes {
+            self.classes.insert(class.descriptor.clone(), class);
+        }
+        self.dex_tables.push(DexSymbolTables {
+            methods: inventory.method_references,
+            fields: inventory.field_references,
+        });
+        Ok(dex_index)
+    }
+
+    pub fn class_count(&self) -> usize { self.classes.len() }
+    pub fn dex_count(&self) -> usize { self.dex_tables.len() }
+
+    pub fn field_reference_count(&self, dex_index: usize) -> Result<usize, LinkError> {
+        self.dex_tables.get(dex_index)
+            .map(|tables| tables.fields.len())
+            .ok_or(LinkError::InvalidDexIndex)
+    }
+
+    pub fn resolve_declared_method(
+        &self, class_descriptor: &str, name: &str, prototype: &str,
+    ) -> Result<ResolvedMethod, LinkError> {
+        let class = self.classes.get(class_descriptor)
+            .ok_or_else(|| LinkError::ClassNotFound(class_descriptor.to_owned()))?;
+        let method = class.methods.iter()
+            .find(|method| method.name == name && method.prototype == prototype)
+            .cloned()
+            .ok_or_else(|| LinkError::MethodNotFound {
+                class: class_descriptor.to_owned(),
+                name: name.to_owned(),
+                prototype: prototype.to_owned(),
+            })?;
+        Ok(ResolvedMethod { class: class.clone(), method })
+    }
+
+    /// Resolves one method_id from a registered DEX. Framework/library references
+    /// remain unresolved until their class definitions exist in a boot class path.
+    pub fn resolve_method_reference(
+        &self, dex_index: usize, method_index: usize,
+    ) -> Result<ResolvedMethod, LinkError> {
+        let reference = self.dex_tables.get(dex_index)
+            .ok_or(LinkError::InvalidDexIndex)?
+            .methods.get(method_index)
+            .ok_or(LinkError::InvalidMethodIndex)?;
+        self.resolve_declared_method(
+            &reference.class_descriptor, &reference.name, &reference.prototype,
+        )
+    }
+}
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReturnValue {
@@ -247,6 +344,94 @@ pub fn execute_integer_method(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_inventory() -> ClassInventory {
+        ClassInventory {
+            classes: vec![ClassDefinition {
+                class_index: 0,
+                descriptor: "Lgame/Main;".into(),
+                access_flags: 1,
+                superclass_index: None,
+                static_field_count: 0,
+                instance_field_count: 0,
+                direct_method_count: 1,
+                virtual_method_count: 0,
+                methods: vec![MethodDefinition {
+                    method_index: 0, name: "start".into(), prototype: "()V".into(),
+                    access_flags: 0x0009, code_offset: 0, is_direct: true,
+                }],
+            }],
+            method_references: vec![
+                MethodReference {
+                    method_index: 0, class_descriptor: "Lgame/Main;".into(),
+                    name: "start".into(), prototype: "()V".into(),
+                },
+                MethodReference {
+                    method_index: 1, class_descriptor: "Landroid/app/Activity;".into(),
+                    name: "onCreate".into(), prototype: "(Landroid/os/Bundle;)V".into(),
+                },
+            ],
+            field_references: vec![FieldReference {
+                field_index: 0, class_descriptor: "Lgame/Main;".into(),
+                name: "score".into(), field_type: "I".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn resolves_defined_method_reference_from_registered_dex() {
+        let mut registry = ClassRegistry::new();
+        let dex = registry.register_dex(sample_inventory()).unwrap();
+        let resolved = registry.resolve_method_reference(dex, 0).unwrap();
+        assert_eq!(resolved.class.descriptor, "Lgame/Main;");
+        assert_eq!(resolved.method.name, "start");
+    }
+
+    #[test]
+    fn leaves_framework_reference_unresolved_without_boot_class_path() {
+        let mut registry = ClassRegistry::new();
+        let dex = registry.register_dex(sample_inventory()).unwrap();
+        assert_eq!(
+            registry.resolve_method_reference(dex, 1),
+            Err(LinkError::ClassNotFound("Landroid/app/Activity;".into()))
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_class_registration_atomically() {
+        let mut registry = ClassRegistry::new();
+        registry.register_dex(sample_inventory()).unwrap();
+        assert_eq!(
+            registry.register_dex(sample_inventory()),
+            Err(LinkError::DuplicateClass("Lgame/Main;".into()))
+        );
+        assert_eq!(registry.dex_count(), 1);
+        assert_eq!(registry.class_count(), 1);
+    }
+
+    #[test]
+    fn reports_missing_method_and_invalid_symbol_indices() {
+        let mut registry = ClassRegistry::new();
+        let dex = registry.register_dex(sample_inventory()).unwrap();
+        assert!(matches!(
+            registry.resolve_declared_method("Lgame/Main;", "missing", "()V"),
+            Err(LinkError::MethodNotFound { .. })
+        ));
+        assert_eq!(registry.resolve_method_reference(dex, 99), Err(LinkError::InvalidMethodIndex));
+        assert_eq!(registry.resolve_method_reference(99, 0), Err(LinkError::InvalidDexIndex));
+        assert_eq!(registry.field_reference_count(dex), Ok(1));
+    }
+
+    #[test]
+    fn requires_exact_method_prototype() {
+        let mut registry = ClassRegistry::new();
+        registry.register_dex(sample_inventory()).unwrap();
+        assert!(matches!(
+            registry.resolve_declared_method("Lgame/Main;", "start", "(I)V"),
+            Err(LinkError::MethodNotFound { .. })
+        ));
+    }
+
 
     #[test]
     fn executes_constant_add_and_return() {
