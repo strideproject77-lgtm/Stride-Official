@@ -331,8 +331,10 @@ fn class_data(
                 return Err(ClassReadError::InvalidMethodKind);
             }
             if code != 0 {
-                let body = read_code_item(b, code)
-                    .map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
+                let body = read_code_item(b, code).map_err(|error| match error {
+                    CodeItemError::InvalidInstructions => ClassReadError::InvalidInstructions,
+                    _ => ClassReadError::InvalidCodeItem,
+                })?;
                 validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)?;
                 super::decode_instructions(body.instructions)
                     .map_err(|_| ClassReadError::InvalidInstructions)?;
