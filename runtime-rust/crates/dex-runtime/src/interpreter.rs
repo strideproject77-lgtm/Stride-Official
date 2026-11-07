@@ -972,25 +972,27 @@ mod tests {
         let mut jni = JniNativeRegistry::new();
         let mut methods = HashMap::new();
 
-        // PC 0: const/4 v0, 2 (0x2012)
-        // PC 1: packed-switch v0, +4 (0x002b, 0x0004, 0x0000) -> jumps to PC 1+4 = 5
-        // PC 4: return v0 (0x000f) - default
-        // PC 5: payload: ident 0x0100, size 3, first_key 1 (0x0001, 0x0000), targets: +3 (to PC 4+3=7), +4 (to PC 4+4=8), +5
-        // PC 15: const/4 v0, 42; return v0
+        // PC 0: const/4 v0, 2
+        // PC 1: packed-switch v0, +4 -> payload at PC 5
+        // PC 4: default return
+        // PC 5..14: packed-switch payload (three keys: 1, 2, 3)
+        // Case targets are executable instructions after the payload.
         let code = vec![
-            0x2012, // const/4 v0, 2
-            0x002b, 0x0004, 0x0000, // packed-switch v0, +4 (offset from PC 1 is 4 -> PC 5)
-            0x000f, // return v0 (if fallthrough)
-            // Payload at PC 5:
-            0x0100, // ident
-            0x0003, // size = 3 (keys: 1, 2, 3)
-            0x0001, 0x0000, // first_key = 1
-            0x0007, 0x0000, // target for key 1: PC 1+7 = 8
-            0x000a, 0x0000, // target for key 2: PC 1+10 = 11
-            0x000d, 0x0000, // target for key 3: PC 1+13 = 14
-            // PC 11:
-            0x0013, 999, // const/16 v0, 999
-            0x000f, // return v0
+            0x2012, // PC 0: const/4 v0, 2
+            0x002b, 0x0004, 0x0000, // PC 1: packed-switch v0, +4
+            0x000f, // PC 4: return v0 (default)
+            0x0100, // PC 5: packed-switch payload ident
+            0x0003, // PC 6: size = 3
+            0x0001, 0x0000, // PC 7..8: first_key = 1
+            0x000e, 0x0000, // PC 9..10: key 1 -> PC 15
+            0x0011, 0x0000, // PC 11..12: key 2 -> PC 18
+            0x0014, 0x0000, // PC 13..14: key 3 -> PC 21
+            0x0013, 111, // PC 15..16: const/16 v0, 111
+            0x000f, // PC 17: return v0
+            0x0013, 999, // PC 18..19: const/16 v0, 999
+            0x000f, // PC 20: return v0
+            0x0013, 333, // PC 21..22: const/16 v0, 333
+            0x000f, // PC 23: return v0
         ];
 
         methods.insert(
