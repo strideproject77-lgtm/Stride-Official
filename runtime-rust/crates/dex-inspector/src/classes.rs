@@ -272,6 +272,8 @@ fn class_data(
                 validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)?;
                 super::decode_instructions(body.instructions)
                     .map_err(|_| ClassReadError::InvalidInstructions)?;
+                super::validate_register_operands(body.instructions, body.registers_size)
+                    .map_err(|_| ClassReadError::InvalidInstructions)?;
             }
             found.push(MethodDefinition {
                 method_index: idx, name, prototype, access_flags: flags, code_offset: code, is_direct
