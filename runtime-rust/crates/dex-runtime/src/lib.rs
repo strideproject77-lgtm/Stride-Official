@@ -159,12 +159,13 @@ pub enum VmError {
     InvalidBranchTarget,
     DivisionByZero,
     StepLimitExceeded,
+    NullObjectReference,
 }
 
 fn width(op: u8) -> Option<usize> {
     match op {
         0x00 | 0x01 | 0x0e | 0x0f | 0x12 | 0x28 | 0xb0..=0xb4 => Some(1),
-        0x02 | 0x13 | 0x15 | 0x29 | 0x32..=0x3d | 0x90..=0x94 => Some(2),
+        0x02 | 0x13 | 0x15 | 0x29 | 0x32..=0x3d | 0x52 | 0x59 | 0x60 | 0x67 | 0x90..=0x94 => Some(2),
         0x03 | 0x14 | 0x2a => Some(3),
         _ => None,
     }
@@ -194,15 +195,45 @@ fn branch_target(
     Ok(target as usize)
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct IntegerFieldStore {
+    static_values: HashMap<u16, i32>,
+    instance_values: HashMap<(i32, u16), i32>,
+}
+
+impl IntegerFieldStore {
+    pub fn get_static(&self, field_index: u16) -> Option<i32> {
+        self.static_values.get(&field_index).copied()
+    }
+    pub fn set_static(&mut self, field_index: u16, value: i32) {
+        self.static_values.insert(field_index, value);
+    }
+    pub fn get_instance(&self, object_id: i32, field_index: u16) -> Option<i32> {
+        self.instance_values.get(&(object_id, field_index)).copied()
+    }
+    pub fn set_instance(&mut self, object_id: i32, field_index: u16, value: i32) {
+        self.instance_values.insert((object_id, field_index), value);
+    }
+}
+
 /// Executes one already-selected DEX method body represented as little-endian code units.
 ///
 /// `initial_registers` fills the lowest-numbered registers. All remaining registers start
 /// at zero. The caller is responsible for selecting a method and preparing its arguments.
 pub fn execute_integer_method(
+    code_units: &[u16], register_count: usize, initial_registers: &[i32], step_limit: usize,
+) -> Result<ExecutionReport, VmError> {
+    execute_integer_method_with_fields(code_units, register_count, initial_registers, step_limit, &mut IntegerFieldStore::default())
+}
+
+/// Executes the supported integer subset with explicit static and instance field storage.
+/// Field indices are DEX field_id indices; callers must resolve and type-check them first.
+pub fn execute_integer_method_with_fields(
     code_units: &[u16],
     register_count: usize,
     initial_registers: &[i32],
     step_limit: usize,
+    fields: &mut IntegerFieldStore,
 ) -> Result<ExecutionReport, VmError> {
     if code_units.is_empty() {
         return Err(VmError::EmptyMethod);
@@ -331,6 +362,33 @@ pub fn execute_integer_method(
                     _ => value <= 0,
                 };
                 pc = if take { branch_target(pc, delta, &boundaries)? } else { pc + 2 };
+            }
+            0x52 => { // iget vA, vB, field@CCCC (integer-like fields only)
+                let object = register(&registers, b4)?;
+                if object == 0 { return Err(VmError::NullObjectReference); }
+                let field = code_units[pc + 1];
+                let value = fields.get_instance(object, field).unwrap_or(0);
+                write_register(&mut registers, a4, value)?;
+                pc += 2;
+            }
+            0x59 => { // iput vA, vB, field@CCCC (integer-like fields only)
+                let object = register(&registers, b4)?;
+                if object == 0 { return Err(VmError::NullObjectReference); }
+                let field = code_units[pc + 1];
+                let value = register(&registers, a4)?;
+                fields.set_instance(object, field, value);
+                pc += 2;
+            }
+            0x60 => { // sget vAA, field@BBBB (integer-like fields only)
+                let field = code_units[pc + 1];
+                let value = fields.get_static(field).unwrap_or(0);
+                write_register(&mut registers, a8, value)?;
+                pc += 2;
+            }
+            0x67 => { // sput vAA, field@BBBB (integer-like fields only)
+                let field = code_units[pc + 1];
+                fields.set_static(field, register(&registers, a8)?);
+                pc += 2;
             }
             0x90..=0x94 => { // add/sub/mul/div/rem-int vAA, vBB, vCC
                 let second = code_units[pc + 1];
@@ -494,6 +552,29 @@ mod tests {
         ));
     }
 
+
+    #[test]
+    fn executes_integer_instance_and_static_field_access() {
+        let mut store = IntegerFieldStore::default();
+        // v0 = object id 7; v1 = 42; iput v1,v0,field@3; iget v2,v0,field@3; return v2
+        let instance = [0x0012, 7, 0x1012, 42, 0x1059, 3, 0x2052, 3, 0x000f];
+        let report = execute_integer_method_with_fields(&instance, 3, &[], 20, &mut store).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(42));
+        assert_eq!(store.get_instance(7, 3), Some(42));
+
+        // v0 = 19; sput v0,field@5; sget v1,field@5; return v1
+        let static_code = [0x0012, 19, 0x0067, 5, 0x0160, 5, 0x000f];
+        let report = execute_integer_method_with_fields(&static_code, 2, &[], 20, &mut store).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(19));
+        assert_eq!(store.get_static(5), Some(19));
+    }
+
+    #[test]
+    fn rejects_null_instance_field_access() {
+        let mut store = IntegerFieldStore::default();
+        assert_eq!(execute_integer_method_with_fields(&[0x0052, 0, 0x000e], 1, &[], 5, &mut store),
+            Err(VmError::NullObjectReference));
+    }
 
     #[test]
     fn executes_constant_add_and_return() {
