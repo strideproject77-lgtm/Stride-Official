@@ -16,7 +16,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
-- 2026-11-07: Added a bounded structural instruction-stream validation step for every non-empty method body discovered during DEX class inventory. A method is now rejected from inventory if its code_item is malformed or its instruction stream contains unknown/truncated encodings or invalid branch/payload targets. Added valid-method and unsupported-opcode fixture tests. This is instruction decoding/structural validation only—not full Dalvik verification, class loading, or execution. Rust tests have not yet been rerun for this change.
+- 2026-11-07: Added bounded structural instruction-stream decoding for each non-empty method and checked the incoming register layout against the method prototype. The register check accounts for the receiver on instance methods, omits it for static methods, and counts `long`/`double` parameters as two register words (array parameters count as one). Added fixtures for invalid incoming-word counts, static methods, wide arguments, malformed descriptors, and unsupported opcodes. This remains partial structural validation—not full Dalvik verification, class loading, or execution. Rust tests have not yet been rerun for these latest edits.
 
 - 2026-11-07 follow-up: Damaged/corrupt DEX entry extraction is now counted as skipped instead of aborting inspection of the whole APK.
 - Added Swift unit coverage with a minimal valid DEX fixture for the Rust FFI class/method counts, plus malformed and empty-buffer rejection cases. These new Swift tests have **not** been executed yet.
@@ -54,10 +54,10 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 ## Known issues
 
-- Latest unverified integration: Swift import calls the Rust DEX inventory FFI and surfaces class/method counts. Validate compilation and bounded extraction before relying on these results.
+- Latest unverified integration: Swift import calls the Rust DEX inventory FFI and surfaces class/method counts. Validate compilation and bounded extraction before relying on these results. Latest Rust changes also add partial method incoming-register layout checks; the new tests are pending.
 
 - The DEX inventory and FFI crate passed Rust CI in runs #38, #43, and #51; device/simulator Rust compilation and Swift linkage passed in run #51.
-- The DEX FFI returns class/method counts and is linked through a Swift wrapper, but APKArchiveInspector does not call it yet. It does not execute code.
+- APKArchiveInspector now calls the DEX FFI during bounded APK import and surfaces class/method counts. The new Swift integration and added Swift fixture tests remain unverified until the next deliberate iOS build/test checkpoint. The FFI inspects metadata; it does not execute code.
 - The UI compiled in the successful iOS 15 physical-device build in run #51, but has not been visually checked in Simulator or on an iPhone.
 - The interpreter supports only a small primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
@@ -106,4 +106,4 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 - Confirm branch feat/dex-class-method-loader and current workflow status.
 - Read the Hill Climb target gate, current 0% status, and workflow policy above.
 - Recent code step: APK import now invokes the Rust DEX inventory FFI with bounded extraction; compilation and behavior remain unverified.
-- Latest implementation: class inventory now decodes and structurally validates each non-empty method instruction stream. Next, expand verification beyond instruction boundaries (register/operand constraints, try/catch and handler validation, method-reference resolution) before designing a real class loader. Review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
+- Latest implementation: class inventory decodes each non-empty method instruction stream and validates incoming register-word layout against its prototype. Next, validate register operands for supported instruction formats, then try/catch and encoded handler structures, followed by method-reference resolution before designing a real class loader. Review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
