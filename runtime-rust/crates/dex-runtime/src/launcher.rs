@@ -14,6 +14,7 @@ use crate::framework::{AndroidEnvironment, ActivityLifecycleState, PackageInfo, 
 use crate::graphics::{Surface, InputQueue, DisplayMetrics};
 use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
+use crate::diagnostics::{RuntimeDiagnostics, DiagnosticSeverity};
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,7 @@ pub struct LaunchReport {
     pub total_classes_loaded: usize,
     pub instructions_executed: usize,
     pub status: LaunchStatus,
+    pub diagnostics_summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -48,6 +50,7 @@ pub struct AndroidRuntime {
     pub display_metrics: DisplayMetrics,
     pub active_activity_obj: Option<u32>,
     pub active_activity_class: Option<String>,
+    pub diagnostics: Arc<RuntimeDiagnostics>,
 }
 
 impl AndroidRuntime {
@@ -68,6 +71,7 @@ impl AndroidRuntime {
             display_metrics: DisplayMetrics::default(),
             active_activity_obj: None,
             active_activity_class: None,
+            diagnostics: Arc::new(RuntimeDiagnostics::new()),
         }
     }
 
@@ -175,6 +179,7 @@ impl AndroidRuntime {
                     total_classes_loaded: self.class_loader.classes.len(),
                     instructions_executed: 0,
                     status: LaunchStatus::ManifestError(format!("{:?}", e)),
+                    diagnostics_summary: self.diagnostics.format_summary(),
                 };
             }
         };
@@ -213,6 +218,7 @@ impl AndroidRuntime {
                     total_classes_loaded: self.class_loader.classes.len(),
                     instructions_executed: 0,
                     status: LaunchStatus::ActivityNotFound("No launcher activity declared in AndroidManifest.xml".into()),
+                    diagnostics_summary: self.diagnostics.format_summary(),
                 };
             }
         };
@@ -282,6 +288,7 @@ impl AndroidRuntime {
                                 class: ex.class_descriptor,
                                 message: ex.message,
                             },
+                            diagnostics_summary: self.diagnostics.format_summary(),
                         };
                     }
                 }
@@ -319,6 +326,7 @@ impl AndroidRuntime {
             total_classes_loaded: self.class_loader.classes.len(),
             instructions_executed: total_steps,
             status: LaunchStatus::Running,
+            diagnostics_summary: self.diagnostics.format_summary(),
         }
     }
 }

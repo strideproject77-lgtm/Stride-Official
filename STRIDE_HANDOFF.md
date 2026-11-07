@@ -16,6 +16,19 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-07: **Managed Heap String Interning, JNI Native Extensions & Runtime Diagnostics**:
+  - **Managed Heap (`heap.rs`)**: Added string interning (`intern_string`), string concatenation (`concat_strings`), substring extraction, length calculation, `array_copy` slice transfers, byte array allocation/extraction (`allocate_byte_array`, `get_byte_array`), and identity hash code generation to `ManagedHeap`. Added tests for interning and array copy.
+  - **JNI Native Subsystem (`jni.rs`)**: Added local reference frame push/pop (`push_local_frame`, `pop_local_frame`), field access helpers, byte array manipulation, mangled symbol lookup (`Java_pkg_Class_method`), and standard built-ins (`java.lang.Math` min/max/abs/sqrt, `System.arraycopy`, `android.os.SystemClock.uptimeMillis`).
+  - **Runtime Diagnostics (`diagnostics.rs`)**: Built `RuntimeDiagnostics` aggregator tracking missing APIs, unlinked classes, unresolved methods, warnings, and fatal errors with severity levels and summary telemetry.
+  - **Telemetry & UI Integration**: Connected `missing_apis_count` from `AndroidRuntime` through C FFI (`stride_dex_ffi.h`, `lib.rs`) to `ExecutionBackend.swift` and displayed live missing API counts in the iOS app UI (`ContentView.swift`).
+
+- 2026-11-07: **Expanded Dalvik Opcode Coverage in ArtVm (`interpreter.rs`)**:
+  - Implemented 2-addr arithmetic (`0xb0..=0xcf` for int, long, float, double).
+  - Implemented 3-register float and double binary arithmetic (`0xa6..=0xaf`).
+  - Implemented unary operations (`neg-long`, `not-long`, `neg-float`, `neg-double`) and full conversions (`long-to-int/float/double`, `float-to-int/long/double`, `double-to-int/long/float`).
+  - Implemented `filled-new-array` (0x24), `filled-new-array/range` (0x25), and `fill-array-data` (0x26).
+  - Added unit tests for 2-addr arithmetic and filled array execution. Commit `45becac` pushed to `feat/dex-class-method-loader`.
+
 - 2026-11-07: **Major ART-Compatible Managed Runtime & Execution Pipeline Integration**:
   - **Blocker Resolution**: Fixed E0502 Rust borrow-checker conflict in `interpreter.rs` by extracting method metadata upfront, decoupling `self.methods` queries from the recursive execution frame and `JniEnv` creation.
   - **Exception Unwinding & Stack Traces**: Connected recursive method calls and `athrow` with try/catch handler search and frame recording in `RuntimeStackTrace`.

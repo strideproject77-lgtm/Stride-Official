@@ -28,6 +28,7 @@ pub struct StrideLaunchReport {
     pub instructions_executed: u32,
     /// 0: not started, 1: created, 2: started, 3: resumed, 4: paused, 5: stopped, 6: destroyed
     pub lifecycle_state: i32,
+    pub missing_apis_count: u32,
 }
 
 /// Inspect one DEX buffer and return the total class and encoded method counts.
@@ -141,11 +142,14 @@ pub unsafe extern "C" fn stride_runtime_launch_apk(
         ActivityLifecycleState::Destroyed => 6,
     };
 
+    let missing_apis_count = rt.diagnostics.count_by_severity(stride_dex_runtime::DiagnosticSeverity::MissingApi) as u32;
+
     let summary = StrideLaunchReport {
         status_code,
         total_classes_loaded: report.total_classes_loaded as u32,
         instructions_executed: report.instructions_executed as u32,
         lifecycle_state,
+        missing_apis_count,
     };
 
     unsafe { out_report.write(summary) };

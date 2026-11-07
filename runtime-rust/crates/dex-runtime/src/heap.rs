@@ -80,6 +80,7 @@ pub struct ManagedHeap {
     max_heap_bytes: usize,
     gc_runs: usize,
     total_reclaimed_bytes: usize,
+    interned_strings: HashMap<String, u32>,
 }
 
 impl Default for ManagedHeap {
@@ -97,6 +98,7 @@ impl ManagedHeap {
             max_heap_bytes,
             gc_runs: 0,
             total_reclaimed_bytes: 0,
+            interned_strings: HashMap::new(),
         }
     }
 
@@ -297,6 +299,103 @@ impl ManagedHeap {
         }
     }
 
+    pub fn intern_string(&mut self, content: &str) -> Result<u32, HeapError> {
+        if let Some(&existing_id) = self.interned_strings.get(content) {
+            if self.objects.contains_key(&existing_id) {
+                return Ok(existing_id);
+            }
+        }
+        let id = self.allocate_string(content)?;
+        self.interned_strings.insert(content.to_owned(), id);
+        Ok(id)
+    }
+
+    pub fn string_length(&self, string_id: u32) -> Result<usize, HeapError> {
+        let text = self.get_string(string_id)?;
+        Ok(text.chars().count())
+    }
+
+    pub fn concat_strings(&mut self, id1: u32, id2: u32) -> Result<u32, HeapError> {
+        let s1 = self.get_string(id1)?.to_owned();
+        let s2 = self.get_string(id2)?.to_owned();
+        let combined = format!("{}{}", s1, s2);
+        self.allocate_string(&combined)
+    }
+
+    pub fn substring(&mut self, string_id: u32, start: usize, end: usize) -> Result<u32, HeapError> {
+        let text = self.get_string(string_id)?.to_owned();
+        let chars: Vec<char> = text.chars().collect();
+        if start > chars.len() || end > chars.len() || start > end {
+            return Err(HeapError::ArrayIndexOutOfBounds {
+                index: start as i32,
+                length: chars.len(),
+            });
+        }
+        let sub: String = chars[start..end].iter().collect();
+        self.allocate_string(&sub)
+    }
+
+    pub fn array_copy(
+        &mut self,
+        src_id: u32,
+        src_pos: i32,
+        dst_id: u32,
+        dst_pos: i32,
+        length: i32,
+    ) -> Result<(), HeapError> {
+        if length < 0 {
+            return Err(HeapError::NegativeArraySize(length));
+        }
+        if length == 0 {
+            return Ok(());
+        }
+        let src_len = self.array_length(src_id)?;
+        let dst_len = self.array_length(dst_id)?;
+        if src_pos < 0 || (src_pos as usize) + (length as usize) > src_len {
+            return Err(HeapError::ArrayIndexOutOfBounds { index: src_pos, length: src_len });
+        }
+        if dst_pos < 0 || (dst_pos as usize) + (length as usize) > dst_len {
+            return Err(HeapError::ArrayIndexOutOfBounds { index: dst_pos, length: dst_len });
+        }
+
+        let mut copied_vals = Vec::with_capacity(length as usize);
+        for i in 0..length {
+            let v = self.get_array_element(src_id, src_pos + i)?;
+            copied_vals.push(v);
+        }
+        for (i, v) in copied_vals.into_iter().enumerate() {
+            self.set_array_element(dst_id, dst_pos + i as i32, v)?;
+        }
+        Ok(())
+    }
+
+    pub fn allocate_byte_array(&mut self, bytes: &[u8]) -> Result<u32, HeapError> {
+        let id = self.allocate_array("[B", bytes.len() as i32)?;
+        for (i, &b) in bytes.iter().enumerate() {
+            self.set_array_element(id, i as i32, Value::Int(b as i8 as i32))?;
+        }
+        Ok(id)
+    }
+
+    pub fn get_byte_array(&self, array_id: u32) -> Result<Vec<u8>, HeapError> {
+        let len = self.array_length(array_id)?;
+        let mut out = Vec::with_capacity(len);
+        for i in 0..len {
+            let v = self.get_array_element(array_id, i as i32)?;
+            out.push(v.as_int() as u8);
+        }
+        Ok(out)
+    }
+
+    pub fn identity_hash_code(&self, id: u32) -> i32 {
+        if id == 0 {
+            return 0;
+        }
+        let mut h = id.wrapping_mul(0x9e3779b9);
+        h ^= h >> 16;
+        h as i32
+    }
+
     // --- Real Mark-Sweep Garbage Collection ---
 
     pub fn collect_garbage(&mut self, roots: &[u32]) -> GcReport {
@@ -397,5 +496,26 @@ mod tests {
             heap.get_array_element(arr, 5),
             Err(HeapError::ArrayIndexOutOfBounds { .. })
         ));
+    }
+
+    #[test]
+    fn heap_string_interning_and_array_copy() {
+        let mut heap = ManagedHeap::new(1024 * 1024);
+        let id1 = heap.intern_string("hello").unwrap();
+        let id2 = heap.intern_string("hello").unwrap();
+        assert_eq!(id1, id2); // Same interned string handle
+
+        let id3 = heap.intern_string(" world").unwrap();
+        let cat = heap.concat_strings(id1, id3).unwrap();
+        assert_eq!(heap.get_string(cat).unwrap(), "hello world");
+        assert_eq!(heap.string_length(cat).unwrap(), 11);
+
+        let src = heap.allocate_byte_array(&[1, 2, 3, 4, 5]).unwrap();
+        let dst = heap.allocate_array("[B", 5).unwrap();
+        heap.array_copy(src, 1, dst, 0, 3).unwrap();
+        assert_eq!(heap.get_array_element(dst, 0).unwrap(), Value::Int(2));
+        assert_eq!(heap.get_array_element(dst, 1).unwrap(), Value::Int(3));
+        assert_eq!(heap.get_array_element(dst, 2).unwrap(), Value::Int(4));
+        assert_eq!(heap.get_array_element(dst, 3).unwrap(), Value::Int(0));
     }
 }

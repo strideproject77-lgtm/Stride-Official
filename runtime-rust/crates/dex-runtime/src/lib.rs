@@ -15,6 +15,7 @@ pub mod interpreter;
 pub mod loader;
 pub mod graphics;
 pub mod launcher;
+pub mod diagnostics;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -33,6 +34,7 @@ pub use graphics::{
     ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL, KEYCODE_BACK,
 };
 pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
+pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{

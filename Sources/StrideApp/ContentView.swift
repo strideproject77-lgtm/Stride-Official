@@ -561,7 +561,7 @@ private struct APKDetailSheet: View {
                             Text("Status: \(res.statusCode == 0 ? "Running" : "Finished") · Lifecycle: \(res.lifecycleState)")
                                 .font(.footnote)
                                 .foregroundStyle(muted)
-                            Text("Classes Loaded: \(res.totalClassesLoaded) · Instructions Executed: \(res.instructionsExecuted)")
+                            Text("Classes Loaded: \(res.totalClassesLoaded) · Instructions: \(res.instructionsExecuted) · Missing APIs: \(res.missingApisCount)")
                                 .font(.footnote)
                                 .foregroundStyle(muted)
                         }

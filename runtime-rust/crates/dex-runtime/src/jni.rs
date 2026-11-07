@@ -18,6 +18,7 @@ pub struct NativeMethodKey {
 pub struct JniEnv<'a> {
     pub heap: &'a mut ManagedHeap,
     pub local_refs: Vec<u32>,
+    pub local_frames: Vec<usize>,
 }
 
 impl<'a> JniEnv<'a> {
@@ -25,6 +26,17 @@ impl<'a> JniEnv<'a> {
         Self {
             heap,
             local_refs: Vec::new(),
+            local_frames: Vec::new(),
+        }
+    }
+
+    pub fn push_local_frame(&mut self, _capacity: usize) {
+        self.local_frames.push(self.local_refs.len());
+    }
+
+    pub fn pop_local_frame(&mut self) {
+        if let Some(prev_len) = self.local_frames.pop() {
+            self.local_refs.truncate(prev_len);
         }
     }
 
@@ -57,12 +69,39 @@ impl<'a> JniEnv<'a> {
         }
         Ok(out)
     }
+
+    pub fn new_byte_array(&mut self, length: i32) -> Result<u32, String> {
+        let id = self.heap.allocate_array("[B", length).map_err(|e| format!("{:?}", e))?;
+        self.local_refs.push(id);
+        Ok(id)
+    }
+
+    pub fn get_byte_array_elements(&self, array_id: u32) -> Result<Vec<u8>, String> {
+        self.heap.get_byte_array(array_id).map_err(|e| format!("{:?}", e))
+    }
+
+    pub fn set_byte_array_region(&mut self, array_id: u32, start: i32, bytes: &[u8]) -> Result<(), String> {
+        for (i, &b) in bytes.iter().enumerate() {
+            self.heap.set_array_element(array_id, start + i as i32, Value::Int(b as i8 as i32))
+                .map_err(|e| format!("{:?}", e))?;
+        }
+        Ok(())
+    }
+
+    pub fn get_object_field(&self, obj_id: u32, field_name: &str) -> Result<Value, String> {
+        self.heap.get_instance_field(obj_id, field_name).map_err(|e| format!("{:?}", e))
+    }
+
+    pub fn set_object_field(&mut self, obj_id: u32, field_name: &str, val: Value) -> Result<(), String> {
+        self.heap.set_instance_field(obj_id, field_name, val).map_err(|e| format!("{:?}", e))
+    }
 }
 
 /// JNI native method registry for binding native library symbols to DEX method declarations.
 #[derive(Default, Clone)]
 pub struct JniNativeRegistry {
     methods: HashMap<NativeMethodKey, NativeHandler>,
+    mangled_symbols: HashMap<String, NativeHandler>,
 }
 
 impl JniNativeRegistry {
@@ -95,12 +134,30 @@ impl JniNativeRegistry {
         );
     }
 
+    /// Registers a native function under its C-mangled symbol name (e.g., `Java_com_example_App_init`).
+    pub fn register_symbol<F>(&mut self, mangled_name: &str, handler: F)
+    where
+        F: for<'env, 'heap> Fn(&'env mut JniEnv<'heap>, &[Value]) -> Result<Option<Value>, String>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.mangled_symbols.insert(mangled_name.to_owned(), Arc::new(handler));
+    }
+
     pub fn find(&self, class: &str, name: &str, prototype: &str) -> Option<&NativeHandler> {
-        self.methods.get(&NativeMethodKey {
+        if let Some(h) = self.methods.get(&NativeMethodKey {
             class_descriptor: class.to_owned(),
             name: name.to_owned(),
             prototype: prototype.to_owned(),
-        })
+        }) {
+            return Some(h);
+        }
+
+        // Check fallback mangled symbol: Java_package_Class_method
+        let clean_class = class.trim_start_matches('L').trim_end_matches(';').replace('/', "_");
+        let mangled = format!("Java_{}_{}", clean_class, name);
+        self.mangled_symbols.get(&mangled)
     }
 
     fn register_builtins(&mut self) {
@@ -118,18 +175,88 @@ impl JniNativeRegistry {
             },
         );
 
-        // android.util.Log.i(String, String)I
+        // java.lang.System.nanoTime()J
         self.register(
-            "Landroid/util/Log;",
-            "i",
-            "(Ljava/lang/String;Ljava/lang/String;)I",
+            "Ljava/lang/System;",
+            "nanoTime",
+            "()J",
             |_env, _args| {
-                Ok(Some(Value::Int(1)))
+                let nanos = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as i64)
+                    .unwrap_or(0);
+                Ok(Some(Value::Long(nanos)))
             },
         );
+
+        // java.lang.System.arraycopy(Ljava/lang/Object;ILjava/lang/Object;II)V
+        self.register(
+            "Ljava/lang/System;",
+            "arraycopy",
+            "(Ljava/lang/Object;ILjava/lang/Object;II)V",
+            |env, args| {
+                if args.len() < 5 {
+                    return Err("arraycopy requires 5 arguments".into());
+                }
+                let src_id = args[0].as_object().ok_or("null src array")?;
+                let src_pos = args[1].as_int();
+                let dst_id = args[2].as_object().ok_or("null dst array")?;
+                let dst_pos = args[3].as_int();
+                let length = args[4].as_int();
+
+                env.heap.array_copy(src_id, src_pos, dst_id, dst_pos, length)
+                    .map_err(|e| format!("{:?}", e))?;
+                Ok(None)
+            },
+        );
+
+        // android.os.SystemClock.uptimeMillis()J
+        self.register(
+            "Landroid/os/SystemClock;",
+            "uptimeMillis",
+            "()J",
+            |_env, _args| {
+                let ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                Ok(Some(Value::Long(ms)))
+            },
+        );
+
+        // android.util.Log logging bridges
+        let log_fn = |_env: &mut JniEnv, _args: &[Value]| Ok(Some(Value::Int(1)));
+        self.register("Landroid/util/Log;", "i", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
+        self.register("Landroid/util/Log;", "d", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
+        self.register("Landroid/util/Log;", "e", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
+        self.register("Landroid/util/Log;", "w", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
+        self.register("Landroid/util/Log;", "v", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
+
+        // java.lang.Math standard operations
+        self.register("Ljava/lang/Math;", "abs", "(I)I", |_env, args| {
+            let v = args.first().map(|v| v.as_int()).unwrap_or(0);
+            Ok(Some(Value::Int(v.abs())))
+        });
+        self.register("Ljava/lang/Math;", "abs", "(J)J", |_env, args| {
+            let v = args.first().map(|v| v.as_long()).unwrap_or(0);
+            Ok(Some(Value::Long(v.abs())))
+        });
+        self.register("Ljava/lang/Math;", "min", "(II)I", |_env, args| {
+            let a = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            let b = args.get(1).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Some(Value::Int(a.min(b))))
+        });
+        self.register("Ljava/lang/Math;", "max", "(II)I", |_env, args| {
+            let a = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            let b = args.get(1).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Some(Value::Int(a.max(b))))
+        });
+        self.register("Ljava/lang/Math;", "sqrt", "(D)D", |_env, args| {
+            let d = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Some(Value::Double(d.sqrt())))
+        });
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -144,5 +271,23 @@ mod tests {
         let handler = reg.find("Ljava/lang/System;", "currentTimeMillis", "()J").unwrap();
         let res = handler(&mut env, &[]).unwrap();
         assert!(matches!(res, Some(Value::Long(ts)) if ts > 0));
+
+        let math_handler = reg.find("Ljava/lang/Math;", "abs", "(I)I").unwrap();
+        let math_res = math_handler(&mut env, &[Value::Int(-42)]).unwrap();
+        assert_eq!(math_res, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn jni_local_frame_management() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+
+        env.push_local_frame(16);
+        let s = env.new_string_utf("temporary").unwrap();
+        assert_eq!(env.local_refs.len(), 1);
+        assert_eq!(env.get_string_utf(s).unwrap(), "temporary");
+
+        env.pop_local_frame();
+        assert_eq!(env.local_refs.len(), 0);
     }
 }

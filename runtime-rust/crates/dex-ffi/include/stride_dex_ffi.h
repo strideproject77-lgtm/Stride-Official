@@ -18,6 +18,7 @@ typedef struct StrideLaunchReport {
     uint32_t total_classes_loaded;
     uint32_t instructions_executed;
     int32_t lifecycle_state;
+    uint32_t missing_apis_count;
 } StrideLaunchReport;
 
 typedef struct AndroidRuntime AndroidRuntime;

@@ -23,6 +23,7 @@ struct APKExecutionResult: Equatable {
     let totalClassesLoaded: UInt32
     let instructionsExecuted: UInt32
     let lifecycleState: String
+    let missingApisCount: UInt32
 }
 
 enum RuntimeExecutionError: LocalizedError {
@@ -152,7 +153,8 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             statusCode: report.status_code,
             totalClassesLoaded: report.total_classes_loaded,
             instructionsExecuted: report.instructions_executed,
-            lifecycleState: lifecycleDescription
+            lifecycleState: lifecycleDescription,
+            missingApisCount: report.missing_apis_count
         )
     }
 }
