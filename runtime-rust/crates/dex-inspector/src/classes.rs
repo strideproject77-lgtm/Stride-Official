@@ -462,6 +462,12 @@ mod tests {
     }
 
     #[test]
+    fn rejects_out_of_range_register_operand_in_defined_method() {
+        let (bytes, _) = sample_with_code(0x1012); // const/4 references v1, but only v0 exists
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
+    }
+
+    #[test]
     fn rejects_incoming_register_count_mismatch() {
         let (mut bytes, code_offset) = sample_with_code(0x000e);
         bytes[code_offset + 2..code_offset + 4].copy_from_slice(&0u16.to_le_bytes());
