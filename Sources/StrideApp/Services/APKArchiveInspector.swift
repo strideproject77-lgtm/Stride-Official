@@ -19,8 +19,125 @@ struct APKInspection: Equatable {
         guard isValidPackage else { return "Invalid APK archive" }
         return "\(dexFileCount) DEX · \(nativeABIs.isEmpty ? "No native libraries" : nativeABIs.joined(separator: ", "))"
     }
+}
 
-    /// Extracts conventional launcher images while preserving their original artwork.
+enum APKInspectionError: LocalizedError {
+    case unreadableArchive
+    case missingManifest
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadableArchive: return "The selected file is not a readable APK archive."
+        case .missingManifest: return "The archive does not contain AndroidManifest.xml."
+        }
+    }
+}
+
+struct APKArchiveInspector {
+    // Bound decompression and FFI input for untrusted APKs.
+    private let maxDEXEntryBytes: UInt64 = 64 * 1_024 * 1_024
+    private let maxTotalDEXBytes: UInt64 = 128 * 1_024 * 1_024
+    private let maxDEXFileCount = 32
+    private let maxIconEntryBytes: UInt64 = 8 * 1_024 * 1_024
+
+    func inspect(_ url: URL) throws -> APKInspection {
+        guard let archive = Archive(url: url, accessMode: .read) else {
+            throw APKInspectionError.unreadableArchive
+        }
+
+        var count = 0
+        var hasManifest = false
+        var dexEntries: [Entry] = []
+        var iconEntries: [Entry] = []
+        var abis = Set<String>()
+        var hasResources = false
+
+        for entry in archive {
+            count += 1
+            if entry.path == "AndroidManifest.xml" { hasManifest = true }
+            if entry.path == "resources.arsc" { hasResources = true }
+            if Self.isLauncherIconCandidate(entry.path) { iconEntries.append(entry) }
+            if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
+                dexEntries.append(entry)
+            }
+            if entry.path.hasPrefix("lib/") {
+                let parts = entry.path.split(separator: "/")
+                if parts.count >= 3, parts.last == "lib" || parts.last?.hasSuffix(".so") == true {
+                    abis.insert(String(parts[1]))
+                }
+            }
+        }
+
+        guard hasManifest else { throw APKInspectionError.missingManifest }
+
+        var analyzedDexCount = 0
+        var skippedDexCount = 0
+        var dexClassCount: UInt64 = 0
+        var dexMethodCount: UInt64 = 0
+        var declaredDEXBytes: UInt64 = 0
+
+        for entry in dexEntries.prefix(maxDEXFileCount) {
+            let declaredSize = UInt64(entry.uncompressedSize)
+            guard declaredSize <= maxDEXEntryBytes,
+                  declaredDEXBytes <= maxTotalDEXBytes,
+                  declaredSize <= maxTotalDEXBytes - declaredDEXBytes else {
+                skippedDexCount += 1
+                continue
+            }
+            declaredDEXBytes += declaredSize
+
+            var dexData = Data()
+            dexData.reserveCapacity(Int(declaredSize))
+            var extractedBytes: UInt64 = 0
+            var exceededLimit = false
+            do {
+                _ = try archive.extract(entry) { chunk in
+                    let (newSize, overflow) = extractedBytes.addingReportingOverflow(UInt64(chunk.count))
+                    guard !overflow, newSize <= maxDEXEntryBytes else {
+                        exceededLimit = true
+                        return
+                    }
+                    dexData.append(chunk)
+                    extractedBytes = newSize
+                }
+            } catch {
+                skippedDexCount += 1
+                continue
+            }
+            guard !exceededLimit else {
+                skippedDexCount += 1
+                continue
+            }
+
+            do {
+                let inventory = try StrideDexInventory.inspect(dexData)
+                analyzedDexCount += 1
+                dexClassCount += UInt64(inventory.classCount)
+                dexMethodCount += UInt64(inventory.methodCount)
+            } catch {
+                skippedDexCount += 1
+            }
+        }
+        skippedDexCount += max(0, dexEntries.count - min(dexEntries.count, maxDEXFileCount))
+
+        let iconData = extractIcon(from: iconEntries, in: archive)
+        return APKInspection(
+            archiveEntryCount: count,
+            hasAndroidManifest: hasManifest,
+            hasDEX: !dexEntries.isEmpty,
+            dexFileCount: dexEntries.count,
+            analyzedDexFileCount: analyzedDexCount,
+            skippedDexFileCount: skippedDexCount,
+            dexClassCount: dexClassCount,
+            dexMethodCount: dexMethodCount,
+            nativeABIs: abis.sorted(),
+            hasResourceTable: hasResources,
+            isValidPackage: true,
+            iconData: iconData
+        )
+    }
+
+    /// Extract conventional launcher images while preserving their original artwork.
     /// Adaptive-icon XML is not rasterized; density-specific image fallbacks are used.
     private func extractIcon(from entries: [Entry], in archive: Archive) -> Data? {
         let candidates = entries
@@ -93,125 +210,5 @@ struct APKInspection: Equatable {
             return true
         }
         return bytes.count >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
-    }
-
-}
-
-enum APKInspectionError: LocalizedError {
-    case unreadableArchive
-    case missingManifest
-
-    var errorDescription: String? {
-        switch self {
-        case .unreadableArchive: return "The selected file is not a readable APK archive."
-        case .missingManifest: return "The archive does not contain AndroidManifest.xml."
-        }
-    }
-}
-
-struct APKArchiveInspector {
-    // Bound decompression and FFI input for untrusted APKs.
-    private let maxDEXEntryBytes: UInt64 = 64 * 1_024 * 1_024
-    private let maxTotalDEXBytes: UInt64 = 128 * 1_024 * 1_024
-    private let maxDEXFileCount = 32
-    private let maxIconEntryBytes: UInt64 = 8 * 1_024 * 1_024
-
-    func inspect(_ url: URL) throws -> APKInspection {
-        guard let archive = Archive(url: url, accessMode: .read) else {
-            throw APKInspectionError.unreadableArchive
-        }
-
-        var count = 0
-        var hasManifest = false
-        var dexEntries: [Entry] = []
-        var abis = Set<String>()
-        var hasResources = false
-        var iconEntries: [Entry] = []
-
-        for entry in archive {
-            count += 1
-            if entry.path == "AndroidManifest.xml" { hasManifest = true }
-            if entry.path == "resources.arsc" { hasResources = true }
-            if Self.isLauncherIconCandidate(entry.path) { iconEntries.append(entry) }
-            if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
-                dexEntries.append(entry)
-            }
-            if entry.path.hasPrefix("lib/") {
-                let parts = entry.path.split(separator: "/")
-                if parts.count >= 3, parts.last == "lib" || parts.last?.hasSuffix(".so") == true {
-                    abis.insert(String(parts[1]))
-                }
-            }
-        }
-
-        guard hasManifest else { throw APKInspectionError.missingManifest }
-
-        var analyzedDexCount = 0
-        var skippedDexCount = 0
-        var dexClassCount: UInt64 = 0
-        var dexMethodCount: UInt64 = 0
-        var declaredDEXBytes: UInt64 = 0
-
-        for entry in dexEntries.prefix(maxDEXFileCount) {
-            let declaredSize = UInt64(entry.uncompressedSize)
-            guard declaredSize <= maxDEXEntryBytes,
-                  declaredDEXBytes <= maxTotalDEXBytes,
-                  declaredSize <= maxTotalDEXBytes - declaredDEXBytes else {
-                skippedDexCount += 1
-                continue
-            }
-            declaredDEXBytes += declaredSize
-
-            var dexData = Data()
-            dexData.reserveCapacity(Int(declaredSize))
-            var extractedBytes: UInt64 = 0
-            var exceededLimit = false
-            do {
-                _ = try archive.extract(entry) { chunk in
-                    let (newSize, overflow) = extractedBytes.addingReportingOverflow(UInt64(chunk.count))
-                    guard !overflow, newSize <= maxDEXEntryBytes else {
-                        exceededLimit = true
-                        return
-                    }
-                    dexData.append(chunk)
-                    extractedBytes = newSize
-                }
-            } catch {
-                // A damaged DEX entry must not make an otherwise readable APK unimportable.
-                skippedDexCount += 1
-                continue
-            }
-            guard !exceededLimit else {
-                skippedDexCount += 1
-                continue
-            }
-
-            do {
-                let inventory = try StrideDexInventory.inspect(dexData)
-                analyzedDexCount += 1
-                dexClassCount += UInt64(inventory.classCount)
-                dexMethodCount += UInt64(inventory.methodCount)
-            } catch {
-                skippedDexCount += 1
-            }
-        }
-        skippedDexCount += max(0, dexEntries.count - min(dexEntries.count, maxDEXFileCount))
-
-        let iconData = extractIcon(from: iconEntries, in: archive)
-
-        return APKInspection(
-            archiveEntryCount: count,
-            hasAndroidManifest: hasManifest,
-            hasDEX: !dexEntries.isEmpty,
-            dexFileCount: dexEntries.count,
-            analyzedDexFileCount: analyzedDexCount,
-            skippedDexFileCount: skippedDexCount,
-            dexClassCount: dexClassCount,
-            dexMethodCount: dexMethodCount,
-            nativeABIs: abis.sorted(),
-            hasResourceTable: hasResources,
-            isValidPackage: true,
-            iconData: iconData
-        )
     }
 }
