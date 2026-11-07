@@ -12,6 +12,9 @@ pub mod exceptions;
 pub mod jni;
 pub mod framework;
 pub mod interpreter;
+pub mod loader;
+pub mod graphics;
+pub mod launcher;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -19,8 +22,17 @@ pub use hierarchy::{ClassHierarchy, RuntimeClass};
 pub use sync::{MonitorTable, SyncError};
 pub use exceptions::{TryBlock, CatchHandler, ThrownException, RuntimeStackTrace, StackFrameInfo};
 pub use jni::{JniNativeRegistry, JniEnv, NativeMethodKey};
-pub use framework::{AndroidEnvironment, SharedPreferences, ActivityLifecycleState};
+pub use framework::{
+    AndroidEnvironment, SharedPreferences, ActivityLifecycleState, Bundle, Intent,
+    PackageInfo, ActivityInfo, ServiceInfo, AssetManager, Resources,
+};
 pub use interpreter::{ArtVm, MethodCode, InterpreterReport, ExecutionStopReason};
+pub use loader::{AppClassLoader, LoadedClass, LoadedMethod, ClassInitState};
+pub use graphics::{
+    Surface, DisplayMetrics, MotionEvent, PointerCoords, KeyEvent, InputQueue, AudioTrack, AudioTrackState,
+    ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL, KEYCODE_BACK,
+};
+pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{

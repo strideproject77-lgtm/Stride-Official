@@ -1,9 +1,14 @@
-//! Small C ABI for passing DEX inventory summaries to Swift.
-//!
-//! This module reports structural metadata only. It does not verify or execute DEX code.
+//! C ABI for passing DEX inventory summaries and ART runtime execution to Swift.
 
+use std::ffi::CStr;
+use std::os::raw::c_char;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::slice;
+
+use stride_dex_runtime::{
+    AndroidRuntime, LaunchReport, LaunchStatus, ActivityLifecycleState,
+    MotionEvent, PointerCoords, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL,
+};
 
 /// Summary returned after a successful DEX metadata scan.
 #[repr(C)]
@@ -13,20 +18,19 @@ pub struct StrideDexSummary {
     pub method_count: u32,
 }
 
+/// Execution report returned from the ART runtime launch pipeline.
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct StrideLaunchReport {
+    /// 0: running, 1: finished normally, 2: uncaught exception, 3: activity not found, 4: manifest error
+    pub status_code: i32,
+    pub total_classes_loaded: u32,
+    pub instructions_executed: u32,
+    /// 0: not started, 1: created, 2: started, 3: resumed, 4: paused, 5: stopped, 6: destroyed
+    pub lifecycle_state: i32,
+}
+
 /// Inspect one DEX buffer and return the total class and encoded method counts.
-///
-/// Return codes:
-/// - 0: success
-/// - 1: null input or output pointer
-/// - 2: input length exceeds Rust's slice limit
-/// - 3: invalid or unsupported DEX
-/// - 4: parser panicked
-/// - 5: total method count overflowed
-///
-/// # Safety
-/// When `len` is nonzero, `data` must point to `len` readable bytes. `out`
-/// must point to an aligned, writable `StrideDexSummary`. Both pointers must
-/// remain valid for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn stride_dex_inventory_counts(
     data: *const u8,
@@ -41,7 +45,6 @@ pub unsafe extern "C" fn stride_dex_inventory_counts(
     }
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        // The caller guarantees that data references len readable bytes.
         let bytes = unsafe { slice::from_raw_parts(data, len) };
         let inventory = stride_dex_inspector::classes::inspect_classes(bytes)
             .map_err(|_| 3i32)?;
@@ -54,7 +57,6 @@ pub unsafe extern "C" fn stride_dex_inventory_counts(
 
     match result {
         Ok(Ok(summary)) => {
-            // The caller guarantees that out points to an aligned writable value.
             unsafe { out.write(summary) };
             0
         }
@@ -66,6 +68,130 @@ pub unsafe extern "C" fn stride_dex_inventory_counts(
             unsafe { out.write(StrideDexSummary::default()) };
             4
         }
+    }
+}
+
+/// Creates a new ART-compatible Android runtime instance.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_create(package_name: *const c_char) -> *mut AndroidRuntime {
+    let pkg = if !package_name.is_null() {
+        unsafe { CStr::from_ptr(package_name).to_str().unwrap_or("unknown") }
+    } else {
+        "unknown"
+    };
+
+    let runtime = Box::new(AndroidRuntime::new(pkg));
+    Box::into_raw(runtime)
+}
+
+/// Loads a DEX binary into an active Android runtime instance.
+/// Returns 0 on success, 1 on null pointer, 2 on invalid DEX.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_load_dex(
+    runtime: *mut AndroidRuntime,
+    data: *const u8,
+    len: usize,
+) -> i32 {
+    if runtime.is_null() || data.is_null() || len == 0 {
+        return 1;
+    }
+
+    let rt = unsafe { &mut *runtime };
+    let bytes = unsafe { slice::from_raw_parts(data, len) };
+
+    match rt.load_dex(bytes) {
+        Ok(_) => 0,
+        Err(_) => 2,
+    }
+}
+
+/// Launches the main Activity from AndroidManifest.xml and executes its lifecycle.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_launch_apk(
+    runtime: *mut AndroidRuntime,
+    manifest_data: *const u8,
+    manifest_len: usize,
+    step_budget: usize,
+    out_report: *mut StrideLaunchReport,
+) -> i32 {
+    if runtime.is_null() || manifest_data.is_null() || manifest_len == 0 || out_report.is_null() {
+        return 1;
+    }
+
+    let rt = unsafe { &mut *runtime };
+    let manifest_bytes = unsafe { slice::from_raw_parts(manifest_data, manifest_len) };
+
+    let report: LaunchReport = rt.launch_application(manifest_bytes, step_budget);
+
+    let status_code = match report.status {
+        LaunchStatus::Running => 0,
+        LaunchStatus::FinishedNormally => 1,
+        LaunchStatus::UncaughtException { .. } => 2,
+        LaunchStatus::ActivityNotFound(_) => 3,
+        LaunchStatus::ManifestError(_) => 4,
+    };
+
+    let lifecycle_state = match report.lifecycle_state {
+        ActivityLifecycleState::NotStarted => 0,
+        ActivityLifecycleState::Created => 1,
+        ActivityLifecycleState::Started => 2,
+        ActivityLifecycleState::Resumed => 3,
+        ActivityLifecycleState::Paused => 4,
+        ActivityLifecycleState::Stopped => 5,
+        ActivityLifecycleState::Destroyed => 6,
+    };
+
+    let summary = StrideLaunchReport {
+        status_code,
+        total_classes_loaded: report.total_classes_loaded as u32,
+        instructions_executed: report.instructions_executed as u32,
+        lifecycle_state,
+    };
+
+    unsafe { out_report.write(summary) };
+    0
+}
+
+/// Dispatches a touch event to the active runtime input queue.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_dispatch_touch(
+    runtime: *mut AndroidRuntime,
+    action: i32,
+    x: f32,
+    y: f32,
+) -> i32 {
+    if runtime.is_null() {
+        return 1;
+    }
+
+    let rt = unsafe { &*runtime };
+    let motion_action = match action {
+        0 => ACTION_DOWN,
+        1 => ACTION_UP,
+        2 => ACTION_MOVE,
+        _ => ACTION_CANCEL,
+    };
+
+    let event = MotionEvent {
+        action: motion_action,
+        event_time_ms: 0,
+        pointers: vec![PointerCoords {
+            id: 0,
+            x,
+            y,
+            pressure: 1.0,
+        }],
+    };
+
+    rt.input_queue.enqueue_motion(event);
+    0
+}
+
+/// Destroys an Android runtime instance and frees its resources.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_destroy(runtime: *mut AndroidRuntime) {
+    if !runtime.is_null() {
+        drop(unsafe { Box::from_raw(runtime) });
     }
 }
 
@@ -93,5 +219,15 @@ mod tests {
         };
         assert_eq!(status, 3);
         assert_eq!(summary, StrideDexSummary::default());
+    }
+
+    #[test]
+    fn creates_and_destroys_runtime() {
+        unsafe {
+            let rt = stride_runtime_create(b"com.example.test\0".as_ptr() as *const c_char);
+            assert!(!rt.is_null());
+            assert_eq!(stride_runtime_dispatch_touch(rt, 0, 100.0, 200.0), 0);
+            stride_runtime_destroy(rt);
+        }
     }
 }

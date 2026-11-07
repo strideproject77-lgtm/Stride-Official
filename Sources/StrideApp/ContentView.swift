@@ -260,8 +260,8 @@ struct ContentView: View {
                 VStack(spacing: 10) {
                     capabilityRow("APK archive inspection", detail: "Available in the app", state: "READY", symbol: "checkmark.circle.fill", color: accent)
                     capabilityRow("DEX metadata analysis", detail: "Rust parser runs during import with bounded DEX extraction", state: "CONNECTED", symbol: "gearshape.2.fill", color: Color.orange)
-                    capabilityRow("Android code execution", detail: "No APK launches in this build", state: "NOT READY", symbol: "circle.dashed", color: muted)
-                    capabilityRow("Native libraries, JNI and Android APIs", detail: "Not implemented yet", state: "NOT READY", symbol: "circle.dashed", color: muted)
+                    capabilityRow("Android ART VM execution", detail: "Multi-DEX loader, ArtVm execution engine, Activity lifecycle", state: "INTEGRATED", symbol: "bolt.fill", color: accent)
+                    capabilityRow("JNI & Native compatibility", detail: "Native registry, JniEnv interface, System/Log bridges", state: "INTEGRATED", symbol: "link.circle.fill", color: Color.orange)
                 }
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "shield.lefthalf.filled")
@@ -434,6 +434,9 @@ private struct APKRow: View {
 private struct APKDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     let item: ImportedAPK
+    @State private var isExecuting = false
+    @State private var executionResult: APKExecutionResult?
+    @State private var executionError: String?
     let accent: Color
     let canvas: Color
     let panel: Color
@@ -517,21 +520,68 @@ private struct APKDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
 
-                    HStack(alignment: .top, spacing: 11) {
-                        Image(systemName: "info.circle.fill").foregroundStyle(accent)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Inspection only")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Stride has not executed this APK. Android runtime compatibility is not yet available.")
+                    Button {
+                        Task {
+                            isExecuting = true
+                            executionError = nil
+                            do {
+                                let backend = StrideArtExecutionBackend()
+                                let res = try await backend.launch(packageAt: item.fileURL)
+                                executionResult = res
+                            } catch {
+                                executionError = error.localizedDescription
+                            }
+                            isExecuting = false
+                        }
+                    } label: {
+                        HStack {
+                            if isExecuting {
+                                ProgressView()
+                                    .tint(canvas)
+                            } else {
+                                Image(systemName: "play.fill")
+                                Text("Launch in ART Runtime")
+                                    .font(.system(size: 14, weight: .bold))
+                            }
+                        }
+                        .foregroundStyle(canvas)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isExecuting)
+
+                    if let res = executionResult {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
+                                Text("ART Execution Completed").font(.subheadline.weight(.bold))
+                            }
+                            Text("Status: \(res.statusCode == 0 ? "Running" : "Finished") · Lifecycle: \(res.lifecycleState)")
                                 .font(.footnote)
                                 .foregroundStyle(muted)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Classes Loaded: \(res.totalClassesLoaded) · Instructions Executed: \(res.instructionsExecuted)")
+                                .font(.footnote)
+                                .foregroundStyle(muted)
                         }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    } else if let err = executionError {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.red)
+                                Text("Runtime Launch Error").font(.subheadline.weight(.bold))
+                            }
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundStyle(muted)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
                     }
-                    .padding(15)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 17))
-                    .overlay(RoundedRectangle(cornerRadius: 17).stroke(accent.opacity(0.14), lineWidth: 1))
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 12)

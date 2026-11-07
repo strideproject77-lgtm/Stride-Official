@@ -8,3 +8,4 @@ path = "src/lib.rs"
 
 [dependencies]
 stride-dex-inspector = { path = "../dex-inspector" }
+stride-axml = { path = "../axml" }

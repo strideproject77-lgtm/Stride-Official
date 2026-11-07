@@ -93,10 +93,20 @@ impl<'a> ArtVm<'a> {
             return Err("Call depth limit exceeded (128 frames)".into());
         }
 
-        let method = self.methods.get(&method_id)
-            .ok_or_else(|| format!("Method ID {} not found", method_id))?;
+        let (code_units, registers_size, ins_size, try_blocks, method_class, method_name, method_proto) = {
+            let m = self.methods.get(&method_id)
+                .ok_or_else(|| format!("Method ID {} not found", method_id))?;
+            (
+                m.code_units.clone(),
+                m.registers_size,
+                m.ins_size,
+                m.try_blocks.clone(),
+                m.class_descriptor.clone(),
+                m.name.clone(),
+                m.prototype.clone(),
+            )
+        };
 
-        let code_units = &method.code_units;
         if code_units.is_empty() {
             return Ok(InterpreterReport {
                 stop_reason: ExecutionStopReason::ReturnedVoid,
@@ -104,10 +114,10 @@ impl<'a> ArtVm<'a> {
             });
         }
 
-        let mut rf = RegisterFile::new(method.registers_size);
+        let mut rf = RegisterFile::new(registers_size);
 
         // Map arguments into incoming registers (high end of register window)
-        let incoming_start = method.registers_size.saturating_sub(method.ins_size);
+        let incoming_start = registers_size.saturating_sub(ins_size);
         let mut reg_idx = incoming_start as u16;
         for arg in arguments {
             match *arg {
@@ -398,7 +408,7 @@ impl<'a> ArtVm<'a> {
 
                     // Check if current method has a matching catch block covering PC
                     let mut caught_pc = None;
-                    for block in &method.try_blocks {
+                    for block in &try_blocks {
                         if block.covers(pc) {
                             if let Some(target) = block.find_handler(&ex_desc, |t, s| self.hierarchy.is_assignable_from(t, s)) {
                                 caught_pc = Some(target);
@@ -412,7 +422,7 @@ impl<'a> ArtVm<'a> {
                         pc = target;
                         continue;
                     } else {
-                        trace.push_frame(&method.class_descriptor, &method.name, &method.prototype, pc);
+                        trace.push_frame(&method_class, &method_name, &method_proto, pc);
                         return Ok(InterpreterReport {
                             stop_reason: ExecutionStopReason::UncaughtException(ThrownException {
                                 exception_object: ex_id,
@@ -814,15 +824,19 @@ impl<'a> ArtVm<'a> {
                     }
 
                     // Check for native method invocation
-                    if let Some(target) = self.methods.get(&target_method_id) {
-                        if let Some(native_handler) = self.jni.find(&target.class_descriptor, &target.name, &target.prototype) {
-                            let handler_clone = native_handler.clone();
-                            let mut env = crate::jni::JniEnv::new(self.heap);
-                            let native_res = handler_clone(&mut env, &args).map_err(|e| format!("{:?}", e))?;
-                            pending_result = native_res;
-                            pc += 3;
-                            continue;
-                        }
+                    let native_handler = self
+                        .methods
+                        .get(&target_method_id)
+                        .and_then(|target| {
+                            self.jni.find(&target.class_descriptor, &target.name, &target.prototype).cloned()
+                        });
+
+                    if let Some(handler) = native_handler {
+                        let mut env = crate::jni::JniEnv::new(self.heap);
+                        let native_res = handler(&mut env, &args).map_err(|e| format!("{:?}", e))?;
+                        pending_result = native_res;
+                        pc += 3;
+                        continue;
                     }
 
                     let remaining = step_limit.saturating_sub(steps);
@@ -836,11 +850,28 @@ impl<'a> ArtVm<'a> {
                         ExecutionStopReason::ReturnedVoid => {
                             pending_result = None;
                         }
-                        ExecutionStopReason::UncaughtException(uncaught_ex) => {
-                            return Ok(InterpreterReport {
-                                stop_reason: ExecutionStopReason::UncaughtException(uncaught_ex),
-                                steps_executed: steps,
-                            });
+                        ExecutionStopReason::UncaughtException(mut uncaught_ex) => {
+                            trace.push_frame(&method_class, &method_name, &method_proto, pc);
+                            let mut caught_pc = None;
+                            for block in &try_blocks {
+                                if block.covers(pc) {
+                                    if let Some(target) = block.find_handler(&uncaught_ex.class_descriptor, |t, s| self.hierarchy.is_assignable_from(t, s)) {
+                                        caught_pc = Some(target);
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(target) = caught_pc {
+                                pending_exception = Some(uncaught_ex.exception_object);
+                                pc = target;
+                                continue;
+                            } else {
+                                uncaught_ex.stack_trace = trace.clone();
+                                return Ok(InterpreterReport {
+                                    stop_reason: ExecutionStopReason::UncaughtException(uncaught_ex),
+                                    steps_executed: steps,
+                                });
+                            }
                         }
                         ExecutionStopReason::StepLimitExceeded => {
                             return Ok(InterpreterReport {

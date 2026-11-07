@@ -9,3 +9,4 @@ crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 stride-dex-inspector = { path = "../dex-inspector" }
+stride-dex-runtime = { path = "../dex-runtime" }

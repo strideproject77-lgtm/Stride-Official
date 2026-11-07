@@ -15,6 +15,32 @@ pub struct RuntimeClass {
 }
 
 impl RuntimeClass {
+    pub fn new(descriptor: &str, superclass_descriptor: Option<&str>) -> Self {
+        Self {
+            descriptor: descriptor.to_string(),
+            superclass_descriptor: superclass_descriptor.map(|s| s.to_string()),
+            interface_descriptors: Vec::new(),
+            access_flags: 0x0001,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: false,
+        }
+    }
+
+    pub fn register_method(&mut self, name: &str, prototype: &str, method_index: u32, is_direct: bool) {
+        self.methods.insert(
+            (name.to_string(), prototype.to_string()),
+            MethodDefinition {
+                method_index,
+                name: name.to_string(),
+                prototype: prototype.to_string(),
+                access_flags: 0x0001,
+                code_offset: 0,
+                is_direct,
+            },
+        );
+    }
+
     pub fn is_interface(&self) -> bool {
         (self.access_flags & 0x0200) != 0
     }
