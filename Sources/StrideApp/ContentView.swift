@@ -259,7 +259,7 @@ struct ContentView: View {
                 }
                 VStack(spacing: 10) {
                     capabilityRow("APK archive inspection", detail: "Available in the app", state: "READY", symbol: "checkmark.circle.fill", color: accent)
-                    capabilityRow("DEX analysis", detail: "Parser in development; not connected to import yet", state: "BUILDING", symbol: "gearshape.2.fill", color: Color.orange)
+                    capabilityRow("DEX metadata analysis", detail: "Rust parser runs during import with bounded DEX extraction", state: "CONNECTED", symbol: "gearshape.2.fill", color: Color.orange)
                     capabilityRow("Android code execution", detail: "No APK launches in this build", state: "NOT READY", symbol: "circle.dashed", color: muted)
                     capabilityRow("Native libraries, JNI and Android APIs", detail: "Not implemented yet", state: "NOT READY", symbol: "circle.dashed", color: muted)
                 }
@@ -483,7 +483,15 @@ private struct APKDetailSheet: View {
                         Divider().overlay(Color.white.opacity(0.05))
                         detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
                         Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.dexFileCount)" : "None found", symbol: "chevron.left.forwardslash.chevron.right")
+                        detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "chevron.left.forwardslash.chevron.right")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("DEX classes", value: "\(item.inspection.dexClassCount)", symbol: "square.stack.3d.up")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("DEX methods", value: "\(item.inspection.dexMethodCount)", symbol: "function")
+                        if item.inspection.skippedDexFileCount > 0 {
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("DEX files skipped", value: "\(item.inspection.skippedDexFileCount)", symbol: "exclamationmark.triangle")
+                        }
                         Divider().overlay(Color.white.opacity(0.05))
                         detailRow("Resource table", value: item.inspection.hasResourceTable ? "Found" : "Not found", symbol: "square.grid.3x3")
                         Divider().overlay(Color.white.opacity(0.05))
