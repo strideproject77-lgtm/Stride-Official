@@ -87,7 +87,7 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 ### Workflow policy
 
 - Batch implementation changes. Do not trigger workflows for routine commits; use PR checks or deliberate manual Rust-only checks periodically. Enable `build_ios` only at a real Swift/linkage integration gate or when an IPA is explicitly needed.
-- macOS/XCFramework/IPA runs are manual-only via workflow_dispatch and should be used at a real Swift/linkage integration gate or when an IPA is explicitly needed.
+- macOS/XCFramework/IPA runs are manual-only via workflow_dispatch; the `build_ios` input defaults to false.
 - Do not merge PR #1 until checks and review pass.
 
 
@@ -104,4 +104,4 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 - Confirm branch feat/dex-class-method-loader and current workflow status.
 - Read the Hill Climb target gate, current 0% status, and workflow policy above.
 - Recent code step: APK import now invokes the Rust DEX inventory FFI with bounded extraction; compilation and behavior remain unverified.
-- First task on resume: manually compile the integration once, fix any issues, and verify valid/malformed DEX handling. Then obtain/pin the exact official APK before writing app-execution code.
+- First task on resume: continue the implementation batch and review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
