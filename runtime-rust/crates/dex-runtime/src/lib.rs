@@ -557,13 +557,13 @@ mod tests {
     fn executes_integer_instance_and_static_field_access() {
         let mut store = IntegerFieldStore::default();
         // v0 = object id 7; v1 = 42; iput v1,v0,field@3; iget v2,v0,field@3; return v2
-        let instance = [0x0012, 7, 0x1012, 42, 0x1059, 3, 0x2052, 3, 0x000f];
+        let instance = [0x7012, 0x0113, 42, 0x0159, 3, 0x0252, 3, 0x000f];
         let report = execute_integer_method_with_fields(&instance, 3, &[], 20, &mut store).unwrap();
         assert_eq!(report.value, ReturnValue::Int(42));
         assert_eq!(store.get_instance(7, 3), Some(42));
 
         // v0 = 19; sput v0,field@5; sget v1,field@5; return v1
-        let static_code = [0x0012, 19, 0x0067, 5, 0x0160, 5, 0x000f];
+        let static_code = [0x0013, 19, 0x0067, 5, 0x0160, 5, 0x000f];
         let report = execute_integer_method_with_fields(&static_code, 2, &[], 20, &mut store).unwrap();
         assert_eq!(report.value, ReturnValue::Int(19));
         assert_eq!(store.get_static(5), Some(19));
