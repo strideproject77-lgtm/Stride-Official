@@ -217,8 +217,7 @@ fn write_register(registers: &mut [i32], index: u16, value: i32) -> Result<(), V
 }
 
 fn branch_target(
-    source: usize,    delta: isize,
-    boundaries: &[bool],
+    source: usize,    delta: isize,    boundaries: &[bool],
 ) -> Result<usize, VmError> {
     let target = (source as isize)
         .checked_add(delta)
@@ -437,8 +436,7 @@ fn execute_integer_method_internal(
                 let value = register(&registers, b)?;
                 write_register(&mut registers, a, value)?;
                 pc += 3;            }
-            0x0a => {
-                match pending_result.take() {
+            0x0a => {                match pending_result.take() {
                     Some(ReturnValue::Int(value)) => write_register(&mut registers, a8, value)?,
                     _ => return Err(VmError::MissingInvokeResult),
                 }
@@ -657,8 +655,7 @@ fn execute_integer_method_internal(
     }
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod tests {    use super::*;
 
     fn sample_inventory() -> ClassInventory {
         ClassInventory {
@@ -878,7 +875,6 @@ mod tests {
         assert_eq!(report.value, ReturnValue::Int(7));
         assert_eq!(objects.class_of(1), Ok("Lgame/Vehicle;"));
     }
-
     #[test]
     fn virtual_dispatch_uses_exact_runtime_class_mapping() {
         let mut methods = HashMap::new();
@@ -1086,6 +1082,7 @@ mod tests {
 // inventory; it does not imply that Android framework or native methods exist.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DexLoadError {
+    InvalidDex(stride_dex_inspector::classes::ClassReadError),
     InvalidClassTypeIndex(u32),
     InvalidMethodIndex(u32),
     DuplicateClassType(u16),
@@ -1102,6 +1099,14 @@ pub struct DexExecutable {
 }
 
 impl DexExecutable {
+    /// Parse a complete DEX buffer and load its defined method bodies.
+    /// This connects DEX metadata inspection directly to the bounded interpreter.
+    pub fn from_dex_bytes(dex_bytes: &[u8]) -> Result<Self, DexLoadError> {
+        let inventory = stride_dex_inspector::classes::inspect_classes(dex_bytes)
+            .map_err(DexLoadError::InvalidDex)?;
+        Self::from_inventory(dex_bytes, inventory)
+    }
+
     /// Build executable method bodies from one DEX byte buffer and its parsed inventory.
     /// Abstract/native methods (code_off == 0) are deliberately left unresolved.
     pub fn from_inventory(
@@ -1240,6 +1245,14 @@ mod dex_loader_tests {
             0, &[], 10, &mut IntegerFieldStore::default(),
         ).unwrap();
         assert_eq!(report.value, ReturnValue::Int(5));
+    }
+
+    #[test]
+    fn rejects_invalid_dex_before_loading_any_method() {
+        assert!(matches!(
+            DexExecutable::from_dex_bytes(&[0u8; 16]),
+            Err(DexLoadError::InvalidDex(_))
+        ));
     }
 
     #[test]
