@@ -14,6 +14,7 @@ pub enum LinkError {
     DuplicateClass(String),
     InvalidDexIndex,
     InvalidMethodIndex,
+    InvalidFieldIndex,
     ClassNotFound(String),
     MethodNotFound { class: String, name: String, prototype: String },
     FieldNotFound { class: String, name: String, field_type: String },
@@ -90,7 +91,7 @@ impl ClassRegistry {
         let reference = self.dex_tables.get(dex_index)
             .ok_or(LinkError::InvalidDexIndex)?
             .fields.get(field_index)
-            .ok_or(LinkError::InvalidMethodIndex)?;
+            .ok_or(LinkError::InvalidFieldIndex)?;
         self.resolve_declared_field(
             &reference.class_descriptor, &reference.name, &reference.field_type,
         )
@@ -392,10 +393,16 @@ mod tests {
                 instance_field_count: 0,
                 direct_method_count: 1,
                 virtual_method_count: 0,
-                fields: vec![FieldDefinition {
-                    field_index: 0, name: "score".into(), field_type: "I".into(),
-                    access_flags: 0x0008, is_static: true,
-                }],
+                fields: vec![
+                    FieldDefinition {
+                        field_index: 0, name: "score".into(), field_type: "I".into(),
+                        access_flags: 0x0008, is_static: true,
+                    },
+                    FieldDefinition {
+                        field_index: 1, name: "lives".into(), field_type: "I".into(),
+                        access_flags: 0x0002, is_static: false,
+                    },
+                ],
                 methods: vec![MethodDefinition {
                     method_index: 0, name: "start".into(), prototype: "()V".into(),
                     access_flags: 0x0009, code_offset: 0, is_direct: true,
@@ -411,10 +418,16 @@ mod tests {
                     name: "onCreate".into(), prototype: "(Landroid/os/Bundle;)V".into(),
                 },
             ],
-            field_references: vec![FieldReference {
-                field_index: 0, class_descriptor: "Lgame/Main;".into(),
-                name: "score".into(), field_type: "I".into(),
-            }],
+            field_references: vec![
+                FieldReference {
+                    field_index: 0, class_descriptor: "Lgame/Main;".into(),
+                    name: "score".into(), field_type: "I".into(),
+                },
+                FieldReference {
+                    field_index: 1, class_descriptor: "Lgame/Main;".into(),
+                    name: "lives".into(), field_type: "I".into(),
+                },
+            ],
         }
     }
 
@@ -463,6 +476,10 @@ mod tests {
         let field = registry.resolve_field_reference(dex, 0).unwrap();
         assert_eq!(field.field.name, "score");
         assert!(field.field.is_static);
+        let instance_field = registry.resolve_field_reference(dex, 1).unwrap();
+        assert_eq!(instance_field.field.name, "lives");
+        assert!(!instance_field.field.is_static);
+        assert_eq!(registry.resolve_field_reference(dex, 9), Err(LinkError::InvalidFieldIndex));
         assert_eq!(registry.resolve_declared_field("Lgame/Main;", "score", "J"),
             Err(LinkError::FieldNotFound { class: "Lgame/Main;".into(), name: "score".into(), field_type: "J".into() }));
     }
