@@ -64,6 +64,7 @@ fn validate_handler_list(
     bytes: &[u8],
     list_start: usize,
     insns_size: u32,
+    instruction_boundaries: &[usize],
 ) -> Result<Vec<usize>, CodeItemError> {
     let mut cursor = list_start;
     let count = usize::try_from(read_uleb128(bytes, &mut cursor)?)
@@ -77,11 +78,15 @@ fn validate_handler_list(
         for _ in 0..typed_count {
             let _type_idx = read_uleb128(bytes, &mut cursor)?;
             let address = read_uleb128(bytes, &mut cursor)?;
-            if address >= insns_size { return Err(CodeItemError::InvalidHandlerAddress); }
+            if address >= insns_size || !instruction_boundaries.contains(&(address as usize)) {
+                return Err(CodeItemError::InvalidHandlerAddress);
+            }
         }
         if signed_count <= 0 {
             let catch_all = read_uleb128(bytes, &mut cursor)?;
-            if catch_all >= insns_size { return Err(CodeItemError::InvalidHandlerAddress); }
+            if catch_all >= insns_size || !instruction_boundaries.contains(&(catch_all as usize)) {
+                return Err(CodeItemError::InvalidHandlerAddress);
+            }
         }
     }
     Ok(offsets)
@@ -100,6 +105,12 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
     let insns_start=start+16;
     let insns_bytes=usize::try_from(insns_size).ok().and_then(|n|n.checked_mul(2)).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let insns_end=insns_start.checked_add(insns_bytes).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
+    let decoded = decode_instructions(&bytes[insns_start..insns_end])
+        .map_err(|_| CodeItemError::InvalidHandlerAddress)?;
+    let instruction_boundaries: Vec<usize> = decoded.iter()
+        .filter(|instruction| instruction.kind == InstructionKind::Opcode)
+        .map(|instruction| instruction.code_unit_offset)
+        .collect();
     let tries_offset=if tries_size==0 {None} else {
         let aligned=if insns_size%2==1 {insns_end.checked_add(2).ok_or(CodeItemError::TryItemsOutOfBounds)?} else {insns_end};
         if aligned>bytes.len(){return Err(CodeItemError::InvalidTryPadding);}
@@ -113,13 +124,16 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
             let insn_count = u32::from(u16le(bytes, item + 4)?);
             let handler_off = usize::from(u16le(bytes, item + 6)?);
             let range_end = start_addr.checked_add(insn_count).ok_or(CodeItemError::InvalidTryRange)?;
-            if insn_count == 0 || range_end > insns_size || (index > 0 && start_addr < previous_end) {
+            if insn_count == 0 || range_end > insns_size
+                || !instruction_boundaries.contains(&(start_addr as usize))
+                || (range_end != insns_size && !instruction_boundaries.contains(&(range_end as usize)))
+                || (index > 0 && start_addr < previous_end) {
                 return Err(CodeItemError::InvalidTryRange);
             }
             previous_end = range_end;
             let _ = handler_off;
         }
-        let valid_handler_offsets = validate_handler_list(bytes, end, insns_size)?;
+        let valid_handler_offsets = validate_handler_list(bytes, end, insns_size, &instruction_boundaries)?;
         for index in 0..count {
             let item = aligned + index * 8;
             let handler_off = usize::from(u16le(bytes, item + 6)?);
@@ -161,6 +175,11 @@ mod code_item_tests {
   bad_range[tr..tr+4].copy_from_slice(&1u32.to_le_bytes());
   bad_range[tr+4..tr+6].copy_from_slice(&2u16.to_le_bytes());
   assert_eq!(read_code_item(&bad_range,0x70),Err(CodeItemError::InvalidTryRange));
+
+  let mut bad_boundary=b.clone();
+  bad_boundary[tr..tr+4].copy_from_slice(&1u32.to_le_bytes());
+  bad_boundary[tr+4..tr+6].copy_from_slice(&1u16.to_le_bytes());
+  assert_eq!(read_code_item(&bad_boundary,0x70),Err(CodeItemError::InvalidTryRange));
 
   let mut bad_offset=b.clone();
   bad_offset[tr+6..tr+8].copy_from_slice(&0u16.to_le_bytes());
