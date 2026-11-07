@@ -72,20 +72,26 @@ impl JniNativeRegistry {
         reg
     }
 
-    pub fn register(
+    pub fn register<F>(
         &mut self,
         class_descriptor: &str,
         name: &str,
         prototype: &str,
-        handler: NativeHandler,
-    ) {
+        handler: F,
+    )
+    where
+        F: for<'env, 'heap> Fn(&'env mut JniEnv<'heap>, &[Value]) -> Result<Option<Value>, String>
+            + Send
+            + Sync
+            + 'static,
+    {
         self.methods.insert(
             NativeMethodKey {
                 class_descriptor: class_descriptor.to_owned(),
                 name: name.to_owned(),
                 prototype: prototype.to_owned(),
             },
-            handler,
+            Arc::new(handler),
         );
     }
 
