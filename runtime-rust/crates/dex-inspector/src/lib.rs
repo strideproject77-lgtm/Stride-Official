@@ -215,7 +215,7 @@ mod decoder_tests {
 
  #[test] fn rejects_out_of_range_register_in_12x(){
   assert_eq!(validate_register_operands(&words(&[0x0012,0x000e]),1),Ok(()));
-  assert_eq!(validate_register_operands(&words(&[0x1012,0x000e]),1),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x0112,0x000e]),1),Err(DecodeError::InvalidRegister));
  }
  #[test] fn validates_registers_in_22x_and_23x(){
   assert_eq!(validate_register_operands(&words(&[0x0002,0x0001,0x000e]),2),Ok(()));
