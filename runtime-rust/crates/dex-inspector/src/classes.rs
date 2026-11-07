@@ -17,6 +17,7 @@ pub enum ClassReadError {
     InvalidClassData,
     InvalidUleb128,
     InvalidCodeItem,
+    InvalidInstructions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,7 +212,10 @@ fn class_data(
                 return Err(ClassReadError::InvalidIndex);
             }
             if code != 0 {
-                read_code_item(b, code).map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
+                let body = read_code_item(b, code)
+                    .map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
+                super::decode_instructions(body.instructions)
+                    .map_err(|_| ClassReadError::InvalidInstructions)?;
             }
             let proto_index = u32::from(u16le(b, at + 2)?);
             let name_index = u32le(b, at + 4)?;
@@ -361,6 +365,45 @@ mod tests {
         assert_eq!(class.methods[0].name, "foo");
         assert_eq!(class.methods[0].prototype, "()Lx;");
         assert_eq!(class.methods[0].code_offset, 0);
+    }
+
+    fn sample_with_code(opcode: u16) -> (Vec<u8>, usize) {
+        let mut b = sample(0);
+        let strings = 0x70usize;
+        let data = 0xb4usize;
+        let string_data = data + 7;
+
+        // Expand the method's code_off ULEB128 from one byte to two bytes.
+        b[data + 6] = 0xc8; // low seven bits of aligned code offset 0xc8
+        b.insert(data + 7, 0x01);
+        let shifted_string_data = string_data + 1;
+        b[strings..strings + 4].copy_from_slice(&(shifted_string_data as u32).to_le_bytes());
+        b[strings + 4..strings + 8]
+            .copy_from_slice(&((shifted_string_data + 5) as u32).to_le_bytes());
+
+        while b.len() < 0xc8 { b.push(0); }
+        let code_offset = b.len();
+        let mut header = [0u8; 16];
+        header[0..2].copy_from_slice(&1u16.to_le_bytes()); // registers_size
+        header[12..16].copy_from_slice(&1u32.to_le_bytes()); // one code unit
+        b.extend_from_slice(&header);
+        b.extend_from_slice(&opcode.to_le_bytes());
+        let file_size = b.len() as u32;
+        b[0x20..0x24].copy_from_slice(&file_size.to_le_bytes());
+        (b, code_offset)
+    }
+
+    #[test]
+    fn validates_instruction_streams_for_defined_methods() {
+        let (bytes, _) = sample_with_code(0x000e); // return-void
+        let inventory = inspect_classes(&bytes).unwrap();
+        assert_eq!(inventory.classes[0].methods[0].code_offset, 0xc8);
+    }
+
+    #[test]
+    fn rejects_unsupported_opcode_in_defined_method() {
+        let (bytes, _) = sample_with_code(0x0073);
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
     }
 
     #[test]
