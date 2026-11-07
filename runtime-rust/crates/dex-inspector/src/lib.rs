@@ -73,7 +73,7 @@ pub enum InstructionKind { Opcode, PackedSwitchPayload, SparseSwitchPayload, Arr
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedInstruction { pub code_unit_offset: usize, pub opcode: u8, pub width: usize, pub kind: InstructionKind }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DecodeError { OddByteLength, TruncatedInstruction, InvalidOpcode(u8), InvalidPayload, InvalidBranchTarget, InvalidPayloadTarget }
+pub enum DecodeError { OddByteLength, TruncatedInstruction, InvalidOpcode(u8), InvalidPayload, InvalidBranchTarget, InvalidPayloadTarget, InvalidRegister }
 
 fn unit_at(units:&[u16], at:usize)->Result<u16,DecodeError>{units.get(at).copied().ok_or(DecodeError::TruncatedInstruction)}
 fn signed32(units:&[u16], at:usize)->Result<i32,DecodeError>{
@@ -93,6 +93,73 @@ fn opcode_width(op:u8)->Option<usize>{
   0xfa|0xfb => 4,
   _ => return None,
  })
+}
+
+/// Checks encoded register indices for the instruction formats handled here.
+/// This is a deliberately partial operand check, not the Dalvik verifier.
+pub fn validate_register_operands(
+    bytes: &[u8],
+    registers_size: u16,
+) -> Result<(), DecodeError> {
+    if bytes.len() % 2 != 0 { return Err(DecodeError::OddByteLength); }
+    let units: Vec<u16> = bytes.chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
+    let decoded = decode_instructions(bytes)?;
+    let limit = usize::from(registers_size);
+    let check = |register: usize| {
+        if register < limit { Ok(()) } else { Err(DecodeError::InvalidRegister) }
+    };
+    for instruction in decoded {
+        if instruction.kind != InstructionKind::Opcode { continue; }
+        let pc = instruction.code_unit_offset;
+        let first = unit_at(&units, pc)?;
+        let op = instruction.opcode;
+        let a8 = usize::from((first >> 8) & 0xff);
+        let a4 = usize::from((first >> 8) & 0x0f);
+        let b4 = usize::from((first >> 12) & 0x0f);
+        match op {
+            // 12x: two four-bit register operands.
+            0x01 | 0x04 | 0x07 | 0x7b..=0x8f | 0xb0..=0xcf => {
+                check(a4)?; check(b4)?;
+            }
+            // 11x and 11n: one byte or four-bit register.
+            0x0a..=0x0d | 0x0f..=0x11 | 0x1d | 0x1e | 0x27 => check(a8)?,
+            0x12 => check(a4)?,
+            // 22x: A is a byte, B is the next full code unit.
+            0x02 | 0x05 | 0x08 => {
+                check(a8)?; check(usize::from(unit_at(&units, pc + 1)?))?;
+            }
+            // 32x: two full code-unit register indices.
+            0x03 | 0x06 | 0x09 => {
+                check(usize::from(unit_at(&units, pc + 1)?))?;
+                check(usize::from(unit_at(&units, pc + 2)?))?;
+            }
+            // 21* formats: one byte register in the first unit.
+            0x13 | 0x15 | 0x16 | 0x19 | 0x1a | 0x1c | 0x1f |
+            0x22 | 0x26 | 0x29 | 0x2a | 0x2b | 0x2c |
+            0x38..=0x3d | 0xfe | 0xff => check(a8)?,
+            // 22t/22c/22s formats: two four-bit registers.
+            0x20 | 0x23 | 0x32..=0x37 | 0xd0..=0xd7 => {
+                check(a4)?; check(b4)?;
+            }
+            // 23x formats: A is in first unit, B/C in second.
+            0x2d..=0x31 | 0x44..=0x6d | 0x90..=0xaf => {
+                let second = unit_at(&units, pc + 1)?;
+                check(a8)?;
+                check(usize::from(second & 0xff))?;
+                check(usize::from(second >> 8))?;
+            }
+            // 22b formats: A byte in first unit, B byte in second.
+            0xd8..=0xe2 => {
+                check(a8)?;
+                check(usize::from(unit_at(&units, pc + 1)? & 0xff))?;
+            }
+            // Other formats are decoded for width/targets, but operand checks are not
+            // claimed until their encoding-specific register layouts are implemented.
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Decodes every code unit in a DEX instruction stream, validating instruction widths,
@@ -146,5 +213,15 @@ mod decoder_tests {
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
  #[test] fn rejects_branch_into_instruction_operand(){assert_eq!(decode_instructions(&words(&[0x0129,0x0001,0x000e])),Err(DecodeError::InvalidBranchTarget));}
 
+ #[test] fn rejects_out_of_range_register_in_12x(){
+  assert_eq!(validate_register_operands(&words(&[0x0012,0x000e]),1),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x1012,0x000e]),1),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_registers_in_22x_and_23x(){
+  assert_eq!(validate_register_operands(&words(&[0x0002,0x0001,0x000e]),2),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0002,0x0002,0x000e]),2),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x0044,0x0201,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0044,0x0301,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
