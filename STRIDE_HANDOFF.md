@@ -2,80 +2,66 @@
 
 Updated: 2026-11-07
 
-## Product goal
+## Goal
 
-Build an iOS app that can run a growing, clearly documented set of Android APKs. The long-term target is broad compatibility; every support claim must name the APK/build, ABI, Android API assumptions, iPhone/iOS version, and real-device result. APK import or static inspection is not execution.
+Build an iOS app that runs a growing, measured set of Android APKs, with a long-term goal of broad compatibility. Every support claim must name the APK/build, ABI, Android API assumptions, iPhone/iOS version, and real-device result. Importing or inspecting an APK does not mean it runs.
 
-## Working location
+## Working state
 
 - Repository: https://github.com/strideproject77-lgtm/Stride-Official
 - Continue on branch: feat/dex-class-method-loader
-- Changes are on the feature branch; they have not been merged to main.
-- Fetch the branch head when resuming; this handoff itself is committed after the code/UI/workflow commits.
-- Do not start from a fresh checkout or discard this branch.
+- Draft PR: https://github.com/strideproject77-lgtm/Stride-Official/pull/1
+- The branch was reconciled with latest main by a two-parent merge commit, preserving main's newer ELF address-overflow validation.
+- Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
-## Work completed on this branch
+## Completed
 
-- Added Rust DEX class/method inventory parsing in runtime-rust/crates/dex-inspector/src/classes.rs.
-  - Reads class definitions, encoded field/method lists, class descriptors, method names and prototypes.
-  - Checks DEX table bounds, indexes, modified UTF-8 strings and referenced code_item boundaries.
-  - Metadata parsing only; it does not verify or execute app code.
-  - Unit tests are included and passed in PR workflow run #19.
-- Exported the parser from runtime-rust/crates/dex-inspector/src/lib.rs.
-- Refreshed Sources/StrideApp/ContentView.swift.
-  - Added APK/DEX counts, recent-package rows, package detail sheet and native ABI chips.
-  - Added explicit runtime status labels. The UI does not claim APK execution.
-  - ABI chips wrap for narrow screens.
-- Updated .github/workflows/ios-build.yml.
-  - Rust tests run on ubuntu-latest.
-  - The unsigned iOS build runs on macos-15 after Rust tests, for main and the Codex feature branch; PR runs skip the macOS job.
-  - The Codex branch now triggers CI on push.
-  - No Husk source files, code, tests, or assets were copied.
+- Added bounds-checked DEX class/method inventory parsing at runtime-rust/crates/dex-inspector/src/classes.rs. It reads class definitions, encoded fields and methods, descriptors, names, prototypes, and referenced code-item boundaries. This is structural metadata parsing, not verification or execution.
+- Added unit tests for valid inventory, foreign class ownership, and invalid file size. These passed in Rust workflow run #19.
+- Improved the SwiftUI APK library/detail experience in Sources/StrideApp/ContentView.swift. It shows APK and DEX counts, recent packages, details, ABI chips, and explicit runtime limitations. The screen has not yet been visually checked in Xcode.
+- Split CI so Ubuntu runs Rust checks for pull requests and pushes; the macOS job runs only on main and feat/dex-class-method-loader pushes and builds an unsigned device IPA. Simulator tests are currently omitted because the hosted runner could not connect to/download its Simulator runtime.
+- Added runtime-rust/crates/dex-ffi as a workspace crate. It exports a C ABI that accepts one DEX byte buffer and returns class/method counts with explicit error codes. Added the C header at runtime-rust/crates/dex-ffi/include/stride_dex_ffi.h. FFI tests cover null pointers and malformed DEX input.
+- The FFI is not yet linked into the iOS app; APKArchiveInspector still only inspects ZIP entries.
+- No Husk source, code, tests, or assets were copied.
 
-## Current app/runtime boundary
+## Current boundary
 
-The Swift app imports APKs using ZIPFoundation, stores them under Documents/APKs, and inspects ZIP entries. The Rust crates separately contain AXML/DEX/ELF inspection, a bounded integer-only DEX interpreter, and an ELF native-image page planner. The Rust DEX inventory parser is not connected to Swift APK import. There is no working Android execution backend, Bionic/JNI bridge, Android framework, or end-to-end APK launch yet.
+The app imports APKs through ZIPFoundation and stores them under Documents/APKs. Rust has AXML/DEX/ELF inspection, a small integer-only DEX interpreter, and an ELF page planner. There is no Android execution backend, Bionic/JNI bridge, Android framework, or end-to-end APK launch yet.
 
-## Decisions
+## Product and licensing decisions
 
-1. Continue Stride as an independent Swift/Rust implementation. Do not rewrite the repository from zero and do not copy Husk.
-2. Use Android/DEX/ELF/JNI specifications, public documentation, published architecture notes, and black-box behavior to define requirements. Implement independently and maintain original tests.
-3. The Husk GitHub repository declares GPL-2.0. High-level documentation and observed behavior can inform requirements. Do not copy or port source, comments, tests, or distinctive implementation structure. Reading GPL code and then reproducing its implementation is not a reliable way to avoid license obligations; obtain a license review before distributing anything materially based on source-level study.
-4. Treat “supports most apps” as a long-term goal. Build a measured compatibility matrix and ship support by ABI, API level, framework/service dependencies, and graphics needs. Start with a small real APK cohort and expand from evidence.
-5. Prefer an honest partial compatibility report over a fake launch path. Unsupported apps must report why they cannot run.
+1. Continue Stride as an independent Swift/Rust implementation. Do not copy or port Husk source, comments, tests, assets, or distinctive implementation structure.
+2. Use Android/DEX/ELF/JNI specifications, public documentation, and black-box behavior to define requirements. If source-level GPL study materially informs a distributable implementation, get a license review; reproducing implementation after reading GPL code is not a reliable way to avoid license obligations.
+3. Treat “supports most apps” as a long-term objective. Measure compatibility by APK, ABI, API level, framework/service dependencies, graphics needs, and real-device results.
+4. Report unsupported features clearly; do not label inspection as execution.
 
-## CI and unsigned IPA status
+## CI status and workflow history
 
-The CI workflow has been split by runner:
-- PRs run Rust tests on Ubuntu; the macOS job is skipped.
-- Pushes to main and feat/dex-class-method-loader run Rust tests first, then the macOS physical-device build and unsigned IPA packaging.
-- The macOS workflow intentionally does not run simulator-based Swift tests because the hosted Mac runner reported "Unable to connect to simulator" during xcodebuild -downloadPlatform iOS (run #24). The app's Swift sources are still compiled by the physical-device build; simulator test execution remains unverified and must be run on a runner with a working Simulator service.
-- Run #23 on the feature branch passed Rust tests but failed Swift tests because the requested iPhone 17 Pro simulator did not exist.
-- Run #24 fixed the hard-coded simulator selection but failed while attempting to download the iOS Simulator runtime: "Unable to connect to simulator."
-- Workflow commit 913a9f3 removes the simulator download/device-selection/test steps so the IPA build is no longer blocked by the unavailable Simulator service. The next run must verify the physical-device build and artifact upload.
+- PR run #19 passed the Ubuntu Rust tests after the DEX parser/native-loader fix.
+- Runs #23 and #24 exposed unavailable simulator support on the hosted Mac. Workflow commit 913a9f3 removed simulator download/device-test steps; macOS CI now builds the physical-device target and packages an unsigned IPA.
+- Workflow run #36 was in progress on branch head 6f4f946c4de12949a6f83afe3dbd697645e9d8c2 when this handoff was written. Check its Rust and macOS jobs, including IPA artifact upload. The handoff update itself may start another run.
+- PR #1 is draft and must remain unmerged until checks and review are complete.
 
-## Known issues and limits
+## Known issues
 
-- The DEX class/method parser compiled and passed its Rust tests in CI run #19.
-- The parser is not wired to APKArchiveInspector or the iOS UI.
-- Method inventory does not load classes, resolve Android framework calls, or execute methods.
-- The integer interpreter supports only a tiny primitive opcode subset; it is not ART.
+- The DEX inventory has passed Rust CI, but the new FFI crate still needs CI validation.
+- The DEX FFI only returns class/method counts; it is not linked into Swift and does not execute code.
+- The UI has not been visually checked in Xcode.
+- The interpreter supports only a small primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
-- No real-device end-to-end APK test exists.
-- UI changes have not been rendered or built in Xcode; verify them through the macOS workflow when runner capacity is available.
-- CI run #18 also exposed an old native-loader test failure: address overflow returned InvalidAlignment first. The validation order was fixed in the next commit; run #19 passed.
+- No real-device APK launch test exists.
+- Simulator test execution is unverified because the hosted Mac runner could not access its Simulator service.
 
-## Exact next steps
+## Next steps
 
-1. PR #1 is open as a draft. Recheck CI on the latest feature-branch commit; do not merge until the full checks and review pass.
-2. Verify the physical-device build, IPA packaging, and artifact upload on the latest workflow run; inspect the IPA before making UI claims.
-3. Implement a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
-4. Extract classes*.dex from imported APKs in APKArchiveInspector and call the bridge. Show real class/method counts in the detail screen, with parse errors reported safely.
-5. Only after APK parsing is connected and tested, expand execution beyond integer opcodes: DEX verifier, types/objects, method calls and exceptions.
-6. Then implement a minimal ARM64 native ABI path (ELF mapping/relocations, Bionic shims and JNI) and a small Android framework surface, starting with real test APKs.
+1. Check the latest workflow on feat/dex-class-method-loader. Fix Rust, iOS build, or artifact failures.
+2. Add macOS CI steps that build the Rust static library for iOS device and simulator targets. Link the library into the generated Xcode project and verify the Swift app builds.
+3. Add a Swift wrapper around stride_dex_inventory_counts. Extract classes*.dex from imported APKs and report class/method counts and parse errors in the package detail sheet.
+4. Add valid DEX fixtures to exercise the C ABI through Swift before claiming the app uses Rust parsing.
+5. Expand execution in measured stages: verifier and type model, objects/method calls/exceptions, ARM64 ELF loading, Bionic/JNI, then a small Android framework surface. Test each stage against a real APK cohort.
 
 ## Resume checklist
 
-- Confirm branch feat/dex-class-method-loader exists and compare it with current main.
-- Read this file before making another plan.
-- First code action: build the Rust-to-Swift DEX inventory bridge; keep macOS for a deliberate IPA build attempt.
+- Confirm current branch head and latest workflow run.
+- Re-read this handoff, especially CI status and known issues.
+- First check run #36, then continue with macOS Rust target builds and Xcode linking.
