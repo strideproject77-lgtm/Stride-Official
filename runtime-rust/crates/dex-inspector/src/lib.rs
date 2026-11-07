@@ -269,14 +269,14 @@ pub fn validate_register_operands(
             }
             // 21* formats: one byte register in the first unit.
             0x13 | 0x14 | 0x15 | 0x16 | 0x17 | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1f |
-            0x22 | 0x26 | 0x29 | 0x2a | 0x2b | 0x2c |
+            0x22 | 0x26 | 0x29 | 0x2a | 0x2b | 0x2c | 0x60..=0x6d |
             0x38..=0x3d | 0xfe | 0xff => check(a8)?,
             // 22t/22c/22s formats: two four-bit registers.
-            0x20 | 0x23 | 0x32..=0x37 | 0xd0..=0xd7 => {
+            0x20 | 0x23 | 0x32..=0x37 | 0x52..=0x5f | 0xd0..=0xd7 => {
                 check(a4)?; check(b4)?;
             }
             // 23x formats: A is in first unit, B/C in second.
-            0x2d..=0x31 | 0x44..=0x6d | 0x90..=0xaf => {
+            0x2d..=0x31 | 0x44..=0x51 | 0x90..=0xaf => {
                 let second = unit_at(&units, pc + 1)?;
                 check(a8)?;
                 check(usize::from(second & 0xff))?;
@@ -428,6 +428,14 @@ mod decoder_tests {
   assert_eq!(validate_register_operands(&words(&[0x0002,0x0002,0x000e]),2),Err(DecodeError::InvalidRegister));
   assert_eq!(validate_register_operands(&words(&[0x0044,0x0201,0x000e]),3),Ok(()));
   assert_eq!(validate_register_operands(&words(&[0x0044,0x0301,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_field_access_register_formats(){
+  // iget v1, v2, field@0 uses 22c.
+  assert_eq!(validate_register_operands(&words(&[0x2152,0,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x3152,0,0x000e]),3),Err(DecodeError::InvalidRegister));
+  // sget v2, field@0 uses 21c.
+  assert_eq!(validate_register_operands(&words(&[0x0260,0,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0360,0,0x000e]),3),Err(DecodeError::InvalidRegister));
  }
  #[test] fn validates_invoke_35c_register_list(){
   // invoke-virtual {v0, v1}, method@0
