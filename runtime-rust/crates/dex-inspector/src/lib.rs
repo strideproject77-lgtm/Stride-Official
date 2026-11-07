@@ -109,6 +109,13 @@ pub fn validate_register_operands(
     let check = |register: usize| {
         if register < limit { Ok(()) } else { Err(DecodeError::InvalidRegister) }
     };
+    let check_wide = |register: usize| {
+        if register.checked_add(1).filter(|end| *end < limit).is_some() {
+            Ok(())
+        } else {
+            Err(DecodeError::InvalidRegister)
+        }
+    };
     for instruction in decoded {
         if instruction.kind != InstructionKind::Opcode { continue; }
         let pc = instruction.code_unit_offset;
@@ -179,6 +186,55 @@ pub fn validate_register_operands(
             }
             // Other formats are decoded for width/targets, but operand checks are not
             // claimed until their encoding-specific register layouts are implemented.
+            _ => {}
+        }
+
+        // Wide values occupy two consecutive virtual registers. Validate only
+        // opcodes whose wide operand positions are defined by their format.
+        match op {
+            // move-wide vA, vB (12x); both operands are wide.
+            0x04 => { check_wide(a4)?; check_wide(b4)?; }
+            // move-wide/from16 and move-wide/16.
+            0x05 => { check_wide(a8)?; check_wide(usize::from(unit_at(&units, pc + 1)?))?; }
+            0x06 => {
+                check_wide(usize::from(unit_at(&units, pc + 1)?))?;
+                check_wide(usize::from(unit_at(&units, pc + 2)?))?;
+            }
+            // move-result-wide and const-wide variants.
+            0x0b | 0x16 | 0x17 | 0x18 => check_wide(a8)?,
+            // aget-wide / aput-wide: A is the wide value register.
+            0x45 | 0x4c => check_wide(a8)?,
+            // iget-wide / iput-wide and sget-wide / sput-wide.
+            0x53 | 0x5a | 0x61 | 0x68 => check_wide(a4)?,
+            // Unary wide operations/conversions (12x).
+            0x7d | 0x7e | 0x80 => { check_wide(a4)?; check_wide(b4)?; }
+            0x81 | 0x83 | 0x88 | 0x89 | 0x8b => check_wide(a4)?,
+            0x84 | 0x85 | 0x87 | 0x8a | 0x8c => check_wide(b4)?,
+            // Long binary arithmetic: A and B are wide; C is wide except shifts.
+            0x9b..=0xa2 => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check_wide(usize::from(second >> 8))?;
+            }
+            0xa3..=0xa5 => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check(usize::from(second >> 8))?;
+            }
+            // Double binary arithmetic: all three operands are wide.
+            0xab..=0xaf => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check_wide(usize::from(second >> 8))?;
+            }
+            // 2addr long operations and double operations.
+            0xbb..=0xc5 | 0xcb..=0xcf => {
+                check_wide(a4)?;
+                check_wide(b4)?;
+            }
             _ => {}
         }
     }
@@ -261,6 +317,19 @@ mod decoder_tests {
   assert_eq!(validate_register_operands(&words(&[0x0374,0,2,0x000e]),4),Err(DecodeError::InvalidRegister));
   // Zero arguments is valid when the start is at the end of the frame.
   assert_eq!(validate_register_operands(&words(&[0x0074,0,4,0x000e]),4),Ok(()));
+ }
+ #[test] fn validates_wide_register_pairs(){
+  // move-wide v0, v1 is valid in a two-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x1004,0x000e]),2),Ok(()));
+  // The destination pair v1/v2 exceeds the frame.
+  assert_eq!(validate_register_operands(&words(&[0x1104,0x000e]),2),Err(DecodeError::InvalidRegister));
+  // move-result-wide requires two destination registers.
+  assert_eq!(validate_register_operands(&words(&[0x000b,0x000e]),1),Err(DecodeError::InvalidRegister));
+  // const-wide/16 destination pair must fit.
+  assert_eq!(validate_register_operands(&words(&[0x0016,0x0000,0x000e]),1),Err(DecodeError::InvalidRegister));
+  // add-long uses wide A/B/C operands.
+  assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),3),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),4),Ok(()));
  }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
