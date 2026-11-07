@@ -5,7 +5,7 @@
 //! framework classes, inheritance dispatch, JNI, or native library execution.
 
 use std::collections::{HashMap, HashSet};
-use stride_dex_inspector::{
+use stride_dex_inspector::classes::{
     ClassDefinition, ClassInventory, FieldDefinition, FieldReference, MethodDefinition, MethodReference,
 };
 
