@@ -18,6 +18,7 @@ pub enum ClassReadError {
     InvalidUleb128,
     InvalidCodeItem,
     InvalidInstructions,
+    InvalidRegisterLayout,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,6 +172,56 @@ fn proto_signature(
     Ok(signature)
 }
 
+fn parameter_word_count(prototype: &str) -> Result<u16, ClassReadError> {
+    let params = prototype.strip_prefix('(')
+        .and_then(|value| value.split_once(')').map(|(args, _)| args))
+        .ok_or(ClassReadError::InvalidRegisterLayout)?;
+    let bytes = params.as_bytes();
+    let mut cursor = 0usize;
+    let mut words = 0u16;
+    while cursor < bytes.len() {
+        let mut dimensions = 0usize;
+        while bytes.get(cursor) == Some(&b'[') {
+            dimensions += 1;
+            cursor += 1;
+        }
+        let kind = *bytes.get(cursor).ok_or(ClassReadError::InvalidRegisterLayout)?;
+        cursor += 1;
+        match kind {
+            b'L' => {
+                let tail = params.get(cursor..).ok_or(ClassReadError::InvalidRegisterLayout)?;
+                let end = tail.find(';').ok_or(ClassReadError::InvalidRegisterLayout)?;
+                if end == 0 { return Err(ClassReadError::InvalidRegisterLayout); }
+                cursor += end + 1;
+                let _ = dimensions;
+                words = words.checked_add(1).ok_or(ClassReadError::InvalidRegisterLayout)?;
+            }
+            b'Z' | b'B' | b'C' | b'S' | b'I' | b'F' | b'J' | b'D' => {
+                let width = if dimensions > 0 { 1 } else if matches!(kind, b'J' | b'D') { 2 } else { 1 };
+                words = words.checked_add(width).ok_or(ClassReadError::InvalidRegisterLayout)?;
+            }
+            _ => return Err(ClassReadError::InvalidRegisterLayout),
+        }
+    }
+    Ok(words)
+}
+
+fn validate_register_layout(
+    registers_size: u16,
+    ins_size: u16,
+    access_flags: u32,
+    prototype: &str,
+) -> Result<(), ClassReadError> {
+    let receiver_words = if access_flags & 0x0008 == 0 { 1u16 } else { 0u16 };
+    let expected = parameter_word_count(prototype)?
+        .checked_add(receiver_words)
+        .ok_or(ClassReadError::InvalidRegisterLayout)?;
+    if ins_size != expected || registers_size < ins_size {
+        return Err(ClassReadError::InvalidRegisterLayout);
+    }
+    Ok(())
+}
+
 fn class_data(
     b: &[u8], offset: u32, class_index: u32, fields: &std::ops::Range<usize>,
     methods: &std::ops::Range<usize>, strings: &std::ops::Range<usize>,
@@ -211,16 +262,17 @@ fn class_data(
             if at >= methods.end || u32::from(u16le(b, at)?) != class_index {
                 return Err(ClassReadError::InvalidIndex);
             }
-            if code != 0 {
-                let body = read_code_item(b, code)
-                    .map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
-                super::decode_instructions(body.instructions)
-                    .map_err(|_| ClassReadError::InvalidInstructions)?;
-            }
             let proto_index = u32::from(u16le(b, at + 2)?);
             let name_index = u32le(b, at + 4)?;
             let name = dex_string(b, strings, string_count, name_index)?;
             let prototype = proto_signature(b, strings, types, protos, string_count, type_count, proto_index)?;
+            if code != 0 {
+                let body = read_code_item(b, code)
+                    .map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
+                validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)?;
+                super::decode_instructions(body.instructions)
+                    .map_err(|_| ClassReadError::InvalidInstructions)?;
+            }
             found.push(MethodDefinition {
                 method_index: idx, name, prototype, access_flags: flags, code_offset: code, is_direct
             });
@@ -385,6 +437,7 @@ mod tests {
         let code_offset = b.len();
         let mut header = [0u8; 16];
         header[0..2].copy_from_slice(&1u16.to_le_bytes()); // registers_size
+        header[2..4].copy_from_slice(&1u16.to_le_bytes()); // one incoming receiver word
         header[12..16].copy_from_slice(&1u32.to_le_bytes()); // one code unit
         b.extend_from_slice(&header);
         b.extend_from_slice(&opcode.to_le_bytes());
@@ -404,6 +457,32 @@ mod tests {
     fn rejects_unsupported_opcode_in_defined_method() {
         let (bytes, _) = sample_with_code(0x0073);
         assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
+    }
+
+    #[test]
+    fn rejects_incoming_register_count_mismatch() {
+        let (mut bytes, code_offset) = sample_with_code(0x000e);
+        bytes[code_offset + 2..code_offset + 4].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidRegisterLayout));
+    }
+
+    #[test]
+    fn accepts_static_method_without_receiver_word() {
+        let (mut bytes, code_offset) = sample_with_code(0x000e);
+        bytes[0xb4 + 5] = 0x08; // ACC_STATIC
+        bytes[code_offset + 2..code_offset + 4].copy_from_slice(&0u16.to_le_bytes());
+        let inventory = inspect_classes(&bytes).unwrap();
+        assert_eq!(inventory.classes[0].methods[0].access_flags, 0x08);
+    }
+
+    #[test]
+    fn rejects_missing_wide_parameter_words() {
+        let mut bytes = sample(0);
+        // The minimal fixture's prototype is ()Lx;; this test exercises the parser directly.
+        assert_eq!(parameter_word_count("(JD)V"), Ok(4));
+        assert_eq!(parameter_word_count("([JLjava/lang/Object;)V"), Ok(2));
+        assert_eq!(parameter_word_count("(Q)V"), Err(ClassReadError::InvalidRegisterLayout));
+        let _ = &mut bytes;
     }
 
     #[test]
