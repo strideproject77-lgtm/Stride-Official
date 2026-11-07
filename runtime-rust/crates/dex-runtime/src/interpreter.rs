@@ -335,14 +335,18 @@ impl<'a> ArtVm<'a> {
                     if obj_id != 0 {
                         let type_idx = code_units[pc + 1] as usize;
                         let target_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
-                        let actual_obj = self.heap.get(obj_id).map_err(|e| format!("{:?}", e))?;
-                        if !self.hierarchy.is_assignable_from(&target_type, actual_obj.class_descriptor()) {
-                            let npe_id = self.heap.allocate_instance("Ljava/lang/ClassCastException;").map_err(|e| format!("{:?}", e))?;
+                        let actual_class = self.heap.get(obj_id)
+                            .map_err(|e| format!("{:?}", e))?
+                            .class_descriptor()
+                            .to_owned();
+                        if !self.hierarchy.is_assignable_from(&target_type, &actual_class) {
+                            let exception_id = self.heap.allocate_instance("Ljava/lang/ClassCastException;")
+                                .map_err(|e| format!("{:?}", e))?;
                             return Ok(InterpreterReport {
                                 stop_reason: ExecutionStopReason::UncaughtException(ThrownException {
-                                    exception_object: npe_id,
+                                    exception_object: exception_id,
                                     class_descriptor: "Ljava/lang/ClassCastException;".into(),
-                                    message: Some(format!("Cannot cast {} to {}", actual_obj.class_descriptor(), target_type)),
+                                    message: Some(format!("Cannot cast {} to {}", actual_class, target_type)),
                                     stack_trace: trace.clone(),
                                 }),
                                 steps_executed: steps,
