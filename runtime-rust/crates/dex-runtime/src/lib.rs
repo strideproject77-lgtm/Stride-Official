@@ -190,13 +190,17 @@ pub enum VmError {
     ArgumentCountMismatch { expected: usize, actual: usize },
     MissingInvokeResult,
     CallDepthExceeded,
+    MissingClassType(u16),
+    MissingVirtualMethod { class: String, method_index: u16 },
+    InvalidObjectId,
+    ObjectIdExhausted,
 }
 
 fn width(op: u8) -> Option<usize> {
     match op {
         0x00 | 0x01 | 0x0a | 0x0e | 0x0f | 0x12 | 0x28 | 0xb0..=0xb4 => Some(1),
-        0x02 | 0x13 | 0x15 | 0x29 | 0x32..=0x3d | 0x52 | 0x59 | 0x60 | 0x67 | 0x90..=0x94 => Some(2),
-        0x70 | 0x71 | 0x76 | 0x77 => Some(3),
+        0x02 | 0x13 | 0x15 | 0x22 | 0x29 | 0x32..=0x3d | 0x52 | 0x59 | 0x60 | 0x67 | 0x90..=0x94 => Some(2),
+        0x6e | 0x70 | 0x71 | 0x74 | 0x76 | 0x77 => Some(3),
         0x03 | 0x14 | 0x2a => Some(3),
         _ => None,
     }
@@ -247,6 +251,45 @@ impl IntegerFieldStore {
     }
 }
 
+/// Opaque object handles with exact runtime class descriptors; not a GC heap.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct DexObjectStore {
+    next_id: i32,
+    class_descriptors: HashMap<u16, String>,
+    objects: HashMap<i32, String>,
+}
+impl DexObjectStore {
+    pub fn register_class_type(&mut self, type_index: u16, descriptor: impl Into<String>) {
+        self.class_descriptors.insert(type_index, descriptor.into());
+    }
+    pub fn allocate(&mut self, type_index: u16) -> Result<i32, VmError> {
+        let descriptor = self.class_descriptors.get(&type_index).cloned()
+            .ok_or(VmError::MissingClassType(type_index))?;
+        self.next_id = self.next_id.checked_add(1).ok_or(VmError::ObjectIdExhausted)?;
+        let id = self.next_id;
+        self.objects.insert(id, descriptor);
+        Ok(id)
+    }
+    pub fn class_of(&self, object_id: i32) -> Result<&str, VmError> {
+        self.objects.get(&object_id).map(String::as_str).ok_or(VmError::InvalidObjectId)
+    }
+    pub fn contains(&self, object_id: i32) -> bool { self.objects.contains_key(&object_id) }
+}
+
+/// Exact-runtime-class virtual dispatch. Superclass/interface lookup is not implemented.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct DexVirtualDispatch {
+    implementations: HashMap<(String, u16), u16>,
+}
+impl DexVirtualDispatch {
+    pub fn register(&mut self, runtime_class: impl Into<String>, method_reference: u16, body_id: u16) {
+        self.implementations.insert((runtime_class.into(), method_reference), body_id);
+    }
+    fn resolve(&self, runtime_class: &str, method_reference: u16) -> Option<u16> {
+        self.implementations.get(&(runtime_class.to_owned(), method_reference)).copied()
+    }
+}
+
 /// Executes one already-selected DEX method body represented as little-endian code units.
 ///
 /// `initial_registers` fills the lowest-numbered registers. All remaining registers start
@@ -287,9 +330,31 @@ pub fn execute_integer_method_with_calls(
             expected: body.incoming_words, actual: initial_registers.len(),
         });
     }
+    execute_integer_method_with_runtime(
+        entry_method, methods, initial_registers, step_limit, fields,
+        &mut DexObjectStore::default(), &DexVirtualDispatch::default(),
+    )
+}
+
+/// Execute with explicit object identities and exact-runtime-class virtual dispatch.
+pub fn execute_integer_method_with_runtime(
+    entry_method: u16,
+    methods: &HashMap<u16, DexMethodBody>,
+    initial_registers: &[i32],
+    step_limit: usize,
+    fields: &mut IntegerFieldStore,
+    objects: &mut DexObjectStore,
+    dispatch: &DexVirtualDispatch,
+) -> Result<ExecutionReport, VmError> {
+    let body = methods.get(&entry_method).ok_or(VmError::MissingMethodBody(entry_method))?;
+    if initial_registers.len() != body.incoming_words {
+        return Err(VmError::ArgumentCountMismatch {
+            expected: body.incoming_words, actual: initial_registers.len(),
+        });
+    }
     execute_integer_method_internal(
         &body.code_units, body.register_count, initial_registers, step_limit,
-        fields, methods, 0, true,
+        fields, objects, dispatch, methods, 0, true,
     )
 }
 
@@ -299,6 +364,8 @@ fn execute_integer_method_internal(
     initial_registers: &[i32],
     step_limit: usize,
     fields: &mut IntegerFieldStore,
+    objects: &mut DexObjectStore,
+    dispatch: &DexVirtualDispatch,
     methods: &HashMap<u16, DexMethodBody>,
     depth: usize,
     incoming_at_end: bool,
@@ -390,6 +457,12 @@ fn execute_integer_method_internal(
                 write_register(&mut registers, a4, literal as i32)?;
                 pc += 1;
             }
+            0x22 => { // new-instance vAA, type@BBBB
+                let type_index = code_units[pc + 1];
+                let object_id = objects.allocate(type_index)?;
+                write_register(&mut registers, a8, object_id)?;
+                pc += 2;
+            }
             0x13 => { // const/16 vAA, #+BBBB
                 write_register(&mut registers, a8, code_units[pc + 1] as i16 as i32)?;
                 pc += 2;
@@ -445,11 +518,12 @@ fn execute_integer_method_internal(
                 };
                 pc = if take { branch_target(pc, delta, &boundaries)? } else { pc + 2 };
             }
-            0x70 | 0x71 | 0x76 | 0x77 => { // invoke-direct/static and range forms
+            0x6e | 0x70 | 0x71 | 0x74 | 0x76 | 0x77 => { // virtual/direct/static calls
                 if depth >= 64 { return Err(VmError::CallDepthExceeded); }
                 let method_index = code_units[pc + 1];
-                let is_range = op == 0x76 || op == 0x77;
-                let is_instance = op == 0x70 || op == 0x76;
+                let is_range = op == 0x74 || op == 0x76 || op == 0x77;
+                let is_virtual = op == 0x6e || op == 0x74;
+                let is_instance = op == 0x6e || op == 0x70 || op == 0x74 || op == 0x76;
                 let count;
                 let argument_registers: Vec<u16>;
                 if !is_range {
@@ -476,8 +550,18 @@ fn execute_integer_method_internal(
                     }
                     argument_registers = (0..count).map(|offset| start + offset as u16).collect();
                 }
-                let callee = methods.get(&method_index)
-                    .ok_or(VmError::MissingMethodBody(method_index))?;
+                let target_body = if is_virtual {
+                    let receiver = argument_registers.first()
+                        .map(|index| register(&registers, *index))
+                        .transpose()?.unwrap_or(0);
+                    if receiver == 0 { return Err(VmError::NullObjectReference); }
+                    let runtime_class = objects.class_of(receiver)?;
+                    dispatch.resolve(runtime_class, method_index).ok_or_else(|| {
+                        VmError::MissingVirtualMethod { class: runtime_class.to_owned(), method_index }
+                    })?
+                } else { method_index };
+                let callee = methods.get(&target_body)
+                    .ok_or(VmError::MissingMethodBody(target_body))?;
                 if count != callee.incoming_words {
                     return Err(VmError::ArgumentCountMismatch {
                         expected: callee.incoming_words, actual: count,
@@ -494,7 +578,7 @@ fn execute_integer_method_internal(
                 if remaining == 0 { return Err(VmError::StepLimitExceeded); }
                 let report = execute_integer_method_internal(
                     &callee.code_units, callee.register_count, &arguments, remaining,
-                    fields, methods, depth + 1, true,
+                    fields, objects, dispatch, methods, depth + 1, true,
                 )?;
                 steps = steps.checked_add(report.steps).ok_or(VmError::StepLimitExceeded)?;
                 if steps > step_limit { return Err(VmError::StepLimitExceeded); }
@@ -776,6 +860,87 @@ mod tests {
         assert_eq!(
             execute_integer_method(&code, 0, &[], 10),
             Err(VmError::InvalidBranchTarget)
+        );
+    }
+
+    #[test]
+    fn allocates_object_and_dispatches_virtual_call_by_runtime_class() {
+        let mut methods = HashMap::new();
+        methods.insert(12, DexMethodBody { code_units: vec![0x7012, 0x000f], register_count: 1, incoming_words: 1 });
+        methods.insert(20, DexMethodBody {
+            code_units: vec![0x0022, 3, 0x106e, 7, 0, 0x010a, 0x010f],
+            register_count: 2, incoming_words: 0,
+        });
+        let mut objects = DexObjectStore::default();
+        objects.register_class_type(3, "Lgame/Vehicle;");
+        let mut dispatch = DexVirtualDispatch::default();
+        dispatch.register("Lgame/Vehicle;", 7, 12);
+        let report = execute_integer_method_with_runtime(
+            20, &methods, &[], 30, &mut IntegerFieldStore::default(), &mut objects, &dispatch,
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(7));
+        assert_eq!(objects.class_of(1), Ok("Lgame/Vehicle;"));
+    }
+
+    #[test]
+    fn virtual_dispatch_uses_exact_runtime_class_mapping() {
+        let mut methods = HashMap::new();
+        methods.insert(1, DexMethodBody { code_units: vec![0x7012, 0x000f], register_count: 1, incoming_words: 1 });
+        methods.insert(2, DexMethodBody { code_units: vec![0x3012, 0x000f], register_count: 1, incoming_words: 1 });
+        methods.insert(3, DexMethodBody {
+            code_units: vec![0x0022, 9, 0x106e, 4, 0, 0x010a, 0x010f],
+            register_count: 2, incoming_words: 0,
+        });
+        let mut objects = DexObjectStore::default();
+        objects.register_class_type(9, "Lgame/Truck;");
+        let mut dispatch = DexVirtualDispatch::default();
+        dispatch.register("Lgame/Truck;", 4, 2);
+        let report = execute_integer_method_with_runtime(
+            3, &methods, &[], 30, &mut IntegerFieldStore::default(), &mut objects, &dispatch,
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(3));
+    }
+
+    #[test]
+    fn rejects_missing_virtual_implementation_and_null_receiver() {
+        let mut methods = HashMap::new();
+        methods.insert(1, DexMethodBody { code_units: vec![0x000e], register_count: 1, incoming_words: 1 });
+        methods.insert(2, DexMethodBody { code_units: vec![0x006e, 5, 0, 0x000e], register_count: 1, incoming_words: 0 });
+        assert_eq!(
+            execute_integer_method_with_runtime(
+                2, &methods, &[], 10, &mut IntegerFieldStore::default(),
+                &mut DexObjectStore::default(), &DexVirtualDispatch::default(),
+            ),
+            Err(VmError::NullObjectReference)
+        );
+        let mut objects = DexObjectStore::default();
+        objects.register_class_type(2, "Lgame/Car;");
+        let mut create_then_call = HashMap::new();
+        create_then_call.insert(2, DexMethodBody {
+            code_units: vec![0x0022, 2, 0x106e, 5, 0, 0x000e],
+            register_count: 1, incoming_words: 0,
+        });
+        assert!(matches!(
+            execute_integer_method_with_runtime(
+                2, &create_then_call, &[], 10, &mut IntegerFieldStore::default(),
+                &mut objects, &DexVirtualDispatch::default(),
+            ),
+            Err(VmError::MissingVirtualMethod { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_unknown_class_type_during_object_allocation() {
+        let mut methods = HashMap::new();
+        methods.insert(1, DexMethodBody {
+            code_units: vec![0x0022, 77, 0x000e], register_count: 1, incoming_words: 0,
+        });
+        assert_eq!(
+            execute_integer_method_with_runtime(
+                1, &methods, &[], 10, &mut IntegerFieldStore::default(),
+                &mut DexObjectStore::default(), &DexVirtualDispatch::default(),
+            ),
+            Err(VmError::MissingClassType(77))
         );
     }
 
