@@ -4,6 +4,15 @@
 //! subset and a metadata-only class/method registry. It does not provide Android
 //! framework classes, inheritance dispatch, JNI, or native library execution.
 
+pub mod types;
+pub mod heap;
+pub mod hierarchy;
+pub mod sync;
+pub mod exceptions;
+pub mod jni;
+pub mod framework;
+pub mod interpreter;
+
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
     ClassDefinition, ClassInventory, FieldDefinition, FieldReference, MethodDefinition, MethodReference,
