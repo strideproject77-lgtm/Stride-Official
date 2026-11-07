@@ -208,10 +208,15 @@ impl ManagedHeap {
             return Err(HeapError::NegativeArraySize(length));
         }
         let ulen = length as usize;
-        let default_val = if element_descriptor.starts_with('L') || element_descriptor.starts_with('[') {
-            Value::Null
-        } else {
-            Value::Int(0)
+        // The descriptor passed here is the *array* descriptor (for example
+        // [I or [Ljava/lang/String;), not just the component type. Primitive
+        // arrays must be zero-initialized; only reference arrays default to null.
+        let default_val = match element_descriptor {
+            "[Z" | "[B" | "[C" | "[S" | "[I" => Value::Int(0),
+            "[J" => Value::Long(0),
+            "[F" => Value::Float(0.0),
+            "[D" => Value::Double(0.0),
+            _ => Value::Null,
         };
         let elements = vec![default_val; ulen];
         let obj = HeapObject::Array(ArrayObject {
