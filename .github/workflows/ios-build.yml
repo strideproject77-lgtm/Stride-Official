@@ -48,6 +48,22 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Set up Rust iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Build Rust DEX FFI for iOS
+        run: |
+          cargo build --manifest-path runtime-rust/Cargo.toml -p stride-dex-ffi --release --target aarch64-apple-ios
+          cargo build --manifest-path runtime-rust/Cargo.toml -p stride-dex-ffi --release --target aarch64-apple-ios-sim
+          xcodebuild -create-xcframework \\
+            -library runtime-rust/target/aarch64-apple-ios/release/libstride_dex_ffi.a \\
+            -headers runtime-rust/crates/dex-ffi/include \\
+            -library runtime-rust/target/aarch64-apple-ios-sim/release/libstride_dex_ffi.a \\
+            -headers runtime-rust/crates/dex-ffi/include \\
+            -output runtime-rust/target/StrideDexFFI.xcframework
+
       - name: Generate Xcode project
         run: xcodegen generate
 

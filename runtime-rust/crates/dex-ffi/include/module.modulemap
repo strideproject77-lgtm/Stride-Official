@@ -1,0 +1,4 @@
+module StrideDexFFI {
+    header "stride_dex_ffi.h"
+    export *
+}
