@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 
-# Keep the latest check for each ref; macOS is reserved for intentional iOS builds.
+# Keep only the latest check for each ref; iOS builds are deliberate manual runs.
 concurrency:
   group: stride-ios-build-${{ github.ref }}
   cancel-in-progress: true
@@ -32,7 +32,7 @@ jobs:
 
   ios-build:
     name: Build unsigned iOS IPA
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch'
     needs: rust-tests
     runs-on: macos-15
     timeout-minutes: 90
@@ -62,9 +62,8 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      # This hosted Mac runner cannot connect to Apple's Simulator service.
-      # Compile the iOS app for a generic physical device below; simulator tests
-      # must run on a runner with a working iOS Simulator runtime.
+      # The hosted Mac runner cannot connect to Apple's Simulator service.
+      # Compile for a physical iOS device; simulator tests need another runner.
       - name: Build for physical iOS devices
         run: |
           xcodebuild \
