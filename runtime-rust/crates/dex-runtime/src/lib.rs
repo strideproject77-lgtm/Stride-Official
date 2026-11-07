@@ -217,8 +217,7 @@ fn write_register(registers: &mut [i32], index: u16, value: i32) -> Result<(), V
 }
 
 fn branch_target(
-    source: usize,
-    delta: isize,
+    source: usize,    delta: isize,
     boundaries: &[bool],
 ) -> Result<usize, VmError> {
     let target = (source as isize)
@@ -437,8 +436,7 @@ fn execute_integer_method_internal(
                 let b = code_units[pc + 2];
                 let value = register(&registers, b)?;
                 write_register(&mut registers, a, value)?;
-                pc += 3;
-            }
+                pc += 3;            }
             0x0a => {
                 match pending_result.take() {
                     Some(ReturnValue::Int(value)) => write_register(&mut registers, a8, value)?,
@@ -658,7 +656,6 @@ fn execute_integer_method_internal(
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -877,8 +874,7 @@ mod tests {
         let mut dispatch = DexVirtualDispatch::default();
         dispatch.register("Lgame/Vehicle;", 7, 12);
         let report = execute_integer_method_with_runtime(
-            20, &methods, &[], 30, &mut IntegerFieldStore::default(), &mut objects, &dispatch,
-        ).unwrap();
+            20, &methods, &[], 30, &mut IntegerFieldStore::default(), &mut objects, &dispatch,        ).unwrap();
         assert_eq!(report.value, ReturnValue::Int(7));
         assert_eq!(objects.class_of(1), Ok("Lgame/Vehicle;"));
     }
@@ -1082,5 +1078,190 @@ mod tests {
             execute_integer_method(&code, 1, &[], 10),
             Err(VmError::UnsupportedOpcode(0x6f))
         );
+    }
+}
+
+
+// DEX-to-interpreter bridge. This loads code_item bodies from a parsed class
+// inventory; it does not imply that Android framework or native methods exist.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DexLoadError {
+    InvalidClassTypeIndex(u32),
+    InvalidMethodIndex(u32),
+    DuplicateClassType(u16),
+    DuplicateMethodBody(u16),
+    CodeItem { method_index: u32, error: stride_dex_inspector::CodeItemError },
+}
+
+#[derive(Debug, Default)]
+pub struct DexExecutable {
+    methods: HashMap<u16, DexMethodBody>,
+    objects: DexObjectStore,
+    dispatch: DexVirtualDispatch,
+    class_count: usize,
+}
+
+impl DexExecutable {
+    /// Build executable method bodies from one DEX byte buffer and its parsed inventory.
+    /// Abstract/native methods (code_off == 0) are deliberately left unresolved.
+    pub fn from_inventory(
+        dex_bytes: &[u8],
+        inventory: ClassInventory,
+    ) -> Result<Self, DexLoadError> {
+        let mut executable = Self::default();
+        let mut seen_types = HashSet::new();
+
+        for class in &inventory.classes {
+            let type_index = u16::try_from(class.class_index)
+                .map_err(|_| DexLoadError::InvalidClassTypeIndex(class.class_index))?;
+            if !seen_types.insert(type_index) {
+                return Err(DexLoadError::DuplicateClassType(type_index));
+            }
+            executable.objects.register_class_type(type_index, class.descriptor.clone());
+            executable.class_count += 1;
+        }
+
+        for class in &inventory.classes {
+            for method in &class.methods {
+                if method.code_offset == 0 {
+                    continue;
+                }
+                let method_id = u16::try_from(method.method_index)
+                    .map_err(|_| DexLoadError::InvalidMethodIndex(method.method_index))?;
+                if executable.methods.contains_key(&method_id) {
+                    return Err(DexLoadError::DuplicateMethodBody(method_id));
+                }
+                let code = stride_dex_inspector::read_code_item(dex_bytes, method.code_offset)
+                    .map_err(|error| DexLoadError::CodeItem {
+                        method_index: method.method_index,
+                        error,
+                    })?;
+                let code_units = code.instructions
+                    .chunks_exact(2)
+                    .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+                    .collect();
+                executable.methods.insert(method_id, DexMethodBody {
+                    code_units,
+                    register_count: usize::from(code.registers_size),
+                    incoming_words: usize::from(code.ins_size),
+                });
+                if !method.is_direct {
+                    executable.dispatch.register(
+                        class.descriptor.clone(),
+                        method_id,
+                        method_id,
+                    );
+                }
+            }
+        }
+        Ok(executable)
+    }
+
+    pub fn class_count(&self) -> usize { self.class_count }
+    pub fn method_count(&self) -> usize { self.methods.len() }
+    pub fn has_method_body(&self, method_id: u16) -> bool {
+        self.methods.contains_key(&method_id)
+    }
+
+    /// Execute a loaded method with the existing bounded integer interpreter.
+    /// This is not a complete Android app launch path.
+    pub fn execute_entry(
+        &mut self,
+        method_id: u16,
+        arguments: &[i32],
+        step_limit: usize,
+        fields: &mut IntegerFieldStore,
+    ) -> Result<ExecutionReport, VmError> {
+        execute_integer_method_with_runtime(
+            method_id,
+            &self.methods,
+            arguments,
+            step_limit,
+            fields,
+            &mut self.objects,
+            &self.dispatch,
+        )
+    }
+}
+
+#[cfg(test)]
+mod dex_loader_tests {
+    use super::*;
+
+    fn one_method_inventory(code_offset: u32) -> ClassInventory {
+        ClassInventory {
+            classes: vec![ClassDefinition {
+                class_index: 0,
+                descriptor: "Lsample/Entry;".into(),
+                access_flags: 1,
+                superclass_index: None,
+                static_field_count: 0,
+                instance_field_count: 0,
+                direct_method_count: 1,
+                virtual_method_count: 0,
+                fields: vec![],
+                methods: vec![MethodDefinition {
+                    method_index: 0,
+                    name: "entry".into(),
+                    prototype: "()I".into(),
+                    access_flags: 0x0009,
+                    code_offset,
+                    is_direct: true,
+                }],
+            }],
+            method_references: vec![],
+            field_references: vec![],
+        }
+    }
+
+    fn minimal_code_item() -> Vec<u8> {
+        let mut bytes = vec![0u8; 0x70 + 16 + 4];
+        let offset = 0x70;
+        bytes[offset..offset + 2].copy_from_slice(&1u16.to_le_bytes());
+        bytes[offset + 2..offset + 4].copy_from_slice(&0u16.to_le_bytes());
+        bytes[offset + 12..offset + 16].copy_from_slice(&2u32.to_le_bytes());
+        // const/4 v0, 5; return v0
+        bytes[offset + 16..offset + 18].copy_from_slice(&0x5012u16.to_le_bytes());
+        bytes[offset + 18..offset + 20].copy_from_slice(&0x000fu16.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn loads_code_item_and_executes_entry_method() {
+        let bytes = minimal_code_item();
+        let mut executable = DexExecutable::from_inventory(
+            &bytes,
+            one_method_inventory(0x70),
+        ).unwrap();
+        assert_eq!(executable.class_count(), 1);
+        assert_eq!(executable.method_count(), 1);
+        assert!(executable.has_method_body(0));
+        let report = executable.execute_entry(
+            0, &[], 10, &mut IntegerFieldStore::default(),
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(5));
+    }
+
+    #[test]
+    fn skips_abstract_or_native_methods_without_code_items() {
+        let executable = DexExecutable::from_inventory(
+            &minimal_code_item(),
+            one_method_inventory(0),
+        ).unwrap();
+        assert_eq!(executable.class_count(), 1);
+        assert_eq!(executable.method_count(), 0);
+        assert!(!executable.has_method_body(0));
+    }
+
+    #[test]
+    fn rejects_invalid_code_item_offsets_without_partial_executable() {
+        let result = DexExecutable::from_inventory(
+            &minimal_code_item(),
+            one_method_inventory(u32::MAX),
+        );
+        assert!(matches!(
+            result,
+            Err(DexLoadError::CodeItem { method_index: 0, .. })
+        ));
     }
 }
