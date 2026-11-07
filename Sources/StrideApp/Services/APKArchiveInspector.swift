@@ -86,14 +86,20 @@ struct APKArchiveInspector {
             dexData.reserveCapacity(Int(declaredSize))
             var extractedBytes: UInt64 = 0
             var exceededLimit = false
-            _ = try archive.extract(entry) { chunk in
-                let (newSize, overflow) = extractedBytes.addingReportingOverflow(UInt64(chunk.count))
-                guard !overflow, newSize <= maxDEXEntryBytes else {
-                    exceededLimit = true
-                    return
+            do {
+                _ = try archive.extract(entry) { chunk in
+                    let (newSize, overflow) = extractedBytes.addingReportingOverflow(UInt64(chunk.count))
+                    guard !overflow, newSize <= maxDEXEntryBytes else {
+                        exceededLimit = true
+                        return
+                    }
+                    dexData.append(chunk)
+                    extractedBytes = newSize
                 }
-                dexData.append(chunk)
-                extractedBytes = newSize
+            } catch {
+                // A damaged DEX entry must not make an otherwise readable APK unimportable.
+                skippedDexCount += 1
+                continue
             }
             guard !exceededLimit else {
                 skippedDexCount += 1
