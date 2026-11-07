@@ -16,6 +16,9 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-07: Connected `APKArchiveInspector` to the Swift `StrideDexInventory` Rust FFI during APK import. It now reports analyzed DEX count plus class/method totals, and the package detail UI shows those counts. Decompression and FFI input are bounded to 64 MiB per DEX, 128 MiB total declared DEX data, and 32 DEX entries; malformed/oversized DEX files are counted as skipped rather than treated as executable.
+- This Swift/ZIPFoundation integration has not yet been compiled or run. No manual macOS workflow run was available through the connected GitHub tools in this session. The next verification must compile the app and exercise APK import with a valid DEX fixture and malformed/oversized inputs; do not claim the Swift bridge is verified until then.
+
 - Added bounds-checked DEX class/method inventory parsing at runtime-rust/crates/dex-inspector/src/classes.rs. It reads class definitions, encoded fields and methods, descriptors, names, prototypes, and referenced code-item boundaries. This is structural metadata parsing, not verification or execution.
 - Added unit tests for valid inventory, foreign class ownership, and invalid file size. These passed in Rust workflow run #19.
 - Improved the SwiftUI APK library/detail experience in Sources/StrideApp/ContentView.swift. It shows APK and DEX counts, recent packages, details, ABI chips, and explicit runtime limitations. The screen has not yet been visually checked in Xcode.
@@ -44,6 +47,8 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 - PR #1 is draft and must remain unmerged until checks and review are complete.
 
 ## Known issues
+
+- Latest unverified integration: Swift import now calls the Rust DEX inventory FFI and surfaces class/method counts. Validate compilation and bounded extraction before relying on these results.
 
 - The DEX inventory and FFI crate passed Rust CI in runs #38, #43, and #51; device/simulator Rust compilation and Swift linkage passed in run #51.
 - The DEX FFI returns class/method counts and is linked through a Swift wrapper, but APKArchiveInspector does not call it yet. It does not execute code.
@@ -84,14 +89,15 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 
 ## Next steps
 
-1. Obtain and pin one official Hill Climb Racing APK build, then produce a requirement report before changing the runtime.
-2. Connect APKArchiveInspector to StrideDexInventory.inspect with bounded DEX extraction and expose parse results in the UI.
-3. Prove the Rust ABI using a valid DEX fixture in Swift tests.
-4. Build a tiny clean-room launch fixture to measure the minimum verifier, class-loader, Activity, render, and input work before promising HCR dates.
-5. Expand toward the pinned HCR build by implementing only observed dependencies; update the target percentage only when acceptance evidence passes.
+1. Compile the latest Swift/ZIPFoundation integration with the manual macOS workflow and fix any build issues. That workflow should not be run for unrelated routine edits.
+2. Verify the Rust ABI on valid DEX input and exercise malformed/oversized DEX handling. Do not use a real HCR APK as a substitute for a controlled fixture.
+3. Obtain and pin one official Hill Climb Racing APK build; record package/version/hash/min/target SDK/ABIs/DEX/native libraries, then write a requirement report.
+4. Build a tiny clean-room launch fixture to measure verifier, class-loader, Activity, rendering, and input work before promising HCR dates.
+5. Expand toward the pinned HCR build by implementing observed dependencies; update the target percentage only when acceptance evidence passes.
 
 ## Resume checklist
 
 - Confirm branch feat/dex-class-method-loader and current workflow status.
 - Read the Hill Climb target gate, current 0% status, and workflow policy above.
-- First task: obtain/pin the exact official APK build; then connect DEX inspection before writing execution code.
+- Recent code step: APK import now invokes the Rust DEX inventory FFI with bounded extraction; compilation and behavior remain unverified.
+- First task on resume: manually compile the integration once, fix any issues, and verify valid/malformed DEX handling. Then obtain/pin the exact official APK before writing app-execution code.
