@@ -8,15 +8,15 @@ use crate::types::{
     Value, RegisterFile, int_to_long, int_to_float, int_to_double, long_to_int,
     long_to_float, long_to_double, float_to_int, float_to_long, float_to_double,
     double_to_int, double_to_long, double_to_float, int_to_byte, int_to_char,
-    int_to_short, cmp_long, cmpl_float, cmpg_float, cmpl_double, cmpg_double,
+    int_to_short,
 };
 use crate::heap::ManagedHeap;
 use crate::hierarchy::ClassHierarchy;
-use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
+use crate::exceptions::TryBlock;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionStopReason {
     ReturnedVoid,
     ReturnedValue(Value),
@@ -97,7 +97,7 @@ impl<'a> ArtVm<'a> {
         let code_units = &method.code_units;
         if code_units.is_empty() {
             return Ok(InterpreterReport {
-                stop_reason: ExecutionStopReason.ReturnedVoid,
+                stop_reason: ExecutionStopReason::ReturnedVoid,
                 steps_executed: 0,
             });
         }
@@ -228,28 +228,28 @@ impl<'a> ArtVm<'a> {
                 }
                 0x0e => { // return-void
                     return Ok(InterpreterReport {
-                        stop_reason: ExecutionStopReason.ReturnedVoid,
+                        stop_reason: ExecutionStopReason::ReturnedVoid,
                         steps_executed: steps,
                     });
                 }
                 0x0f => { // return vAA
                     let val = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     return Ok(InterpreterReport {
-                        stop_reason: ExecutionStopReason.ReturnedValue(Value::Int(val)),
+                        stop_reason: ExecutionStopReason::ReturnedValue(Value::Int(val)),
                         steps_executed: steps,
                     });
                 }
                 0x10 => { // return-wide vAA
                     let val = rf.read_long(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     return Ok(InterpreterReport {
-                        stop_reason: ExecutionStopReason.ReturnedValue(Value::Long(val)),
+                        stop_reason: ExecutionStopReason::ReturnedValue(Value::Long(val)),
                         steps_executed: steps,
                     });
                 }
                 0x11 => { // return-object vAA
                     let val = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     return Ok(InterpreterReport {
-                        stop_reason: ExecutionStopReason.ReturnedValue(Value::Object(val)),
+                        stop_reason: ExecutionStopReason::ReturnedValue(Value::Object(val)),
                         steps_executed: steps,
                     });
                 }
@@ -497,21 +497,21 @@ impl<'a> ArtVm<'a> {
                     steps += sub_report.steps_executed;
 
                     match sub_report.stop_reason {
-                        ExecutionStopReason.ReturnedValue(val) => {
-                            pending_result = Some(val);
+                        ExecutionStopReason::ReturnedValue(returned_val) => {
+                            pending_result = Some(returned_val);
                         }
-                        ExecutionStopReason.ReturnedVoid => {
+                        ExecutionStopReason::ReturnedVoid => {
                             pending_result = None;
                         }
-                        ExecutionStopReason.UncaughtException(ex) => {
+                        ExecutionStopReason::UncaughtException(uncaught_msg) => {
                             return Ok(InterpreterReport {
-                                stop_reason: ExecutionStopReason.UncaughtException(ex),
+                                stop_reason: ExecutionStopReason::UncaughtException(uncaught_msg),
                                 steps_executed: steps,
                             });
                         }
-                        ExecutionStopReason.StepLimitExceeded => {
+                        ExecutionStopReason::StepLimitExceeded => {
                             return Ok(InterpreterReport {
-                                stop_reason: ExecutionStopReason.StepLimitExceeded,
+                                stop_reason: ExecutionStopReason::StepLimitExceeded,
                                 steps_executed: steps,
                             });
                         }
@@ -523,12 +523,11 @@ impl<'a> ArtVm<'a> {
         }
 
         Ok(InterpreterReport {
-            stop_reason: ExecutionStopReason.ReturnedVoid,
+            stop_reason: ExecutionStopReason::ReturnedVoid,
             steps_executed: steps,
         })
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -561,7 +560,7 @@ mod tests {
         let report = vm.execute_method(1, &[], 20).unwrap();
         assert_eq!(
             report.stop_reason,
-            ExecutionStopReason.ReturnedValue(Value::Long(50))
+            ExecutionStopReason::ReturnedValue(Value::Long(50))
         );
     }
 
@@ -593,7 +592,7 @@ mod tests {
         let report = vm.execute_method(2, &[], 20).unwrap();
         assert_eq!(
             report.stop_reason,
-            ExecutionStopReason.ReturnedValue(Value::Int(3))
+            ExecutionStopReason::ReturnedValue(Value::Int(3))
         );
     }
 }
