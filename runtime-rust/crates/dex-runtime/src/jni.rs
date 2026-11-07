@@ -109,13 +109,13 @@ impl JniNativeRegistry {
             "Ljava/lang/System;",
             "currentTimeMillis",
             "()J",
-            Arc::new(|_env, _args| {
+            |_env, _args| {
                 let ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0);
                 Ok(Some(Value::Long(ms)))
-            }),
+            },
         );
 
         // android.util.Log.i(String, String)I
@@ -123,9 +123,9 @@ impl JniNativeRegistry {
             "Landroid/util/Log;",
             "i",
             "(Ljava/lang/String;Ljava/lang/String;)I",
-            Arc::new(|_env, _args| {
+            |_env, _args| {
                 Ok(Some(Value::Int(1)))
-            }),
+            },
         );
     }
 }
