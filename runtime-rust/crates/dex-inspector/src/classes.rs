@@ -34,6 +34,15 @@ pub struct MethodDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldDefinition {
+    pub field_index: u32,
+    pub name: String,
+    pub field_type: String,
+    pub access_flags: u32,
+    pub is_static: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassDefinition {
     pub class_index: u32,
     pub descriptor: String,
@@ -43,6 +52,7 @@ pub struct ClassDefinition {
     pub instance_field_count: u32,
     pub direct_method_count: u32,
     pub virtual_method_count: u32,
+    pub fields: Vec<FieldDefinition>,
     pub methods: Vec<MethodDefinition>,
 }
 
@@ -261,15 +271,30 @@ fn class_data(
         return Err(ClassReadError::InvalidClassData);
     }
 
-    for count in [static_fields, instance_fields] {
+    let mut found_fields = Vec::with_capacity((static_fields + instance_fields) as usize);
+    let mut seen_field_indices = std::collections::HashSet::new();
+    for (count, is_static) in [(static_fields, true), (instance_fields, false)] {
         let mut idx = 0;
         for _ in 0..count {
             idx = delta_index(idx, uleb(b, &mut p)?, field_count)?;
-            let _flags = uleb(b, &mut p)?;
+            let flags = uleb(b, &mut p)?;
             let at = fields.start.checked_add(idx as usize * 8).ok_or(ClassReadError::InvalidIndex)?;
-            if at >= fields.end || u32::from(u16le(b, at)?) != class_index {
+            if at.checked_add(8).filter(|end| *end <= fields.end).is_none()
+                || u32::from(u16le(b, at)?) != class_index {
                 return Err(ClassReadError::InvalidIndex);
             }
+            if !seen_field_indices.insert(idx) {
+                return Err(ClassReadError::InvalidIndex);
+            }
+            let type_index = u32::from(u16le(b, at + 2)?);
+            let name_index = u32le(b, at + 4)?;
+            found_fields.push(FieldDefinition {
+                field_index: idx,
+                name: dex_string(b, strings, string_count, name_index)?,
+                field_type: type_descriptor(b, strings, types, string_count, type_count, type_index)?,
+                access_flags: flags,
+                is_static,
+            });
         }
     }
 
@@ -318,6 +343,7 @@ fn class_data(
         class_index, descriptor: String::new(), access_flags: 0, superclass_index: None,
         static_field_count: static_fields, instance_field_count: instance_fields,
         direct_method_count: direct_methods, virtual_method_count: virtual_methods,
+        fields: found_fields,
         methods: found,
     })
 }
@@ -416,7 +442,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
             ClassDefinition {
                 class_index: id, descriptor: String::new(), access_flags: 0, superclass_index: None,
                 static_field_count: 0, instance_field_count: 0,
-                direct_method_count: 0, virtual_method_count: 0, methods: Vec::new(),
+                direct_method_count: 0, virtual_method_count: 0, fields: Vec::new(), methods: Vec::new(),
             }
         } else {
             class_data(
@@ -483,6 +509,7 @@ mod tests {
         assert_eq!(class.methods[0].name, "foo");
         assert_eq!(class.methods[0].prototype, "()Lx;");
         assert_eq!(class.methods[0].code_offset, 0);
+        assert!(class.fields.is_empty());
         assert_eq!(inventory.method_references, vec![MethodReference {
             method_index: 0,
             class_descriptor: "Lx;".to_string(),
