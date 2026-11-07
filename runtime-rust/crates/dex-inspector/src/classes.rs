@@ -19,6 +19,8 @@ pub enum ClassReadError {
     InvalidCodeItem,
     InvalidInstructions,
     InvalidRegisterLayout,
+    InvalidMethodKind,
+    DuplicateMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +254,7 @@ fn class_data(
     }
 
     let mut found = Vec::new();
+    let mut seen_method_indices = std::collections::HashSet::new();
     for (count, is_direct) in [(direct_methods, true), (virtual_methods, false)] {
         let mut idx = 0;
         for _ in 0..count {
@@ -266,6 +269,17 @@ fn class_data(
             let name_index = u32le(b, at + 4)?;
             let name = dex_string(b, strings, string_count, name_index)?;
             let prototype = proto_signature(b, strings, types, protos, string_count, type_count, proto_index)?;
+            if !seen_method_indices.insert(idx) {
+                return Err(ClassReadError::DuplicateMethod);
+            }
+            let should_be_direct = flags & (0x0002 | 0x0008 | 0x10000) != 0
+                || name == "<init>" || name == "<clinit>";
+            if should_be_direct != is_direct {
+                return Err(ClassReadError::InvalidMethodKind);
+            }
+            if (name == "<init>" || name == "<clinit>") && flags & 0x10000 == 0 {
+                return Err(ClassReadError::InvalidMethodKind);
+            }
             if code != 0 {
                 let body = read_code_item(b, code)
                     .map_err(|_: CodeItemError| ClassReadError::InvalidCodeItem)?;
@@ -380,7 +394,8 @@ mod tests {
         let methods = protos + 12;
         let defs = methods + 8;
         let data = defs + 32;
-        let class_data = [0, 0, 1, 0, 0, 1, 0];
+        // One direct method; ACC_PRIVATE makes its direct classification valid.
+        let class_data = [0, 0, 1, 0, 0, 2, 0];
         let string_data = [3, b'L', b'x', b';', 0, 3, b'f', b'o', b'o', 0];
         let mut b = vec![0; data + class_data.len() + string_data.len()];
         b[..8].copy_from_slice(b"dex\n039\0");
@@ -491,6 +506,14 @@ mod tests {
         assert_eq!(validate_register_layout(4, 4, 0x08, "(JD)V"), Ok(()));
         assert_eq!(validate_register_layout(5, 5, 0, "(JD)V"), Ok(()));
         assert_eq!(validate_register_layout(4, 4, 0, "(JD)V"), Err(ClassReadError::InvalidRegisterLayout));
+    }
+
+    #[test]
+    fn rejects_virtual_method_with_direct_access_flags() {
+        let mut b = sample(0);
+        // The method is listed as direct; remove ACC_PRIVATE to make the category inconsistent.
+        b[0xb4 + 5] = 0;
+        assert_eq!(inspect_classes(&b), Err(ClassReadError::InvalidMethodKind));
     }
 
     #[test]
