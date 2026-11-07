@@ -39,14 +39,15 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 - PR run #19 passed the Ubuntu Rust tests after the DEX parser/native-loader fix.
 - Runs #23 and #24 exposed unavailable simulator support on the hosted Mac. Workflow commit 913a9f3 removed simulator download/device-test steps; macOS CI now builds the physical-device target and packages an unsigned IPA.
-- Workflow run #36 was in progress on branch head 6f4f946c4de12949a6f83afe3dbd697645e9d8c2 when this handoff was written. Check its Rust and macOS jobs, including IPA artifact upload. The handoff update itself may start another run.
+- PR workflow run #38 passed the Ubuntu Rust tests, including the new FFI tests; its macOS job was skipped as designed for pull requests.
+- Push run #37 passed Rust but the iOS compile failed because 11 SwiftUI .tracking modifiers require iOS 16 while the app targets iOS 15. Commit f4cd66a replaced them with iOS 15-compatible .kerning modifiers. Check the next push run to verify the device build and IPA artifact upload.
 - PR #1 is draft and must remain unmerged until checks and review are complete.
 
 ## Known issues
 
-- The DEX inventory has passed Rust CI, but the new FFI crate still needs CI validation.
+- The DEX inventory and new FFI crate passed Rust CI in run #38.
 - The DEX FFI only returns class/method counts; it is not linked into Swift and does not execute code.
-- The UI has not been visually checked in Xcode.
+- The UI has compiled in earlier CI but the current iOS 15 compatibility fix awaits the next macOS run; it has not been visually checked in Xcode.
 - The interpreter supports only a small primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
 - No real-device APK launch test exists.
@@ -54,7 +55,7 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 ## Next steps
 
-1. Check the latest workflow on feat/dex-class-method-loader. Fix Rust, iOS build, or artifact failures.
+1. Check the workflow triggered by commit f4cd66a. Confirm the iOS 15 compile succeeds and the unsigned IPA is uploaded; fix any remaining failures.
 2. Add macOS CI steps that build the Rust static library for iOS device and simulator targets. Link the library into the generated Xcode project and verify the Swift app builds.
 3. Add a Swift wrapper around stride_dex_inventory_counts. Extract classes*.dex from imported APKs and report class/method counts and parse errors in the package detail sheet.
 4. Add valid DEX fixtures to exercise the C ABI through Swift before claiming the app uses Rust parsing.
@@ -64,4 +65,4 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 - Confirm current branch head and latest workflow run.
 - Re-read this handoff, especially CI status and known issues.
-- First check run #36, then continue with macOS Rust target builds and Xcode linking.
+- First check the push run after f4cd66a, then continue with macOS Rust target builds and Xcode linking.
