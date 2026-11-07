@@ -13,11 +13,88 @@ struct APKInspection: Equatable {
     let nativeABIs: [String]
     let hasResourceTable: Bool
     let isValidPackage: Bool
+    let iconData: Data?
 
     var summary: String {
         guard isValidPackage else { return "Invalid APK archive" }
         return "\(dexFileCount) DEX · \(nativeABIs.isEmpty ? "No native libraries" : nativeABIs.joined(separator: ", "))"
     }
+
+    /// Extracts conventional launcher images while preserving their original artwork.
+    /// Adaptive-icon XML is not rasterized; density-specific image fallbacks are used.
+    private func extractIcon(from entries: [Entry], in archive: Archive) -> Data? {
+        let candidates = entries
+            .filter { UInt64($0.uncompressedSize) <= maxIconEntryBytes }
+            .sorted { Self.iconScore($0.path) > Self.iconScore($1.path) }
+
+        for entry in candidates {
+            var data = Data()
+            data.reserveCapacity(Int(entry.uncompressedSize))
+            var exceededLimit = false
+            do {
+                _ = try archive.extract(entry) { chunk in
+                    guard data.count + chunk.count <= Int(self.maxIconEntryBytes) else {
+                        exceededLimit = true
+                        return
+                    }
+                    data.append(chunk)
+                }
+            } catch {
+                continue
+            }
+            guard !exceededLimit, Self.looksLikeSupportedImage(data) else { continue }
+            return data
+        }
+        return nil
+    }
+
+    private static func isLauncherIconCandidate(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        guard lower.hasPrefix("res/"),
+              ["png", "webp", "jpg", "jpeg"].contains(URL(fileURLWithPath: lower).pathExtension) else {
+            return false
+        }
+        let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
+        return ["ic_launcher", "ic_launcher_round", "app_icon", "launcher_icon", "icon"].contains(name)
+    }
+
+    private static func iconScore(_ path: String) -> Int {
+        let lower = path.lowercased()
+        let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
+        let nameScore: Int
+        switch name {
+        case "ic_launcher": nameScore = 500
+        case "ic_launcher_round": nameScore = 450
+        case "app_icon": nameScore = 400
+        case "launcher_icon": nameScore = 350
+        default: nameScore = 300
+        }
+        let densityScore: Int
+        if lower.contains("xxxhdpi") { densityScore = 80 }
+        else if lower.contains("xxhdpi") { densityScore = 70 }
+        else if lower.contains("xhdpi") { densityScore = 60 }
+        else if lower.contains("hdpi") { densityScore = 50 }
+        else if lower.contains("mdpi") { densityScore = 40 }
+        else if lower.contains("tvdpi") { densityScore = 35 }
+        else if lower.contains("nodpi") { densityScore = 30 }
+        else { densityScore = 20 }
+        let formatScore = lower.hasSuffix(".png") ? 3 : (lower.hasSuffix(".webp") ? 2 : 1)
+        return nameScore + densityScore + formatScore
+    }
+
+    private static func looksLikeSupportedImage(_ data: Data) -> Bool {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 8, bytes[0...7].elementsEqual([137, 80, 78, 71, 13, 10, 26, 10]) {
+            return true
+        }
+        if bytes.count >= 12,
+           String(bytes: bytes[0...3], encoding: .ascii) == "RIFF",
+           String(bytes: bytes[8...11], encoding: .ascii) == "WEBP" {
+            return true
+        }
+        return bytes.count >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
+    }
+
 }
 
 enum APKInspectionError: LocalizedError {
@@ -37,6 +114,7 @@ struct APKArchiveInspector {
     private let maxDEXEntryBytes: UInt64 = 64 * 1_024 * 1_024
     private let maxTotalDEXBytes: UInt64 = 128 * 1_024 * 1_024
     private let maxDEXFileCount = 32
+    private let maxIconEntryBytes: UInt64 = 8 * 1_024 * 1_024
 
     func inspect(_ url: URL) throws -> APKInspection {
         guard let archive = Archive(url: url, accessMode: .read) else {
@@ -48,11 +126,13 @@ struct APKArchiveInspector {
         var dexEntries: [Entry] = []
         var abis = Set<String>()
         var hasResources = false
+        var iconEntries: [Entry] = []
 
         for entry in archive {
             count += 1
             if entry.path == "AndroidManifest.xml" { hasManifest = true }
             if entry.path == "resources.arsc" { hasResources = true }
+            if Self.isLauncherIconCandidate(entry.path) { iconEntries.append(entry) }
             if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
                 dexEntries.append(entry)
             }
@@ -117,6 +197,8 @@ struct APKArchiveInspector {
         }
         skippedDexCount += max(0, dexEntries.count - min(dexEntries.count, maxDEXFileCount))
 
+        let iconData = extractIcon(from: iconEntries, in: archive)
+
         return APKInspection(
             archiveEntryCount: count,
             hasAndroidManifest: hasManifest,
@@ -128,7 +210,8 @@ struct APKArchiveInspector {
             dexMethodCount: dexMethodCount,
             nativeABIs: abis.sorted(),
             hasResourceTable: hasResources,
-            isValidPackage: true
+            isValidPackage: true,
+            iconData: iconData
         )
     }
 }
