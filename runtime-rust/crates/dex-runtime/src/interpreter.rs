@@ -574,14 +574,14 @@ mod tests {
         let strings = vec!["[I".to_string()];
 
         // Method 2: const/4 v1, 3; new-array v0, v1, type@0; array-length v2, v0; return v2
-        // code: [0x3112, 0x0123, 0, 0x0221, 0x020f]
+        // code: [0x3112, 0x1023, 0, 0x0221, 0x020f]
         methods.insert(
             2,
             MethodCode {
                 class_descriptor: "Ltest/ArrayTest;".into(),
                 name: "testArray".into(),
                 prototype: "()I".into(),
-                code_units: vec![0x3112, 0x0123, 0, 0x0221, 0x020f],
+                code_units: vec![0x3112, 0x1023, 0, 0x0221, 0x020f],
                 registers_size: 3,
                 ins_size: 0,
                 try_blocks: Vec::new(),
