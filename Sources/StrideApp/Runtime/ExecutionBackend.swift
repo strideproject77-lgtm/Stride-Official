@@ -28,6 +28,8 @@ struct APKExecutionResult: Equatable {
 enum RuntimeExecutionError: LocalizedError {
     case unreadableArchive
     case missingManifest
+    case missingDex
+    case dexLoadFailed(index: Int, status: Int32)
     case runtimeInitializationFailed
     case uncaughtException(String)
     case activityNotFound(String)
@@ -39,6 +41,10 @@ enum RuntimeExecutionError: LocalizedError {
             return "Cannot open APK archive for execution."
         case .missingManifest:
             return "APK is missing AndroidManifest.xml."
+        case .missingDex:
+            return "APK does not contain a DEX executable."
+        case .dexLoadFailed(let index, let status):
+            return "Failed to load DEX file #\(index + 1) (runtime status \(status))."
         case .runtimeInitializationFailed:
             return "Failed to initialize the ART runtime engine."
         case .uncaughtException(let detail):
@@ -93,12 +99,21 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             stride_runtime_destroy(runtime)
         }
 
-        // Load all extracted DEX binaries into the runtime
-        for dex in dexDataList {
-            _ = dex.withUnsafeBytes { rawBuffer in
-                if let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                    _ = stride_runtime_load_dex(runtime, ptr, rawBuffer.count)
+        // A manifest without executable DEX code cannot enter the managed runtime.
+        guard !dexDataList.isEmpty else {
+            throw RuntimeExecutionError.missingDex
+        }
+
+        // Load every DEX and stop immediately if the runtime rejects one.
+        for (index, dex) in dexDataList.enumerated() {
+            let dexStatus = dex.withUnsafeBytes { rawBuffer -> Int32 in
+                guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                    return 1
                 }
+                return stride_runtime_load_dex(runtime, ptr, rawBuffer.count)
+            }
+            guard dexStatus == 0 else {
+                throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus)
             }
         }
 
