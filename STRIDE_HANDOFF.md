@@ -45,9 +45,9 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 ## Known issues
 
-- The DEX inventory and new FFI crate passed Rust CI in run #38.
+- The DEX inventory and new FFI crate passed Rust CI in runs #38 and #43.
 - The DEX FFI only returns class/method counts; it is not linked into Swift and does not execute code.
-- The UI has compiled in earlier CI but the current iOS 15 compatibility fix awaits the next macOS run; it has not been visually checked in Xcode.
+- The UI compiled in the successful iOS 15 physical-device build in run #43, but has not been visually checked in Simulator or on an iPhone.
 - The interpreter supports only a small primitive opcode subset; it is not ART.
 - Native image planning does not map or execute ELF libraries.
 - No real-device APK launch test exists.
@@ -55,7 +55,7 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 ## Next steps
 
-1. Check the workflow triggered by commit f4cd66a. Confirm the iOS 15 compile succeeds and the unsigned IPA is uploaded; fix any remaining failures.
+1. Keep run #43 as the last verified IPA build. Check any newer workflow run before relying on its result; do not merge PR #1 until review.
 2. Add macOS CI steps that build the Rust static library for iOS device and simulator targets. Link the library into the generated Xcode project and verify the Swift app builds.
 3. Add a Swift wrapper around stride_dex_inventory_counts. Extract classes*.dex from imported APKs and report class/method counts and parse errors in the package detail sheet.
 4. Add valid DEX fixtures to exercise the C ABI through Swift before claiming the app uses Rust parsing.
@@ -65,4 +65,4 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 - Confirm current branch head and latest workflow run.
 - Re-read this handoff, especially CI status and known issues.
-- First check the push run after f4cd66a, then continue with macOS Rust target builds and Xcode linking.
+- Recheck the branch head and workflow list. Continue with macOS Rust target builds and Xcode linking.
