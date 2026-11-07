@@ -2,6 +2,20 @@ import Foundation
 import Combine
 import SwiftUI
 
+enum APKLibraryImportError: LocalizedError {
+    case unsupportedFile
+    case unreadableSource
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFile:
+            return "Please choose an .apk file. Other file types cannot be imported."
+        case .unreadableSource:
+            return "iOS could not access this file. Save it in Files and try importing it again."
+        }
+    }
+}
+
 @MainActor
 final class APKLibraryStore: ObservableObject {
     @Published private(set) var packages: [ImportedAPK] = []
@@ -14,6 +28,10 @@ final class APKLibraryStore: ObservableObject {
     }
 
     func importPackage(from sourceURL: URL) throws {
+        guard sourceURL.pathExtension.lowercased() == "apk" else {
+            throw APKLibraryImportError.unsupportedFile
+        }
+
         let didAccess = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
@@ -21,7 +39,26 @@ final class APKLibraryStore: ObservableObject {
 
         let folder = try libraryFolder()
         let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-        try fileManager.copyItem(at: sourceURL, to: destination)
+
+        // File-provider URLs (iCloud Drive / On My iPhone / third-party providers)
+        // must be coordinated before copying. A direct copyItem can fail while the
+        // provider is still materializing the selected document.
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var copyError: Error?
+        coordinator.coordinate(readingItemAt: sourceURL, options: [], error: &coordinationError) { readableURL in
+            do {
+                guard fileManager.fileExists(atPath: readableURL.path) else {
+                    throw APKLibraryImportError.unreadableSource
+                }
+                try fileManager.copyItem(at: readableURL, to: destination)
+            } catch {
+                copyError = error
+            }
+        }
+
+        if let coordinationError { throw coordinationError }
+        if let copyError { throw copyError }
 
         do {
             let report = try inspector.inspect(destination)
