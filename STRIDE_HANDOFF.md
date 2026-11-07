@@ -53,6 +53,17 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 - No real-device APK launch test exists.
 - Simulator test execution is unverified because the hosted Mac runner could not access its Simulator service.
 
+## Compatibility roadmap: Snake pilot, then broader execution
+
+1. Start with the existing [Android Canvas Snake project](https://github.com/fpjunqueira/android-snake-game) as a candidate test app. Its repository describes it as Java and Canvas based and declares MIT; it has no published APK release, so build a debug APK before testing. Inspect its manifest, exact SDK levels, DEX version, permissions, APIs, and whether it uses View Canvas or SurfaceView/game-loop behavior. Do not assume “Canvas game” means no Android dependencies.
+2. Freeze the tested APK identity: package name, version, SHA-256, min/target SDK, DEX files, and required Android APIs. If the candidate's requirements exceed the first vertical slice, build a tiny clean-room fixture APK for the smaller slice and keep Snake as the next target.
+3. Implement only the measured slice required to launch Snake: DEX verification and typed values, then the object/method/exception behavior it actually exercises, Android activity lifecycle, and the specific drawing/input/timing APIs it uses. Keep runtime interfaces modular so later API and graphics implementations can expand without replacing the execution core.
+4. Define “Snake supported” with a real-device acceptance flow: import, launch, draw the board, move the snake by touch, score, game over, and restart, all offline. Record unsupported calls and failures instead of silently faking behavior.
+5. After Snake passes, choose at least two APKs whose inspected requirements overlap. Reuse the implemented DEX and Android API surface, then expand from observed gaps. Shared dependencies make compatibility more likely, but never guarantee it; test each APK/version.
+6. Grow toward advanced execution in layers: broader DEX verifier/opcode and exception coverage; class loading, multidex/resources, and app lifecycle; more Android framework APIs and graphics; then ARM64 ELF loading, Bionic/JNI, and native libraries. Keep a compatibility matrix and real-device regression cohort at every stage.
+
+This is the chosen delivery strategy: ship a small complete execution slice first, while keeping its runtime boundaries extensible toward wider compatibility. Do not begin by attempting to recreate full ART wholesale.
+
 ## Next steps
 
 1. Keep run #43 as the last verified IPA build. Check any newer workflow run before relying on its result; do not merge PR #1 until review.
