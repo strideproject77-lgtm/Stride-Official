@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-06
+Updated: 2026-11-07
 
 ## Product goal
 
@@ -27,11 +27,10 @@ Build an iOS app that can run a growing, clearly documented set of Android APKs.
   - Added explicit runtime status labels. The UI does not claim APK execution.
   - ABI chips wrap for narrow screens.
 - Updated .github/workflows/ios-build.yml.
-  - Rust tests now run on ubuntu-latest for PRs and push/manual runs.
-  - macOS iOS build/IPA job is skipped on PRs and runs after Rust tests on main push or workflow_dispatch.
-  - The changed workflow passed the Ubuntu Rust job in PR run #19; the later handoff-only commit should be checked for the latest PR status.
-- The PR run skipped the macOS job as intended.
-- No Husk source files, code, tests, or assets were copied.
+  - Rust tests run on ubuntu-latest.
+  - The unsigned iOS build runs on macos-15 after Rust tests, for main and the Codex feature branch; PR runs skip the macOS job.
+  - The Codex branch now triggers CI on push.
+  - No Husk source files, code, tests, or assets were copied.
 
 ## Current app/runtime boundary
 
@@ -49,10 +48,11 @@ The Swift app imports APKs using ZIPFoundation, stores them under Documents/APKs
 
 The CI workflow has been split by runner:
 - PRs run Rust tests on Ubuntu; the macOS job is skipped.
-- Main pushes and manual workflow_dispatch run the Ubuntu Rust job first, then Swift/iOS tests, device-target build, and unsigned IPA packaging on macos-15.
-- Feature branch pushes do not trigger the current push rule. A PR targeting main should trigger the Rust-only check.
-- No new workflow run has been started from this branch yet.
-- Earlier macOS jobs were cancelled before a runner was assigned; no build step ran. A queued macOS runner is a service-capacity issue when no runner/job steps are assigned; changing build commands does not fix that.
+- Pushes to main and feat/dex-class-method-loader run Rust tests first, then the macOS physical-device build and unsigned IPA packaging.
+- The macOS workflow intentionally does not run simulator-based Swift tests because the hosted Mac runner reported "Unable to connect to simulator" during xcodebuild -downloadPlatform iOS (run #24). The app's Swift sources are still compiled by the physical-device build; simulator test execution remains unverified and must be run on a runner with a working Simulator service.
+- Run #23 on the feature branch passed Rust tests but failed Swift tests because the requested iPhone 17 Pro simulator did not exist.
+- Run #24 fixed the hard-coded simulator selection but failed while attempting to download the iOS Simulator runtime: "Unable to connect to simulator."
+- Workflow commit 913a9f3 removes the simulator download/device-selection/test steps so the IPA build is no longer blocked by the unavailable Simulator service. The next run must verify the physical-device build and artifact upload.
 
 ## Known issues and limits
 
@@ -67,8 +67,8 @@ The CI workflow has been split by runner:
 
 ## Exact next steps
 
-1. PR #1 is open as a draft and run #19 passed the Ubuntu Rust job. Review the latest check after this handoff update; fix any new failures before merging.
-2. At the next deliberate macOS run, build the updated SwiftUI screen and unsigned IPA; inspect it before making more UI claims.
+1. PR #1 is open as a draft. Recheck CI on the latest feature-branch commit; do not merge until the full checks and review pass.
+2. Verify the physical-device build, IPA packaging, and artifact upload on the latest workflow run; inspect the IPA before making UI claims.
 3. Implement a narrow Rust-to-Swift C ABI for DEX inventory. Build the Rust static library for iOS device and simulator on GitHub's macOS runner.
 4. Extract classes*.dex from imported APKs in APKArchiveInspector and call the bridge. Show real class/method counts in the detail screen, with parse errors reported safely.
 5. Only after APK parsing is connected and tested, expand execution beyond integer opcodes: DEX verifier, types/objects, method calls and exceptions.
