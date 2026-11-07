@@ -154,6 +154,29 @@ pub fn validate_register_operands(
                 check(a8)?;
                 check(usize::from(unit_at(&units, pc + 1)? & 0xff))?;
             }
+            // 35c / 45cc: up to five explicit four-bit register operands.
+            // A is the argument count; G is the fifth register slot.
+            0x24 | 0x6e..=0x72 | 0xfa | 0xfc => {
+                let count = usize::from(first >> 12);
+                if count > 5 { return Err(DecodeError::InvalidRegister); }
+                let packed = unit_at(&units, pc + 2)?;
+                let registers = [
+                    usize::from(packed & 0x0f),
+                    usize::from((packed >> 4) & 0x0f),
+                    usize::from((packed >> 8) & 0x0f),
+                    usize::from(packed >> 12),
+                    usize::from((first >> 8) & 0x0f),
+                ];
+                for register in registers.into_iter().take(count) { check(register)?; }
+            }
+            // 3rc / 4rcc: a contiguous register window beginning at C.
+            0x25 | 0x74..=0x78 | 0xfb | 0xfd => {
+                let count = usize::from(first >> 8);
+                let start = usize::from(unit_at(&units, pc + 2)?);
+                if start.checked_add(count).filter(|end| *end <= limit).is_none() {
+                    return Err(DecodeError::InvalidRegister);
+                }
+            }
             // Other formats are decoded for width/targets, but operand checks are not
             // claimed until their encoding-specific register layouts are implemented.
             _ => {}
@@ -222,6 +245,22 @@ mod decoder_tests {
   assert_eq!(validate_register_operands(&words(&[0x0002,0x0002,0x000e]),2),Err(DecodeError::InvalidRegister));
   assert_eq!(validate_register_operands(&words(&[0x0044,0x0201,0x000e]),3),Ok(()));
   assert_eq!(validate_register_operands(&words(&[0x0044,0x0301,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_invoke_35c_register_list(){
+  // invoke-virtual {v0, v1}, method@0
+  assert_eq!(validate_register_operands(&words(&[0x206e,0,0x0010,0x000e]),2),Ok(()));
+  // The second listed register is v2, outside a two-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x206e,0,0x0020,0x000e]),2),Err(DecodeError::InvalidRegister));
+  // A count of six cannot be represented by the 35c register list.
+  assert_eq!(validate_register_operands(&words(&[0x606e,0,0,0x000e]),8),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_invoke_range_register_window(){
+  // invoke-virtual/range {v1 .. v3}
+  assert_eq!(validate_register_operands(&words(&[0x0374,0,1,0x000e]),4),Ok(()));
+  // v2..v4 exceeds a four-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x0374,0,2,0x000e]),4),Err(DecodeError::InvalidRegister));
+  // Zero arguments is valid when the start is at the end of the frame.
+  assert_eq!(validate_register_operands(&words(&[0x0074,0,4,0x000e]),4),Ok(()));
  }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
