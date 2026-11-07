@@ -33,6 +33,28 @@ impl Value {
         }
     }
 
+    pub fn as_float(&self) -> f32 {
+        match *self {
+            Value::Float(v) => v,
+            Value::Double(v) => v as f32,
+            Value::Long(v) => v as f32,
+            Value::Int(v) => v as f32,
+            Value::Object(v) => v as f32,
+            Value::Null => 0.0,
+        }
+    }
+
+    pub fn as_double(&self) -> f64 {
+        match *self {
+            Value::Double(v) => v,
+            Value::Float(v) => v as f64,
+            Value::Long(v) => v as f64,
+            Value::Int(v) => v as f64,
+            Value::Object(v) => v as f64,
+            Value::Null => 0.0,
+        }
+    }
+
     pub fn as_object(&self) -> Option<u32> {
         match *self {
             Value::Object(id) => Some(id),
