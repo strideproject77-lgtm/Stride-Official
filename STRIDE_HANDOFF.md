@@ -107,3 +107,8 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 - Read the Hill Climb target gate, current 0% status, and workflow policy above.
 - Recent code step: APK import now invokes the Rust DEX inventory FFI with bounded extraction; compilation and behavior remain unverified.
 - Latest implementation: class inventory decodes each non-empty method instruction stream, validates incoming register-word layout, and checks register indices in a limited set of instruction formats. Next, extend operand coverage (especially invoke/range and wide pairs), then validate try/catch and encoded handler structures, followed by method-reference resolution before designing a real class loader. Review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
+
+
+## Latest CI failure diagnosis (2026-11-07)
+
+Workflow run #86 (`42368614689`) failed in the Rust tests: 18 passed and 2 failed. Both failures came from an incorrectly encoded `const/4` test fixture, not from the register validator: DEX format 11n stores register A in bits 8–11, while the original fixture `0x1012` put `1` in the literal nibble (bits 12–15), leaving the register as `v0`. Corrected both fixtures to `0x0112` in `lib.rs` and `classes.rs`. This correction has not yet been rerun in CI; do not mark tests green until a new run passes.
