@@ -476,13 +476,13 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_wide_parameter_words() {
-        let mut bytes = sample(0);
-        // The minimal fixture's prototype is ()Lx;; this test exercises the parser directly.
+    fn validates_wide_and_reference_parameter_word_counts() {
         assert_eq!(parameter_word_count("(JD)V"), Ok(4));
         assert_eq!(parameter_word_count("([JLjava/lang/Object;)V"), Ok(2));
         assert_eq!(parameter_word_count("(Q)V"), Err(ClassReadError::InvalidRegisterLayout));
-        let _ = &mut bytes;
+        assert_eq!(validate_register_layout(4, 4, 0x08, "(JD)V"), Ok(()));
+        assert_eq!(validate_register_layout(4, 5, 0, "(JD)V"), Ok(()));
+        assert_eq!(validate_register_layout(4, 4, 0, "(JD)V"), Err(ClassReadError::InvalidRegisterLayout));
     }
 
     #[test]
