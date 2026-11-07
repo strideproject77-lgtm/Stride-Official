@@ -168,6 +168,14 @@ pub struct ExecutionReport {
     pub steps: usize,
 }
 
+/// A supplied method body. Incoming arguments are one-word integer values only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DexMethodBody {
+    pub code_units: Vec<u16>,
+    pub register_count: usize,
+    pub incoming_words: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VmError {
     EmptyMethod,
@@ -178,12 +186,17 @@ pub enum VmError {
     DivisionByZero,
     StepLimitExceeded,
     NullObjectReference,
+    MissingMethodBody(u16),
+    ArgumentCountMismatch { expected: usize, actual: usize },
+    MissingInvokeResult,
+    CallDepthExceeded,
 }
 
 fn width(op: u8) -> Option<usize> {
     match op {
-        0x00 | 0x01 | 0x0e | 0x0f | 0x12 | 0x28 | 0xb0..=0xb4 => Some(1),
+        0x00 | 0x01 | 0x0a | 0x0e | 0x0f | 0x12 | 0x28 | 0xb0..=0xb4 => Some(1),
         0x02 | 0x13 | 0x15 | 0x29 | 0x32..=0x3d | 0x52 | 0x59 | 0x60 | 0x67 | 0x90..=0x94 => Some(2),
+        0x71 | 0x77 => Some(3),
         0x03 | 0x14 | 0x2a => Some(3),
         _ => None,
     }
@@ -253,6 +266,43 @@ pub fn execute_integer_method_with_fields(
     step_limit: usize,
     fields: &mut IntegerFieldStore,
 ) -> Result<ExecutionReport, VmError> {
+    execute_integer_method_internal(
+        code_units, register_count, initial_registers, step_limit, fields,
+        &HashMap::new(), 0, false,
+    )
+}
+
+/// Executes one entry method and only the method bodies explicitly supplied by the caller.
+/// Incoming arguments are placed in the last registers of each callee frame.
+pub fn execute_integer_method_with_calls(
+    entry_method: u16,
+    methods: &HashMap<u16, DexMethodBody>,
+    initial_registers: &[i32],
+    step_limit: usize,
+    fields: &mut IntegerFieldStore,
+) -> Result<ExecutionReport, VmError> {
+    let body = methods.get(&entry_method).ok_or(VmError::MissingMethodBody(entry_method))?;
+    if initial_registers.len() != body.incoming_words {
+        return Err(VmError::ArgumentCountMismatch {
+            expected: body.incoming_words, actual: initial_registers.len(),
+        });
+    }
+    execute_integer_method_internal(
+        &body.code_units, body.register_count, initial_registers, step_limit,
+        fields, methods, 0, true,
+    )
+}
+
+fn execute_integer_method_internal(
+    code_units: &[u16],
+    register_count: usize,
+    initial_registers: &[i32],
+    step_limit: usize,
+    fields: &mut IntegerFieldStore,
+    methods: &HashMap<u16, DexMethodBody>,
+    depth: usize,
+    incoming_at_end: bool,
+) -> Result<ExecutionReport, VmError> {
     if code_units.is_empty() {
         return Err(VmError::EmptyMethod);
     }
@@ -275,9 +325,15 @@ pub fn execute_integer_method_with_fields(
     boundaries[code_units.len()] = true;
 
     let mut registers = vec![0i32; register_count];
-    registers[..initial_registers.len()].copy_from_slice(initial_registers);
+    let register_start = if incoming_at_end {
+        register_count.checked_sub(initial_registers.len())
+            .ok_or(VmError::ArgumentCountMismatch { expected: register_count, actual: initial_registers.len() })?
+    } else { 0 };
+    registers[register_start..register_start + initial_registers.len()]
+        .copy_from_slice(initial_registers);
     let mut pc = 0usize;
     let mut steps = 0usize;
+    let mut pending_result: Option<ReturnValue> = None;
 
     loop {
         if steps >= step_limit {
@@ -293,6 +349,7 @@ pub fn execute_integer_method_with_fields(
         let a8 = (first >> 8) as u16;
         let a4 = ((first >> 8) & 0x0f) as u16;
         let b4 = (first >> 12) as u16;
+        if op != 0x0a { pending_result = None; }
 
         match op {
             0x00 => pc += 1, // nop
@@ -313,6 +370,13 @@ pub fn execute_integer_method_with_fields(
                 let value = register(&registers, b)?;
                 write_register(&mut registers, a, value)?;
                 pc += 3;
+            }
+            0x0a => {
+                match pending_result.take() {
+                    Some(ReturnValue::Int(value)) => write_register(&mut registers, a8, value)?,
+                    _ => return Err(VmError::MissingInvokeResult),
+                }
+                pc += 1;
             }
             0x0e => return Ok(ExecutionReport { value: ReturnValue::Void, steps }),
             0x0f => {
@@ -380,6 +444,57 @@ pub fn execute_integer_method_with_fields(
                     _ => value <= 0,
                 };
                 pc = if take { branch_target(pc, delta, &boundaries)? } else { pc + 2 };
+            }
+            0x71 | 0x77 => { // invoke-static and invoke-static/range
+                if depth >= 64 { return Err(VmError::CallDepthExceeded); }
+                let method_index = code_units[pc + 1];
+                let count;
+                let argument_registers: Vec<u16>;
+                if op == 0x71 {
+                    count = ((first >> 12) & 0x0f) as usize;
+                    if count > 5 { return Err(VmError::ArgumentCountMismatch { expected: 5, actual: count }); }
+                    let packed = code_units[pc + 2];
+                    let candidates = [
+                        packed & 0x0f,
+                        (packed >> 4) & 0x0f,
+                        (packed >> 8) & 0x0f,
+                        (packed >> 12) & 0x0f,
+                        ((first >> 8) & 0x0f) as u16,
+                    ];
+                    argument_registers = candidates[..count].to_vec();
+                } else {
+                    count = a8 as usize;
+                    let start = code_units[pc + 2];
+                    if count > 0 {
+                        let end = (start as usize).checked_add(count)
+                            .ok_or(VmError::InvalidRegister(start))?;
+                        if end > registers.len() {
+                            return Err(VmError::InvalidRegister((end - 1).min(u16::MAX as usize) as u16));
+                        }
+                    }
+                    argument_registers = (0..count).map(|offset| start + offset as u16).collect();
+                }
+                let callee = methods.get(&method_index)
+                    .ok_or(VmError::MissingMethodBody(method_index))?;
+                if count != callee.incoming_words {
+                    return Err(VmError::ArgumentCountMismatch {
+                        expected: callee.incoming_words, actual: count,
+                    });
+                }
+                let mut arguments = Vec::with_capacity(count);
+                for argument_register in argument_registers {
+                    arguments.push(register(&registers, argument_register)?);
+                }
+                let remaining = step_limit.saturating_sub(steps);
+                if remaining == 0 { return Err(VmError::StepLimitExceeded); }
+                let report = execute_integer_method_internal(
+                    &callee.code_units, callee.register_count, &arguments, remaining,
+                    fields, methods, depth + 1, true,
+                )?;
+                steps = steps.checked_add(report.steps).ok_or(VmError::StepLimitExceeded)?;
+                if steps > step_limit { return Err(VmError::StepLimitExceeded); }
+                pending_result = Some(report.value);
+                pc += 3;
             }
             0x52 => { // iget vA, vB, field@CCCC (integer-like fields only)
                 let object = register(&registers, b4)?;
@@ -656,6 +771,82 @@ mod tests {
         assert_eq!(
             execute_integer_method(&code, 0, &[], 10),
             Err(VmError::InvalidBranchTarget)
+        );
+    }
+
+    #[test]
+    fn invokes_static_method_with_35c_arguments_and_move_result() {
+        let mut methods = HashMap::new();
+        methods.insert(0, DexMethodBody {
+            code_units: vec![0x5012, 0x0090, 0x0001, 0x000f],
+            register_count: 2, incoming_words: 1,
+        });
+        methods.insert(7, DexMethodBody {
+            code_units: vec![0x0013, 7, 0x1071, 0, 0, 0x010a, 0x010f],
+            register_count: 2, incoming_words: 0,
+        });
+        let report = execute_integer_method_with_calls(
+            7, &methods, &[], 30, &mut IntegerFieldStore::default(),
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(12));
+        assert_eq!(report.steps, 7);
+    }
+
+    #[test]
+    fn invokes_static_range_method_with_contiguous_arguments() {
+        let mut methods = HashMap::new();
+        methods.insert(2, DexMethodBody {
+            code_units: vec![0x0090, 0x0001, 0x000f],
+            register_count: 2, incoming_words: 2,
+        });
+        methods.insert(9, DexMethodBody {
+            code_units: vec![0x0013, 4, 0x0113, 6, 0x0277, 2, 0, 0x020a, 0x020f],
+            register_count: 3, incoming_words: 0,
+        });
+        let report = execute_integer_method_with_calls(
+            9, &methods, &[], 30, &mut IntegerFieldStore::default(),
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(10));
+    }
+
+    #[test]
+    fn rejects_missing_callee_and_argument_shape_mismatch() {
+        let mut methods = HashMap::new();
+        methods.insert(1, DexMethodBody {
+            code_units: vec![0x000e], register_count: 0, incoming_words: 0,
+        });
+        methods.insert(3, DexMethodBody {
+            code_units: vec![0x1071, 1, 0, 0x000e],
+            register_count: 1, incoming_words: 0,
+        });
+        assert_eq!(
+            execute_integer_method_with_calls(3, &methods, &[], 10, &mut IntegerFieldStore::default()),
+            Err(VmError::ArgumentCountMismatch { expected: 0, actual: 1 })
+        );
+        assert_eq!(
+            execute_integer_method_with_calls(99, &methods, &[], 10, &mut IntegerFieldStore::default()),
+            Err(VmError::MissingMethodBody(99))
+        );
+    }
+
+    #[test]
+    fn rejects_move_result_without_immediately_preceding_invoke() {
+        assert_eq!(
+            execute_integer_method(&[0x000a, 0x000e], 1, &[], 10),
+            Err(VmError::MissingInvokeResult)
+        );
+    }
+
+    #[test]
+    fn enforces_call_depth_limit() {
+        let mut methods = HashMap::new();
+        methods.insert(1, DexMethodBody {
+            code_units: vec![0x0071, 1, 0, 0x000e],
+            register_count: 0, incoming_words: 0,
+        });
+        assert_eq!(
+            execute_integer_method_with_calls(1, &methods, &[], 500, &mut IntegerFieldStore::default()),
+            Err(VmError::CallDepthExceeded)
         );
     }
 
