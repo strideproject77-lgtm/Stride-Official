@@ -1076,11 +1076,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_object_and_invoke_opcodes() {
-        let code = [0x006e, 0x0000, 0x0000];
+    fn rejects_still_unsupported_invoke_super_opcode() {
+        let code = [0x006f];
         assert_eq!(
             execute_integer_method(&code, 1, &[], 10),
-            Err(VmError::UnsupportedOpcode(0x6e))
+            Err(VmError::UnsupportedOpcode(0x6f))
         );
     }
 }
