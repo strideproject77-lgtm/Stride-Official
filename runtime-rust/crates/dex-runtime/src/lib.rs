@@ -802,7 +802,7 @@ mod tests {
         let mut methods = HashMap::new();
         methods.insert(4, DexMethodBody {
             // Incoming receiver is v1; read its field and return the value.
-            code_units: vec![0x1052, 0, 0x100f],
+            code_units: vec![0x1052, 0, 0x000f],
             register_count: 2, incoming_words: 1,
         });
         methods.insert(8, DexMethodBody {
@@ -823,7 +823,7 @@ mod tests {
             code_units: vec![0x000e], register_count: 1, incoming_words: 1,
         });
         methods.insert(8, DexMethodBody {
-            code_units: vec![0x0070, 4, 0, 0x000e],
+            code_units: vec![0x1070, 4, 0, 0x000e],
             register_count: 1, incoming_words: 0,
         });
         assert_eq!(
