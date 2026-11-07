@@ -674,7 +674,7 @@ impl<'a> ArtVm<'a> {
                 0x60..=0x66 => { // sget variants
                     let field_idx = code_units[pc + 1] as usize;
                     let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
-                    let key = (method.class_descriptor.clone(), field_name);
+                    let key = (method_class.clone(), field_name);
                     let val = self.static_fields.get(&key).copied().unwrap_or(Value::Int(0));
                     if op == 0x61 {
                         rf.write_long(a8, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
@@ -688,7 +688,7 @@ impl<'a> ArtVm<'a> {
                 0x67..=0x6d => { // sput variants
                     let field_idx = code_units[pc + 1] as usize;
                     let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
-                    let key = (method.class_descriptor.clone(), field_name);
+                    let key = (method_class.clone(), field_name);
                     let val = if op == 0x68 {
                         Value::Long(rf.read_long(a8).map_err(|e| format!("Invalid reg {}", e))?)
                     } else if op == 0x69 {
