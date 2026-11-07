@@ -47,8 +47,28 @@ pub struct ClassDefinition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MethodReference {
+    pub method_index: u32,
+    pub class_descriptor: String,
+    pub name: String,
+    pub prototype: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldReference {
+    pub field_index: u32,
+    pub class_descriptor: String,
+    pub name: String,
+    pub field_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassInventory {
     pub classes: Vec<ClassDefinition>,
+    /// Resolved method_id table, including references to classes outside this DEX.
+    pub method_references: Vec<MethodReference>,
+    /// Resolved field_id table, including references to classes outside this DEX.
+    pub field_references: Vec<FieldReference>,
 }
 
 fn u16le(b: &[u8], o: usize) -> Result<u16, ClassReadError> {
@@ -352,6 +372,36 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
             || u32le(b, at + 4)? >= string_count { return Err(ClassReadError::InvalidIndex); }
     }
 
+    // Resolve the DEX identifier tables before class loading. These tables include
+    // references to framework and library classes that are not defined in this DEX.
+    let mut method_references = Vec::with_capacity(method_count as usize);
+    for index in 0..method_count {
+        let at = methods.start + index as usize * 8;
+        let owner = u32::from(u16le(b, at)?);
+        let proto = u32::from(u16le(b, at + 2)?);
+        let name_index = u32le(b, at + 4)?;
+        method_references.push(MethodReference {
+            method_index: index,
+            class_descriptor: type_descriptor(b, &strings, &types, string_count, type_count, owner)?,
+            name: dex_string(b, &strings, string_count, name_index)?,
+            prototype: proto_signature(b, &strings, &types, &protos, string_count, type_count, proto)?,
+        });
+    }
+
+    let mut field_references = Vec::with_capacity(field_count as usize);
+    for index in 0..field_count {
+        let at = fields.start + index as usize * 8;
+        let owner = u32::from(u16le(b, at)?);
+        let field_type = u32::from(u16le(b, at + 2)?);
+        let name_index = u32le(b, at + 4)?;
+        field_references.push(FieldReference {
+            field_index: index,
+            class_descriptor: type_descriptor(b, &strings, &types, string_count, type_count, owner)?,
+            name: dex_string(b, &strings, string_count, name_index)?,
+            field_type: type_descriptor(b, &strings, &types, string_count, type_count, field_type)?,
+        });
+    }
+
     let mut classes = Vec::with_capacity(class_count as usize);
     for i in 0..class_count as usize {
         let at = defs.start + i * 32;
@@ -379,8 +429,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
         classes.push(class);
     }
-    let _ = strings;
-    Ok(ClassInventory { classes })
+    Ok(ClassInventory { classes, method_references, field_references })
 }
 
 #[cfg(test)]
@@ -434,6 +483,13 @@ mod tests {
         assert_eq!(class.methods[0].name, "foo");
         assert_eq!(class.methods[0].prototype, "()Lx;");
         assert_eq!(class.methods[0].code_offset, 0);
+        assert_eq!(inventory.method_references, vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Lx;".to_string(),
+            name: "foo".to_string(),
+            prototype: "()Lx;".to_string(),
+        }]);
+        assert!(inventory.field_references.is_empty());
     }
 
     fn sample_with_code(opcode: u16) -> (Vec<u8>, usize) {
