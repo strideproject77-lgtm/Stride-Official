@@ -18,7 +18,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 - 2026-11-07 follow-up: Damaged/corrupt DEX entry extraction is now counted as skipped instead of aborting inspection of the whole APK.
 - Added Swift unit coverage with a minimal valid DEX fixture for the Rust FFI class/method counts, plus malformed and empty-buffer rejection cases. These new Swift tests have **not** been executed yet.
-- No workflow was manually dispatched and no IPA was built for these edits. The normal push workflow still runs its Rust-only job; the iOS/IPA job remains manual-only.
+- No workflow was manually dispatched and no IPA was built for these edits. Pushes no longer trigger CI; Rust tests run on PRs or a deliberate manual dispatch. Manual dispatch defaults to Rust-only; the iOS/IPA job requires explicitly enabling the `build_ios` input.
 
 - 2026-11-07: Connected `APKArchiveInspector` to the Swift `StrideDexInventory` Rust FFI during APK import. It now reports analyzed DEX count plus class/method totals, and the package detail UI shows those counts. Decompression and FFI input are bounded to 64 MiB per DEX, 128 MiB total declared DEX data, and 32 DEX entries; malformed/oversized DEX files are counted as skipped rather than treated as executable.
 - This Swift/ZIPFoundation integration has not yet been compiled or run. No manual macOS workflow run was available through the connected GitHub tools in this session. The next verification must compile the app and exercise APK import with a valid DEX fixture and malformed/oversized inputs; do not claim the Swift bridge is verified until then.
@@ -26,7 +26,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Added bounds-checked DEX class/method inventory parsing at runtime-rust/crates/dex-inspector/src/classes.rs. It reads class definitions, encoded fields and methods, descriptors, names, prototypes, and referenced code-item boundaries. This is structural metadata parsing, not verification or execution.
 - Added unit tests for valid inventory, foreign class ownership, and invalid file size. These passed in Rust workflow run #19.
 - Improved the SwiftUI APK library/detail experience in Sources/StrideApp/ContentView.swift. It shows APK and DEX counts, recent packages, details, ABI chips, and explicit runtime limitations. The screen has not yet been visually checked in Xcode.
-- CI runs Rust tests on PRs and pushes. The macOS device build/unsigned IPA runs only by manual workflow_dispatch; routine pushes no longer rebuild IPA. Simulator tests remain omitted because the hosted runner could not connect to its Simulator runtime.
+- CI runs Rust tests on PRs and deliberate manual dispatches; ordinary pushes do not trigger workflows. Manual dispatch defaults to Rust-only. The macOS device build/unsigned IPA runs only when `build_ios` is explicitly enabled. Simulator tests remain omitted because the hosted runner could not connect to its Simulator runtime.
 - Added runtime-rust/crates/dex-ffi as a workspace crate. It exports a C ABI that accepts one DEX byte buffer and returns class/method counts with explicit error codes. Added the C header at runtime-rust/crates/dex-ffi/include/stride_dex_ffi.h. FFI tests cover null pointers and malformed DEX input.
 - Built the FFI for iOS device and simulator, packaged an XCFramework, linked it with XcodeGen, and added a Swift wrapper at Sources/StrideApp/Runtime/StrideDexInventory.swift. APKArchiveInspector still does not call that wrapper.
 - No Husk source, code, tests, or assets were copied.
@@ -86,14 +86,14 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 
 ### Workflow policy
 
-- Batch implementation changes; keep Ubuntu Rust checks on PR/push. Do not run an IPA build for routine edits.
+- Batch implementation changes. Do not trigger workflows for routine commits; use PR checks or deliberate manual Rust-only checks periodically. Enable `build_ios` only at a real Swift/linkage integration gate or when an IPA is explicitly needed.
 - macOS/XCFramework/IPA runs are manual-only via workflow_dispatch and should be used at a real Swift/linkage integration gate or when an IPA is explicitly needed.
 - Do not merge PR #1 until checks and review pass.
 
 
 ## Next steps
 
-1. Compile the latest Swift/ZIPFoundation integration with the manual macOS workflow and fix any build issues. That workflow should not be run for unrelated routine edits.
+1. When the Swift integration reaches a verification checkpoint, manually enable `build_ios` once to compile the app and package an unsigned IPA; fix any build issues. Do not run it for unrelated routine edits.
 2. Verify the Rust ABI on valid DEX input and exercise malformed/oversized DEX handling. Do not use a real HCR APK as a substitute for a controlled fixture.
 3. Obtain and pin one official Hill Climb Racing APK build; record package/version/hash/min/target SDK/ABIs/DEX/native libraries, then write a requirement report.
 4. Build a tiny clean-room launch fixture to measure verifier, class-loader, Activity, rendering, and input work before promising HCR dates.
