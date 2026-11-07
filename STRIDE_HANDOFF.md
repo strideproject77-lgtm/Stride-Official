@@ -68,15 +68,16 @@ The app imports APKs through ZIPFoundation and stores them under Documents/APKs.
 
 - Chosen target: the original Hill Climb Racing by Fingersoft, package `com.fingersoft.hillclimb`; explicitly not Hill Climb Racing 2 or 3. Official listing: https://play.google.com/store/apps/details?id=com.fingersoft.hillclimb
 - Selection rationale: among Hill Climb Racing, Dr. Driving, and Subway Surfers, the original Hill Climb Racing's side-view physics gameplay is the smallest likely rendering scope. This is an engineering inference, not a claim that its runtime is simple. Its official listing describes physics-based driving and offline play.
-- Exact version is not frozen. Google Play version/rollout can vary by region; obtain one APK build, record package/version/SHA-256/min/target SDK/ABIs/DEX/native libraries, and use that exact build for all compatibility claims. Do not download or redistribute APKs from unofficial mirrors.
-- Current Hill Climb launch compatibility: **0%**. APK inspection and DEX structural decoding are groundwork only; no Android app execution exists.
-- Rough planning estimate: **6–18+ months of full-time solo work** for a serious attempt at the current full game, with no guarantee. This is an inference from the missing execution core/framework/native/graphics layers; the exact APK inspection may move the estimate. It is not a delivery promise. A small proof-of-launch app comes first and will take substantially less work than the full game.
+- Latest public build located on 2026-11-07: **v1.73.2 (build 1016)**, uploaded 2026-10-29. Package: `com.fingersoft.hillclimb`. APKMirror lists three bundle variants; the broad ARM64 + ARMv7 variant is Android 7.0+ (API 24), 160–640 dpi, about 114.50 MB. Another ARM64-only high-DPI variant is Android 10+ (API 29). Public app metadata reports target SDK Android 16 (API 36). Sources: APKMirror release page and variant listing; AppDashboard metadata. These are third-party catalog observations, not a substitute for inspecting the exact downloaded bundle.
+- Target baseline selected for research: **v1.73.2 (1016), ARM64 + ARMv7, Android 7.0+ variant**. This is a version/variant selection, not yet a pinned binary: no APK/XAPK has been downloaded and hashed or parsed in this workspace. Record the exact bundle SHA-256, manifest, DEX files, native libraries, resources and startup dependencies before target-specific implementation or compatibility claims.
+- Current Hill Climb launch compatibility: **0% verified**. Public metadata research and DEX structural decoding are groundwork only; no HCR APK has been parsed and no Android app execution exists.
+- Rough planning estimate: **6–18+ months of full-time solo work** for a serious attempt at the current full game, with no guarantee. This is an inference from the missing execution core/framework/native/graphics layers; exact binary inspection may move the estimate. It is not a delivery promise. A small proof-of-launch app comes first and will take substantially less work than the full game.
 
 ### Target-specific progress gates
 
 Show progress only when a gate has evidence; avoid percentage changes for code volume alone:
 
-- 0%: no target APK pinned; no launch path.
+- 0%: target version/variant selected from public metadata, but exact APK bundle not pinned or parsed; no launch path.
 - 10%: exact APK frozen and manifest, DEX, ABI, resources, and startup dependencies documented.
 - 25%: DEX verification/class loading and the target's startup method path work.
 - 50%: Activity lifecycle and initial game screen render on device.
@@ -97,7 +98,7 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 
 1. Continue implementation without routine workflow runs. At a deliberate verification checkpoint, run Rust-only tests first. Enable `build_ios` only when Swift/Xcode linkage needs verification or an IPA is explicitly needed.
 2. Verify the Rust ABI on valid DEX input and exercise malformed/oversized DEX handling. Do not use a real HCR APK as a substitute for a controlled fixture.
-3. Obtain and pin one official Hill Climb Racing APK build; record package/version/hash/min/target SDK/ABIs/DEX/native libraries, then write a requirement report.
+3. Obtain the selected v1.73.2 (1016) ARM64 + ARMv7 Android 7+ bundle; record its SHA-256 and inspect manifest, DEX, native libraries/resources, then write a requirement report. Public metadata alone is insufficient for that gate.
 4. Build a tiny clean-room launch fixture to measure verifier, class-loader, Activity, rendering, and input work before promising HCR dates.
 5. Expand toward the pinned HCR build by implementing observed dependencies; update the target percentage only when acceptance evidence passes.
 
