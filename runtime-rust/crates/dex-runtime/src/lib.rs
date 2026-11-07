@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::{
-    ClassDefinition, ClassInventory, FieldReference, MethodDefinition, MethodReference,
+    ClassDefinition, ClassInventory, FieldDefinition, FieldReference, MethodDefinition, MethodReference,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,12 +16,19 @@ pub enum LinkError {
     InvalidMethodIndex,
     ClassNotFound(String),
     MethodNotFound { class: String, name: String, prototype: String },
+    FieldNotFound { class: String, name: String, field_type: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedMethod {
     pub class: ClassDefinition,
     pub method: MethodDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedField {
+    pub class: ClassDefinition,
+    pub field: FieldDefinition,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +65,35 @@ impl ClassRegistry {
             fields: inventory.field_references,
         });
         Ok(dex_index)
+    }
+
+    pub fn resolve_declared_field(
+        &self, class_descriptor: &str, name: &str, field_type: &str,
+    ) -> Result<ResolvedField, LinkError> {
+        let class = self.classes.get(class_descriptor)
+            .ok_or_else(|| LinkError::ClassNotFound(class_descriptor.to_owned()))?;
+        let field = class.fields.iter()
+            .find(|field| field.name == name && field.field_type == field_type)
+            .cloned()
+            .ok_or_else(|| LinkError::FieldNotFound {
+                class: class_descriptor.to_owned(), name: name.to_owned(),
+                field_type: field_type.to_owned(),
+            })?;
+        Ok(ResolvedField { class: class.clone(), field })
+    }
+
+    /// Resolves a field_id against the exact declaring class. Inherited fields and
+    /// framework fields intentionally remain unresolved until class-path support exists.
+    pub fn resolve_field_reference(
+        &self, dex_index: usize, field_index: usize,
+    ) -> Result<ResolvedField, LinkError> {
+        let reference = self.dex_tables.get(dex_index)
+            .ok_or(LinkError::InvalidDexIndex)?
+            .fields.get(field_index)
+            .ok_or(LinkError::InvalidMethodIndex)?;
+        self.resolve_declared_field(
+            &reference.class_descriptor, &reference.name, &reference.field_type,
+        )
     }
 
     pub fn class_count(&self) -> usize { self.classes.len() }
@@ -356,6 +392,10 @@ mod tests {
                 instance_field_count: 0,
                 direct_method_count: 1,
                 virtual_method_count: 0,
+                fields: vec![FieldDefinition {
+                    field_index: 0, name: "score".into(), field_type: "I".into(),
+                    access_flags: 0x0008, is_static: true,
+                }],
                 methods: vec![MethodDefinition {
                     method_index: 0, name: "start".into(), prototype: "()V".into(),
                     access_flags: 0x0009, code_offset: 0, is_direct: true,
@@ -420,6 +460,11 @@ mod tests {
         assert_eq!(registry.resolve_method_reference(dex, 99), Err(LinkError::InvalidMethodIndex));
         assert_eq!(registry.resolve_method_reference(99, 0), Err(LinkError::InvalidDexIndex));
         assert_eq!(registry.field_reference_count(dex), Ok(1));
+        let field = registry.resolve_field_reference(dex, 0).unwrap();
+        assert_eq!(field.field.name, "score");
+        assert!(field.field.is_static);
+        assert_eq!(registry.resolve_declared_field("Lgame/Main;", "score", "J"),
+            Err(LinkError::FieldNotFound { class: "Lgame/Main;".into(), name: "score".into(), field_type: "J".into() }));
     }
 
     #[test]
