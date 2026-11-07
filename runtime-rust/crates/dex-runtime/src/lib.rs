@@ -196,7 +196,7 @@ fn width(op: u8) -> Option<usize> {
     match op {
         0x00 | 0x01 | 0x0a | 0x0e | 0x0f | 0x12 | 0x28 | 0xb0..=0xb4 => Some(1),
         0x02 | 0x13 | 0x15 | 0x29 | 0x32..=0x3d | 0x52 | 0x59 | 0x60 | 0x67 | 0x90..=0x94 => Some(2),
-        0x71 | 0x77 => Some(3),
+        0x70 | 0x71 | 0x76 | 0x77 => Some(3),
         0x03 | 0x14 | 0x2a => Some(3),
         _ => None,
     }
@@ -445,12 +445,14 @@ fn execute_integer_method_internal(
                 };
                 pc = if take { branch_target(pc, delta, &boundaries)? } else { pc + 2 };
             }
-            0x71 | 0x77 => { // invoke-static and invoke-static/range
+            0x70 | 0x71 | 0x76 | 0x77 => { // invoke-direct/static and range forms
                 if depth >= 64 { return Err(VmError::CallDepthExceeded); }
                 let method_index = code_units[pc + 1];
+                let is_range = op == 0x76 || op == 0x77;
+                let is_instance = op == 0x70 || op == 0x76;
                 let count;
                 let argument_registers: Vec<u16>;
-                if op == 0x71 {
+                if !is_range {
                     count = ((first >> 12) & 0x0f) as usize;
                     if count > 5 { return Err(VmError::ArgumentCountMismatch { expected: 5, actual: count }); }
                     let packed = code_units[pc + 2];
@@ -484,6 +486,9 @@ fn execute_integer_method_internal(
                 let mut arguments = Vec::with_capacity(count);
                 for argument_register in argument_registers {
                     arguments.push(register(&registers, argument_register)?);
+                }
+                if is_instance && arguments.first().copied().unwrap_or(0) == 0 {
+                    return Err(VmError::NullObjectReference);
                 }
                 let remaining = step_limit.saturating_sub(steps);
                 if remaining == 0 { return Err(VmError::StepLimitExceeded); }
@@ -790,6 +795,60 @@ mod tests {
         ).unwrap();
         assert_eq!(report.value, ReturnValue::Int(12));
         assert_eq!(report.steps, 7);
+    }
+
+    #[test]
+    fn invokes_direct_instance_method_and_shares_object_fields() {
+        let mut methods = HashMap::new();
+        methods.insert(4, DexMethodBody {
+            // Incoming receiver is v1; read its field and return the value.
+            code_units: vec![0x1052, 0, 0x100f],
+            register_count: 2, incoming_words: 1,
+        });
+        methods.insert(8, DexMethodBody {
+            // v0 = object id 42; invoke-direct {v0}, method@4; move-result v1.
+            code_units: vec![0x0013, 42, 0x1070, 4, 0, 0x010a, 0x010f],
+            register_count: 2, incoming_words: 0,
+        });
+        let mut fields = IntegerFieldStore::default();
+        fields.set_instance(42, 0, 123);
+        let report = execute_integer_method_with_calls(8, &methods, &[], 30, &mut fields).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(123));
+    }
+
+    #[test]
+    fn rejects_null_receiver_for_invoke_direct() {
+        let mut methods = HashMap::new();
+        methods.insert(4, DexMethodBody {
+            code_units: vec![0x000e], register_count: 1, incoming_words: 1,
+        });
+        methods.insert(8, DexMethodBody {
+            code_units: vec![0x0070, 4, 0, 0x000e],
+            register_count: 1, incoming_words: 0,
+        });
+        assert_eq!(
+            execute_integer_method_with_calls(8, &methods, &[], 20, &mut IntegerFieldStore::default()),
+            Err(VmError::NullObjectReference)
+        );
+    }
+
+    #[test]
+    fn invokes_direct_range_method_with_receiver_and_argument() {
+        let mut methods = HashMap::new();
+        methods.insert(4, DexMethodBody {
+            // v1 + v2 -> v0
+            code_units: vec![0x0090, 0x0201, 0x000f],
+            register_count: 3, incoming_words: 2,
+        });
+        methods.insert(8, DexMethodBody {
+            // v0=9, v1=5, invoke-direct/range {v0..v1}, method@4; move-result v2
+            code_units: vec![0x0013, 9, 0x0113, 5, 0x0276, 4, 0, 0x020a, 0x020f],
+            register_count: 3, incoming_words: 0,
+        });
+        let report = execute_integer_method_with_calls(
+            8, &methods, &[], 30, &mut IntegerFieldStore::default(),
+        ).unwrap();
+        assert_eq!(report.value, ReturnValue::Int(14));
     }
 
     #[test]
