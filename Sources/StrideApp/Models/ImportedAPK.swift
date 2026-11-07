@@ -5,6 +5,8 @@ struct ImportedAPK: Identifiable, Hashable {
     let fileURL: URL
     let inspection: APKInspection
 
+    var iconData: Data? { inspection.iconData }
+
     var displayName: String {
         fileURL.deletingPathExtension().lastPathComponent
     }
