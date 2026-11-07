@@ -21,6 +21,8 @@ pub enum ClassReadError {
     InvalidRegisterLayout,
     InvalidMethodKind,
     DuplicateMethod,
+    InvalidFieldKind,
+    DuplicateField,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -271,7 +273,7 @@ fn class_data(
         return Err(ClassReadError::InvalidClassData);
     }
 
-    let mut found_fields = Vec::with_capacity((static_fields + instance_fields) as usize);
+    let mut found_fields = Vec::new();
     let mut seen_field_indices = std::collections::HashSet::new();
     for (count, is_static) in [(static_fields, true), (instance_fields, false)] {
         let mut idx = 0;
@@ -284,7 +286,10 @@ fn class_data(
                 return Err(ClassReadError::InvalidIndex);
             }
             if !seen_field_indices.insert(idx) {
-                return Err(ClassReadError::InvalidIndex);
+                return Err(ClassReadError::DuplicateField);
+            }
+            if (flags & 0x0008 != 0) != is_static {
+                return Err(ClassReadError::InvalidFieldKind);
             }
             let type_index = u32::from(u16le(b, at + 2)?);
             let name_index = u32le(b, at + 4)?;
