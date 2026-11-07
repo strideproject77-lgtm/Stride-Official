@@ -16,6 +16,8 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-07: Added a bounded structural instruction-stream validation step for every non-empty method body discovered during DEX class inventory. A method is now rejected from inventory if its code_item is malformed or its instruction stream contains unknown/truncated encodings or invalid branch/payload targets. Added valid-method and unsupported-opcode fixture tests. This is instruction decoding/structural validation only—not full Dalvik verification, class loading, or execution. Rust tests have not yet been rerun for this change.
+
 - 2026-11-07 follow-up: Damaged/corrupt DEX entry extraction is now counted as skipped instead of aborting inspection of the whole APK.
 - Added Swift unit coverage with a minimal valid DEX fixture for the Rust FFI class/method counts, plus malformed and empty-buffer rejection cases. These new Swift tests have **not** been executed yet.
 - No workflow was manually dispatched and no IPA was built for these edits. Pushes no longer trigger CI; Rust tests run on PRs or a deliberate manual dispatch. Manual dispatch defaults to Rust-only; the iOS/IPA job requires explicitly enabling the `build_ios` input.
@@ -104,4 +106,4 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 - Confirm branch feat/dex-class-method-loader and current workflow status.
 - Read the Hill Climb target gate, current 0% status, and workflow policy above.
 - Recent code step: APK import now invokes the Rust DEX inventory FFI with bounded extraction; compilation and behavior remain unverified.
-- First task on resume: continue the implementation batch and review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
+- Latest implementation: class inventory now decodes and structurally validates each non-empty method instruction stream. Next, expand verification beyond instruction boundaries (register/operand constraints, try/catch and handler validation, method-reference resolution) before designing a real class loader. Review the new Swift tests. Do not run a workflow yet. At the next deliberate verification checkpoint, run Rust-only checks first; enable `build_ios` only if Swift/Xcode linkage needs verification or an IPA is actually needed. Then obtain/pin the exact official APK before writing HCR-specific app-execution code.
