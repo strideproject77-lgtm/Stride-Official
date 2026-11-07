@@ -1,9 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
-
-private extension UTType {
-    static let androidPackage = UTType(filenameExtension: "apk") ?? .data
-}
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
@@ -35,7 +32,7 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.androidPackage],
+            allowedContentTypes: [.data],
             allowsMultipleSelection: true,
             onCompletion: handleImport
         )
@@ -372,10 +369,16 @@ struct ContentView: View {
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            do {
-                for url in urls { try library.importPackage(from: url) }
-            } catch {
-                importError = error.localizedDescription
+            var failures: [String] = []
+            for url in urls {
+                do {
+                    try library.importPackage(from: url)
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                }
+            }
+            if !failures.isEmpty {
+                importError = failures.joined(separator: "\n")
             }
         case .failure(let error):
             importError = error.localizedDescription
@@ -392,18 +395,7 @@ private struct APKRow: View {
 
     var body: some View {
         HStack(spacing: 13) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(LinearGradient(
-                        colors: [accent.opacity(0.18), accent.opacity(0.06)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 48, height: 48)
-                Image(systemName: "app.dashed")
-                    .font(.system(size: 21, weight: .medium))
-                    .foregroundStyle(accent)
-            }
+            APKIconView(data: item.iconData, accent: accent, size: 48)
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.displayName)
                     .font(.system(size: 14, weight: .semibold))
@@ -468,11 +460,7 @@ private struct APKDetailSheet: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 19) {
                     VStack(alignment: .leading, spacing: 9) {
-                        Image(systemName: "app.dashed")
-                            .font(.system(size: 23, weight: .medium))
-                            .foregroundStyle(accent)
-                            .frame(width: 54, height: 54)
-                            .background(accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 17))
+                        APKIconView(data: item.iconData, accent: accent, size: 54)
                         Text(item.displayName)
                             .font(.system(size: 25, weight: .bold, design: .rounded))
                             .lineLimit(2)
@@ -627,5 +615,37 @@ private struct FlowABIList: View {
                     .background(raised, in: Capsule())
             }
         }
+    }
+}
+
+
+private struct APKIconView: View {
+    let data: Data?
+    let accent: Color
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let data, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: size * 0.25)
+                        .fill(LinearGradient(
+                            colors: [accent.opacity(0.18), accent.opacity(0.06)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                    Image(systemName: "app.dashed")
+                        .font(.system(size: size * 0.44, weight: .medium))
+                        .foregroundStyle(accent)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
     }
 }
