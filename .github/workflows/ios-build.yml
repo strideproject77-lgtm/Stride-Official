@@ -1,27 +1,47 @@
 name: iOS Build
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_ios:
+        description: "Build the unsigned iOS app/IPA (leave off for routine Rust checks)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-# Keep only the newest main-branch build pending; avoid a queue of stale IPA builds.
+# Keep only the latest check for each ref; iOS builds are deliberate manual runs.
 concurrency:
   group: stride-ios-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build unsigned iOS IPA
-    runs-on: macos-15
-    timeout-minutes: 60
+  rust-tests:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout main revision
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path runtime-rust/Cargo.toml
+
+  ios-build:
+    name: Build unsigned iOS IPA
+    if: github.event_name == 'workflow_dispatch' && inputs.build_ios
+    needs: rust-tests
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Select Xcode
@@ -32,21 +52,22 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Set up Rust iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Build Rust DEX FFI for iOS
+        run: |
+          cargo build --manifest-path runtime-rust/Cargo.toml -p stride-dex-ffi --release --target aarch64-apple-ios
+          cargo build --manifest-path runtime-rust/Cargo.toml -p stride-dex-ffi --release --target aarch64-apple-ios-sim
+          xcodebuild -create-xcframework -library runtime-rust/target/aarch64-apple-ios/release/libstride_dex_ffi.a -headers runtime-rust/crates/dex-ffi/include -library runtime-rust/target/aarch64-apple-ios-sim/release/libstride_dex_ffi.a -headers runtime-rust/crates/dex-ffi/include -output runtime-rust/target/StrideDexFFI.xcframework
+
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Run Rust unit tests
-        run: cargo test --manifest-path runtime-rust/Cargo.toml
-
-      - name: Run Swift unit tests
-        run: |
-          xcodebuild test \
-            -project Stride.xcodeproj \
-            -scheme Stride \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/StrideTestDerivedData" \
-            CODE_SIGNING_ALLOWED=NO
-
+      # The hosted Mac runner cannot connect to Apple's Simulator service.
+      # Compile for a physical iOS device; simulator tests need another runner.
       - name: Build for physical iOS devices
         run: |
           xcodebuild \

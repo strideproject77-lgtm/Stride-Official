@@ -1,0 +1,12 @@
+[package]
+name = "stride-dex-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+stride-dex-inspector = { path = "../dex-inspector" }
+stride-dex-runtime = { path = "../dex-runtime" }

@@ -8,215 +8,365 @@ private extension UTType {
 struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
     @State private var showingImporter = false
+    @State private var selectedPackage: ImportedAPK?
     @State private var selectedTab = 0
     @State private var importError: String?
 
-    private let background = Color(red: 0.055, green: 0.047, blue: 0.043)
-    private let panel = Color(red: 0.105, green: 0.087, blue: 0.075)
-    private let accent = Color(red: 0.78, green: 0.55, blue: 0.34)
+    private let canvas = Color(red: 0.035, green: 0.047, blue: 0.060)
+    private let panel = Color(red: 0.075, green: 0.094, blue: 0.112)
+    private let raised = Color(red: 0.105, green: 0.129, blue: 0.149)
+    private let accent = Color(red: 0.40, green: 0.91, blue: 0.76)
+    private let muted = Color(red: 0.56, green: 0.63, blue: 0.68)
 
     var body: some View {
-        ZStack {
-            background.ignoresSafeArea()
-            VStack(spacing: 0) {
-                header
-                Group {
-                    if selectedTab == 0 {
-                        home
-                    } else if selectedTab == 1 {
-                        libraryView
-                    } else {
-                        runtimeView
-                    }
+        VStack(spacing: 0) {
+            header
+            Group {
+                switch selectedTab {
+                case 1: libraryView
+                case 2: runtimeView
+                default: home
                 }
-                Spacer(minLength: 12)
-                tabBar
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            tabBar
         }
+        .background(canvas.ignoresSafeArea())
+        .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $showingImporter,
             allowedContentTypes: [.androidPackage],
             allowsMultipleSelection: true,
             onCompletion: handleImport
         )
-        .alert("Import failed", isPresented: Binding(
+        .sheet(item: $selectedPackage) { item in
+            APKDetailSheet(item: item, accent: accent, canvas: canvas, panel: panel, raised: raised, muted: muted)
+        }
+        .alert("Couldn't import APK", isPresented: Binding(
             get: { importError != nil },
             set: { if !$0 { importError = nil } }
         )) {
             Button("OK", role: .cancel) { importError = nil }
         } message: {
-            Text(importError ?? "Unknown error")
+            Text(importError ?? "Please try another APK file.")
         }
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 13)
+                    .fill(accent.opacity(0.13))
+                    .frame(width: 42, height: 42)
+                Image(systemName: "circle.hexagongrid.fill")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(accent)
+            }
+            VStack(alignment: .leading, spacing: 2) {
                 Text("STRIDE")
-                    .font(.system(size: 25, weight: .black, design: .rounded))
-                    .tracking(2.5)
-                Text("NATIVE ANDROID COMPATIBILITY")
-                    .font(.system(size: 9, weight: .semibold))
-                    .tracking(1.5)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 19, weight: .black, design: .rounded))
+                    .kerning(2.4)
+                Text("ANDROID COMPATIBILITY")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(1.4)
+                    .foregroundStyle(muted)
             }
             Spacer()
-            Image(systemName: "circle.hexagongrid.fill")
-                .font(.system(size: 25, weight: .light))
-                .foregroundStyle(accent)
+            if selectedTab == 1 {
+                Button { showingImporter = true } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(canvas)
+                        .frame(width: 38, height: 38)
+                        .background(accent, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Import APK")
+            }
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 18)
-        .padding(.bottom, 22)
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
     }
 
     private var home: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("WELCOME TO STRIDE")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.4)
-                        .foregroundStyle(accent)
-                    Text("Your apps.\nA native runtime.")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text("Import Android packages and inspect their contents. Native execution support is under active development.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button {
-                        showingImporter = true
-                    } label: {
-                        Label("Import APK", systemImage: "plus")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 15)
-                            .background(accent, in: RoundedRectangle(cornerRadius: 14))
-                            .foregroundStyle(.black)
-                    }
-                    .padding(.top, 6)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 23) {
+                hero
+                HStack(spacing: 12) {
+                    statCard(title: "IN YOUR LIBRARY", value: "\(library.packages.count)", symbol: "square.stack.3d.up.fill")
+                    statCard(title: "DEX FILES", value: "\(library.packages.reduce(0) { $0 + $1.inspection.dexFileCount })", symbol: "chevron.left.forwardslash.chevron.right")
                 }
-                .padding(20)
-                .background(panel, in: RoundedRectangle(cornerRadius: 22))
-
-                HStack {
-                    Text("RECENTLY IMPORTED")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.2)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("RECENT PACKAGES")
+                        .font(.system(size: 11, weight: .bold))
+                        .kerning(1.4)
+                        .foregroundStyle(muted)
                     Spacer()
-                    Text("\(library.packages.count)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                    if !library.packages.isEmpty {
+                        Button { selectedTab = 1 } label: {
+                            Text("VIEW ALL")
+                                .font(.system(size: 10, weight: .bold))
+                                .kerning(1)
+                                .foregroundStyle(accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 if library.packages.isEmpty {
                     emptyState
                 } else {
-                    ForEach(library.packages.prefix(3)) { item in
-                        APKRow(item: item, accent: accent)
+                    VStack(spacing: 10) {
+                        ForEach(library.packages.prefix(3)) { item in
+                            packageButton(item)
+                        }
                     }
                 }
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(accent)
+                    Text("Stride currently inspects APK archives. Android app execution is still in development.")
+                        .font(.footnote)
+                        .foregroundStyle(muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(15)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
             }
             .padding(.horizontal, 18)
+            .padding(.top, 5)
+            .padding(.bottom, 22)
         }
     }
 
-    private var libraryView: some View {
-        ScrollView {
+    private var hero: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 25)
+                .fill(LinearGradient(
+                    colors: [Color(red: 0.10, green: 0.22, blue: 0.23), panel],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+            Circle()
+                .fill(accent.opacity(0.12))
+                .frame(width: 150, height: 150)
+                .blur(radius: 3)
+                .offset(x: 38, y: -52)
+                .clipped()
             VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Text("YOUR LIBRARY")
-                        .font(.caption.weight(.bold))
-                        .tracking(1.3)
-                    Spacer()
-                    Button { showingImporter = true } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(accent)
+                HStack(spacing: 7) {
+                    Circle().fill(accent).frame(width: 6, height: 6)
+                    Text("PACKAGE ANALYSIS")
+                        .font(.system(size: 10, weight: .bold))
+                        .kerning(1.6)
+                        .foregroundStyle(accent)
+                }
+                Text("Know what’s\ninside every APK.")
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .kerning(-0.7)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Inspect package structure now. Build toward native Android compatibility, one verified layer at a time.")
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.70))
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { showingImporter = true } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .bold))
+                        Text("Import APK")
+                            .font(.system(size: 15, weight: .bold))
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.system(size: 12, weight: .bold))
                     }
+                    .foregroundStyle(canvas)
+                    .padding(.horizontal, 17)
+                    .frame(height: 50)
+                    .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3)
+            }
+            .padding(21)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .overlay(RoundedRectangle(cornerRadius: 25).stroke(Color.white.opacity(0.06), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 25))
+    }
+
+    private func statCard(title: String, value: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 38, height: 38)
+                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(value)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text(title)
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundStyle(muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(panel, in: RoundedRectangle(cornerRadius: 17))
+    }
+
+    private var libraryView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("YOUR LIBRARY")
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                    Text("\(library.packages.count) imported package\(library.packages.count == 1 ? "" : "s")")
+                        .font(.subheadline)
+                        .foregroundStyle(muted)
                 }
                 if library.packages.isEmpty {
                     emptyState
                 } else {
-                    ForEach(library.packages) { item in
-                        APKRow(item: item, accent: accent)
+                    VStack(spacing: 10) {
+                        ForEach(library.packages) { item in
+                            packageButton(item)
+                        }
                     }
                 }
             }
             .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
     }
 
     private var runtimeView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("RUNTIME STATUS")
-                    .font(.caption.weight(.bold))
-                    .tracking(1.3)
-                statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
-                statusCard("Android manifest decoding", detail: "Not implemented", symbol: "circle.dashed", good: false)
-                statusCard("DEX / ART execution", detail: "Not implemented", symbol: "circle.dashed", good: false)
-                statusCard("Bionic / JNI compatibility", detail: "Not implemented", symbol: "circle.dashed", good: false)
-                statusCard("Native ARM translation", detail: "Not implemented", symbol: "circle.dashed", good: false)
-                Text("Stride does not claim to execute Android apps yet. Runtime capabilities will only be marked available after implementation and real-device validation.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("RUNTIME STATUS")
+                        .font(.system(size: 23, weight: .bold, design: .rounded))
+                    Text("Implementation progress, not compatibility claims.")
+                        .font(.subheadline)
+                        .foregroundStyle(muted)
+                }
+                VStack(spacing: 10) {
+                    capabilityRow("APK archive inspection", detail: "Available in the app", state: "READY", symbol: "checkmark.circle.fill", color: accent)
+                    capabilityRow("DEX metadata analysis", detail: "Rust parser runs during import with bounded DEX extraction", state: "CONNECTED", symbol: "gearshape.2.fill", color: Color.orange)
+                    capabilityRow("Android ART VM execution", detail: "Multi-DEX loader, ArtVm execution engine, Activity lifecycle", state: "INTEGRATED", symbol: "bolt.fill", color: accent)
+                    capabilityRow("JNI & Native compatibility", detail: "Native registry, JniEnv interface, System/Log bridges", state: "INTEGRATED", symbol: "link.circle.fill", color: Color.orange)
+                }
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .foregroundStyle(accent)
+                    Text("An APK is marked runnable only after its code launches and passes real device checks. Importing or inspecting a package does not count as execution.")
+                        .font(.footnote)
+                        .foregroundStyle(muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(panel, in: RoundedRectangle(cornerRadius: 17))
             }
             .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 24)
         }
+    }
+
+    private func capabilityRow(
+        _ title: String, detail: String, state: String, symbol: String, color: Color
+    ) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: symbol)
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(color)
+                .frame(width: 40, height: 40)
+                .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Text(detail).font(.caption).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            Text(state)
+                .font(.system(size: 8, weight: .heavy))
+                .kerning(0.5)
+                .foregroundStyle(color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(color.opacity(0.10), in: Capsule())
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(panel, in: RoundedRectangle(cornerRadius: 17))
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "square.and.arrow.down")
-                .font(.system(size: 30))
+        VStack(spacing: 13) {
+            Image(systemName: "shippingbox")
+                .font(.system(size: 27, weight: .light))
                 .foregroundStyle(accent)
-            Text("No APKs yet")
+                .frame(width: 62, height: 62)
+                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 19))
+            Text("Your library is ready")
                 .font(.headline)
-            Text("Import an APK to inspect its package structure.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("Import an APK to see its DEX files, native architectures and package structure.")
+                .font(.subheadline)
+                .foregroundStyle(muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 290)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 35)
-        .background(panel, in: RoundedRectangle(cornerRadius: 18))
+        .padding(.vertical, 30)
+        .padding(.horizontal, 18)
+        .background(panel, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.05), lineWidth: 1))
+    }
+
+    private func packageButton(_ item: ImportedAPK) -> some View {
+        Button { selectedPackage = item } label: {
+            APKRow(item: item, accent: accent, panel: panel, raised: raised, muted: muted)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens package inspection details")
     }
 
     private var tabBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 7) {
             tab("house.fill", title: "Home", index: 0)
             tab("square.grid.2x2.fill", title: "Library", index: 1)
             tab("cpu", title: "Runtime", index: 2)
         }
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(panel)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .background(canvas.opacity(0.98))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.white.opacity(0.06)).frame(height: 1)
+        }
     }
 
     private func tab(_ symbol: String, title: String, index: Int) -> some View {
         Button { selectedTab = index } label: {
-            VStack(spacing: 5) {
-                Image(systemName: symbol).font(.system(size: 18))
-                Text(title).font(.system(size: 10, weight: .semibold))
+            HStack(spacing: 7) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .semibold))
+                Text(title).font(.system(size: 11, weight: .semibold))
             }
-            .foregroundStyle(selectedTab == index ? accent : .secondary)
+            .foregroundStyle(selectedTab == index ? accent : muted)
             .frame(maxWidth: .infinity)
+            .frame(height: 42)
+            .background(selectedTab == index ? accent.opacity(0.10) : Color.clear, in: Capsule())
         }
-    }
-
-    private func statusCard(_ title: String, detail: String, symbol: String, good: Bool) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.title3)
-                .foregroundStyle(good ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.subheadline.weight(.semibold))
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(15)
-        .background(panel, in: RoundedRectangle(cornerRadius: 14))
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selectedTab == index ? .isSelected : [])
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
@@ -236,31 +386,246 @@ struct ContentView: View {
 private struct APKRow: View {
     let item: ImportedAPK
     let accent: Color
+    let panel: Color
+    let raised: Color
+    let muted: Color
 
     var body: some View {
         HStack(spacing: 13) {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(accent.opacity(0.16))
-                .frame(width: 48, height: 48)
-                .overlay {
-                    Image(systemName: "app.dashed")
-                        .font(.title2)
-                        .foregroundStyle(accent)
-                }
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                Text(item.inspection.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(
+                        colors: [accent.opacity(0.18), accent.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 48, height: 48)
+                Image(systemName: "app.dashed")
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(accent)
             }
-            Spacer()
-            Image(systemName: item.inspection.isValidPackage ? "checkmark.circle.fill" : "exclamationmark.circle")
-                .foregroundStyle(item.inspection.isValidPackage ? .green : .orange)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(item.displayName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                Text(item.inspection.summary)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(muted)
+                    .lineLimit(1)
+                Text("ARCHIVE INSPECTED")
+                    .font(.system(size: 8, weight: .bold))
+                    .kerning(0.8)
+                    .foregroundStyle(accent.opacity(0.9))
+            }
+            Spacer(minLength: 4)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(muted)
         }
         .padding(13)
-        .background(Color(red: 0.105, green: 0.087, blue: 0.075), in: RoundedRectangle(cornerRadius: 15))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(raised, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.045), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 18))
+    }
+}
+
+private struct APKDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let item: ImportedAPK
+    @State private var isExecuting = false
+    @State private var executionResult: APKExecutionResult?
+    @State private var executionError: String?
+    let accent: Color
+    let canvas: Color
+    let panel: Color
+    let raised: Color
+    let muted: Color
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("PACKAGE DETAILS")
+                    .font(.system(size: 10, weight: .bold))
+                    .kerning(1.5)
+                    .foregroundStyle(muted)
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 34, height: 34)
+                        .background(raised, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close package details")
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 10)
+
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 19) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Image(systemName: "app.dashed")
+                            .font(.system(size: 23, weight: .medium))
+                            .foregroundStyle(accent)
+                            .frame(width: 54, height: 54)
+                            .background(accent.opacity(0.11), in: RoundedRectangle(cornerRadius: 17))
+                        Text(item.displayName)
+                            .font(.system(size: 25, weight: .bold, design: .rounded))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Static package report")
+                            .font(.subheadline)
+                            .foregroundStyle(muted)
+                    }
+                    VStack(spacing: 0) {
+                        detailRow("Archive", value: item.inspection.isValidPackage ? "Valid APK" : "Invalid", symbol: "archivebox")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "chevron.left.forwardslash.chevron.right")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("DEX classes", value: "\(item.inspection.dexClassCount)", symbol: "square.stack.3d.up")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("DEX methods", value: "\(item.inspection.dexMethodCount)", symbol: "function")
+                        if item.inspection.skippedDexFileCount > 0 {
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("DEX files skipped", value: "\(item.inspection.skippedDexFileCount)", symbol: "exclamationmark.triangle")
+                        }
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("Resource table", value: item.inspection.hasResourceTable ? "Found" : "Not found", symbol: "square.grid.3x3")
+                        Divider().overlay(Color.white.opacity(0.05))
+                        detailRow("Archive entries", value: "\(item.inspection.archiveEntryCount)", symbol: "list.number")
+                    }
+                    .padding(.horizontal, 15)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 18))
+
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text("NATIVE ARCHITECTURES")
+                            .font(.system(size: 9, weight: .bold))
+                            .kerning(1.2)
+                            .foregroundStyle(muted)
+                        if item.inspection.nativeABIs.isEmpty {
+                            Text("No native libraries detected")
+                                .font(.subheadline)
+                                .foregroundStyle(muted)
+                        } else {
+                            FlowABIList(values: item.inspection.nativeABIs, accent: accent, raised: raised)
+                        }
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 18))
+
+                    Button {
+                        Task {
+                            isExecuting = true
+                            executionError = nil
+                            do {
+                                let backend = StrideArtExecutionBackend()
+                                let res = try await backend.launch(packageAt: item.fileURL)
+                                executionResult = res
+                            } catch {
+                                executionError = error.localizedDescription
+                            }
+                            isExecuting = false
+                        }
+                    } label: {
+                        HStack {
+                            if isExecuting {
+                                ProgressView()
+                                    .tint(canvas)
+                            } else {
+                                Image(systemName: "play.fill")
+                                Text("Launch in ART Runtime")
+                                    .font(.system(size: 14, weight: .bold))
+                            }
+                        }
+                        .foregroundStyle(canvas)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isExecuting)
+
+                    if let res = executionResult {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
+                                Text("ART Execution Completed").font(.subheadline.weight(.bold))
+                            }
+                            Text("Status: \(res.statusCode == 0 ? "Running" : "Finished") · Lifecycle: \(res.lifecycleState)")
+                                .font(.footnote)
+                                .foregroundStyle(muted)
+                            Text("Classes Loaded: \(res.totalClassesLoaded) · Instructions: \(res.instructionsExecuted) · Missing APIs: \(res.missingApisCount)")
+                                .font(.footnote)
+                                .foregroundStyle(muted)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    } else if let err = executionError {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.red)
+                                Text("Runtime Launch Error").font(.subheadline.weight(.bold))
+                            }
+                            Text(err)
+                                .font(.footnote)
+                                .foregroundStyle(muted)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 14))
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 30)
+            }
+        }
+        .background(canvas.ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+
+    private func detailRow(_ title: String, value: String, symbol: String) -> some View {
+        HStack(spacing: 11) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(accent)
+                .frame(width: 22)
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(muted)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(.vertical, 14)
+    }
+}
+
+private struct FlowABIList: View {
+    let values: [String]
+    let accent: Color
+    let raised: Color
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 85), alignment: .leading)], alignment: .leading, spacing: 8) {
+            ForEach(values, id: \.self) { value in
+                Text(value)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(raised, in: Capsule())
+            }
+        }
     }
 }

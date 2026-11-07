@@ -22,6 +22,8 @@ targets:
     dependencies:
       - package: ZIPFoundation
         product: ZIPFoundation
+      - framework: runtime-rust/target/StrideDexFFI.xcframework
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride
