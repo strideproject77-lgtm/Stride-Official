@@ -40,6 +40,8 @@ targets:
       - path: Tests/StrideTests
     dependencies:
       - target: Stride
+      - package: ZIPFoundation
+        product: ZIPFoundation
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride.tests
