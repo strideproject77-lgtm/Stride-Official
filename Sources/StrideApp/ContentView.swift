@@ -841,7 +841,7 @@ private struct APKDetailSheet: View {
                                     Text("No launch logs yet. Force Execute to record the next attempt.")
                                         .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                                 } else {
-                                    ForEach(Array(sessionLogLines.suffix(80).enumerated()), id: \\.offset) { _, line in
+                                    ForEach(Array(sessionLogLines.suffix(80).enumerated()), id: \.offset) { _, line in
                                         Text(line)
                                             .font(.system(size: 9, weight: .regular, design: .monospaced))
                                             .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red.opacity(0.95) : muted)
