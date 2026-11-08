@@ -804,20 +804,20 @@ private struct APKDetailSheet: View {
                             executionError = nil
                             executionResult = nil
                             sessionLogLines = []
-                            appendSessionLog("[SESSION] Force execution requested for \\(item.displayName)")
-                            appendSessionLog("[SESSION] Started: \\(Date().formatted(date: .abbreviated, time: .standard))")
+                            appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
+                            appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
                             do {
                                 let backend = StrideArtExecutionBackend()
                                 let res = try await backend.launch(packageAt: item.fileURL) { line in
                                     Task { @MainActor in appendSessionLog(line) }
                                 }
                                 executionResult = res
-                                lastRunLabel = "Completed · \\(Date().formatted(date: .abbreviated, time: .shortened))"
-                                appendSessionLog("[SESSION] Launch attempt completed with lifecycle \\(res.lifecycleState)")
+                                lastRunLabel = "Completed · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] Launch attempt completed with lifecycle \(res.lifecycleState)")
                             } catch {
                                 executionError = error.localizedDescription
-                                lastRunLabel = "Failed · \\(Date().formatted(date: .abbreviated, time: .shortened))"
-                                appendSessionLog("[SESSION] FAILED: \\(error.localizedDescription)")
+                                lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
                             }
                             isExecuting = false
                         }
@@ -936,19 +936,19 @@ private struct APKDetailSheet: View {
         let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("StrideLogs", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("\\(safeName)-latest-session.txt")
+        return folder.appendingPathComponent("\(safeName)-latest-session.txt")
     }
 
     private func appendSessionLog(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
-        sessionLogLines.append("[\\(stamp)] \\(message)")
+        sessionLogLines.append("[\(stamp)] \(message)")
         let content = sessionLogLines.joined(separator: "\\n") + "\\n"
         let url = logFileURL()
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
             logExportURL = url
         } catch {
-            executionError = "Could not save session log: \\(error.localizedDescription)"
+            executionError = "Could not save session log: \(error.localizedDescription)"
         }
     }
 
@@ -957,7 +957,7 @@ private struct APKDetailSheet: View {
         guard let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
         sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         logExportURL = url
-        if let last = sessionLogLines.last { lastRunLabel = "Saved session · \\(last)" }
+        if let last = sessionLogLines.last { lastRunLabel = "Saved session · \(last)" }
     }
 
     private func detailRow(_ title: String, value: String, symbol: String) -> some View {
