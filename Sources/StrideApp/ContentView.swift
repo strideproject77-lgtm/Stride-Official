@@ -72,12 +72,15 @@ struct ContentView: View {
             if isImporting {
                 ProgressView().tint(accent).frame(width: 34, height: 34)
             } else {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 19, weight: .medium))
-                    .foregroundStyle(accent)
-                    .frame(width: 38, height: 38)
-                    .background(panel, in: Circle())
-                    .accessibilityLabel("Settings")
+                Button { selectedTab = 2 } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 19, weight: .medium))
+                        .foregroundStyle(accent)
+                        .frame(width: 38, height: 38)
+                        .background(panel, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
             }
         }
         .padding(.horizontal, 20)
