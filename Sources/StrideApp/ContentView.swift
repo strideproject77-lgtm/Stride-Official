@@ -8,6 +8,8 @@ struct ContentView: View {
     @State private var selectedPackage: ImportedAPK?
     @State private var selectedTab = 0
     @State private var importError: String?
+    @State private var importAlertTitle = "Import failed"
+    @State private var isImporting = false
     @State private var searchText = ""
 
     private let canvas = Color.black
@@ -45,14 +47,15 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [.data],
-            allowsMultipleSelection: true,
+            // Accept generic Files-provider items; validate the .apk extension after selection.
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false,
             onCompletion: handleImport
         )
         .sheet(item: $selectedPackage) { item in
             APKDetailSheet(item: item, accent: accent, canvas: canvas, panel: panel, raised: raised, muted: muted)
         }
-        .alert("Couldn't import APK", isPresented: Binding(
+        .alert(importAlertTitle, isPresented: Binding(
             get: { importError != nil },
             set: { if !$0 { importError = nil } }
         )) {
@@ -523,20 +526,20 @@ struct ContentView: View {
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            var failures: [String] = []
-            for url in urls {
-                do {
-                    try library.importPackage(from: url)
-                } catch {
-                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
-                }
-            }
-            if !failures.isEmpty {
-                importError = failures.joined(separator: "\n")
-            } else if !urls.isEmpty {
+            guard let url = urls.first else { return }
+            isImporting = true
+            do {
+                try library.importPackage(from: url)
                 selectedTab = 1
+                importAlertTitle = "Import complete"
+                importError = "\(url.lastPathComponent) was added to your Stride library."
+            } catch {
+                importAlertTitle = "Import failed"
+                importError = "\(url.lastPathComponent): \(error.localizedDescription)"
             }
+            isImporting = false
         case .failure(let error):
+            importAlertTitle = "Import failed"
             importError = error.localizedDescription
         }
     }
