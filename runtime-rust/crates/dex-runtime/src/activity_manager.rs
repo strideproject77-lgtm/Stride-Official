@@ -4,7 +4,6 @@
 //! intent-based activity transitions, and proper lifecycle callbacks
 //! (onCreate, onStart, onResume, onPause, onStop, onDestroy).
 
-use std::collections::HashMap;
 use crate::framework::{ActivityLifecycleState, Intent, Bundle};
 use crate::heap::ManagedHeap;
 use crate::loader::AppClassLoader;
@@ -106,7 +105,7 @@ impl ActivityManager {
         }
 
         // 2. Allocate heap instance for the new Activity
-        let obj_ref = heap.allocate_instance(class_name.clone()).ok();
+        let obj_ref = vm.heap.allocate_instance(&class_name).ok();
 
         let mut record = ActivityRecord {
             record_id,
@@ -193,7 +192,7 @@ impl ActivityManager {
             if let Some(obj_ref) = receiver {
                 args.push(Value::Object(obj_ref));
             }
-            let _ = vm.execute_method(&loaded_method, &args, heap, 10_000);
+            let _ = vm.execute_method(u16::try_from(loaded_method).unwrap_or(u16::MAX), &args, 10_000);
         }
     }
 }
@@ -205,12 +204,17 @@ mod tests {
     #[test]
     fn activity_backstack_push_and_pop() {
         let mut am = ActivityManager::new();
-        let mut heap = ManagedHeap::default();
         let mut class_loader = AppClassLoader::new();
-        let mut vm = ArtVm::new();
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = crate::hierarchy::ClassHierarchy::new();
+        let mut monitors = crate::sync::MonitorTable::new();
+        let mut jni = crate::jni::JniNativeRegistry::new();
+        let methods = std::collections::HashMap::new();
+        let strings: Vec<String> = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
 
-        let mut intent1 = Intent::new("android.intent.action.MAIN");
-        intent1.set_component("com.example.test", "MainActivity");
+        let mut intent1 = Intent::new(Some(Intent::ACTION_MAIN));
+        intent1 = intent1.with_component("com.example.test", "MainActivity");
         let id1 = am.start_activity(intent1, &mut heap, &mut class_loader, &mut vm).unwrap();
         assert_eq!(id1, 1);
         assert_eq!(am.activity_count(), 1);
@@ -218,8 +222,8 @@ mod tests {
         assert_eq!(am.current_activity().unwrap().state, ActivityLifecycleState::Resumed);
 
         // Push second activity (e.g. SettingsActivity)
-        let mut intent2 = Intent::new("android.intent.action.VIEW");
-        intent2.set_component("com.example.test", "SettingsActivity");
+        let mut intent2 = Intent::new(Some(Intent::ACTION_VIEW));
+        intent2 = intent2.with_component("com.example.test", "SettingsActivity");
         let id2 = am.start_activity(intent2, &mut heap, &mut class_loader, &mut vm).unwrap();
         assert_eq!(id2, 2);
         assert_eq!(am.activity_count(), 2);
