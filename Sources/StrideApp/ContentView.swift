@@ -692,6 +692,9 @@ private struct APKDetailSheet: View {
     @State private var isExecuting = false
     @State private var executionResult: APKExecutionResult?
     @State private var executionError: String?
+    @State private var sessionLogLines: [String] = []
+    @State private var logExportURL: URL?
+    @State private var lastRunLabel = "No previous launch recorded"
     let accent: Color
     let canvas: Color
     let panel: Color
@@ -780,12 +783,22 @@ private struct APKDetailSheet: View {
                         Task {
                             isExecuting = true
                             executionError = nil
+                            executionResult = nil
+                            sessionLogLines = []
+                            appendSessionLog("[SESSION] Force execution requested for \\(item.displayName)")
+                            appendSessionLog("[SESSION] Started: \\(Date().formatted(date: .abbreviated, time: .standard))")
                             do {
                                 let backend = StrideArtExecutionBackend()
-                                let res = try await backend.launch(packageAt: item.fileURL)
+                                let res = try await backend.launch(packageAt: item.fileURL) { line in
+                                    Task { @MainActor in appendSessionLog(line) }
+                                }
                                 executionResult = res
+                                lastRunLabel = "Completed · \\(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] Launch attempt completed with lifecycle \\(res.lifecycleState)")
                             } catch {
                                 executionError = error.localizedDescription
+                                lastRunLabel = "Failed · \\(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] FAILED: \\(error.localizedDescription)")
                             }
                             isExecuting = false
                         }
@@ -796,7 +809,7 @@ private struct APKDetailSheet: View {
                                 Text("Starting runtime…")
                             } else {
                                 Image(systemName: "play.fill")
-                                Text("Launch in ART Runtime")
+                                Text("Force Execute in ART Runtime")
                             }
                         }
                         .font(.system(size: 13, weight: .bold))
@@ -807,6 +820,50 @@ private struct APKDetailSheet: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isExecuting)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("How was this app run last time?")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Text(lastRunLabel)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(muted)
+                            }
+                            Spacer()
+                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(accent)
+                        }
+                        Text("Session Logs").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 5) {
+                                if sessionLogLines.isEmpty {
+                                    Text("No launch logs yet. Force Execute to record the next attempt.")
+                                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                                } else {
+                                    ForEach(Array(sessionLogLines.suffix(80).enumerated()), id: \\.offset) { _, line in
+                                        Text(line)
+                                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                                            .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red.opacity(0.95) : muted)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 180)
+                        .padding(10)
+                        .background(canvas, in: RoundedRectangle(cornerRadius: 11))
+                        if let logExportURL {
+                            ShareLink(item: logExportURL) {
+                                Label("Export Logs (.txt)", systemImage: "square.and.arrow.up")
+                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                            }
+                        }
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
 
                     if let res = executionResult {
                         VStack(alignment: .leading, spacing: 7) {
@@ -847,6 +904,36 @@ private struct APKDetailSheet: View {
         }
         .background(canvas.ignoresSafeArea())
         .preferredColorScheme(.dark)
+        .onAppear(perform: loadPreviousSession)
+    }
+
+    private func logFileURL() -> URL {
+        let safeName = item.displayName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("StrideLogs", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("\\(safeName)-latest-session.txt")
+    }
+
+    private func appendSessionLog(_ message: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        sessionLogLines.append("[\\(stamp)] \\(message)")
+        let content = sessionLogLines.joined(separator: "\\n") + "\\n"
+        let url = logFileURL()
+        do {
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            logExportURL = url
+        } catch {
+            executionError = "Could not save session log: \\(error.localizedDescription)"
+        }
+    }
+
+    private func loadPreviousSession() {
+        let url = logFileURL()
+        guard let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
+        sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        logExportURL = url
+        if let last = sessionLogLines.last { lastRunLabel = "Saved session · \\(last)" }
     }
 
     private func detailRow(_ title: String, value: String, symbol: String) -> some View {
