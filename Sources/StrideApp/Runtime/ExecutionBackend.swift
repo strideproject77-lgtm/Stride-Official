@@ -73,6 +73,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         var manifestData = Data()
         var dexDataList: [Data] = []
+        var soDataList: [(String, Data)] = []
 
         for entry in archive {
             if entry.path == "AndroidManifest.xml" {
@@ -85,6 +86,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     dex.append(chunk)
                 }
                 dexDataList.append(dex)
+            } else if (entry.path.hasPrefix("lib/arm64-v8a/") || entry.path.hasPrefix("lib/armeabi-v7a/")) && entry.path.hasSuffix(".so") {
+                var so = Data()
+                _ = try archive.extract(entry) { chunk in
+                    so.append(chunk)
+                }
+                let name = URL(fileURLWithPath: entry.path).lastPathComponent
+                soDataList.append((name, so))
             }
         }
 
@@ -115,6 +123,17 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             guard dexStatus == 0 else {
                 throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus)
+            }
+        }
+
+        // Load native shared libraries (.so) into the Bionic/ELF linker
+        for (soName, soData) in soDataList {
+            _ = soData.withUnsafeBytes { rawBuffer in
+                if let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) {
+                    _ = soName.withCString { namePtr in
+                        stride_runtime_load_so(runtime, namePtr, ptr, rawBuffer.count)
+                    }
+                }
             }
         }
 

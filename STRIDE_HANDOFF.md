@@ -16,6 +16,15 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-08: **Bionic Libc Emulation & Native Shared Library Linker (`bionic.rs`)**:
+  - Implemented `BionicEnvironment` with core symbol emulation for liblog (`__android_log_print`, `__android_log_write`), libm (`sin`, `cos`, `tan`, `atan2`, `sqrt`, `pow`, `floor`, `ceil`), and libc (`strlen`, `abort`).
+  - Built `NativeLinker` connecting `stride_elf_inspector` and `stride_native_loader` to parse ELF shared libraries, resolve dynamic symbols, DT_NEEDED dependencies, and JNI function bindings.
+  - Added `load_native_library` in `AndroidRuntime` (`launcher.rs`), exposed `stride_runtime_load_so` in C FFI (`stride_dex_ffi.h`, `lib.rs`), and wired `ExecutionBackend.swift` to extract and link native ARM64 `.so` libraries directly from APK archives.
+
+- 2026-11-08: **Android Canvas 2D Graphics Engine & Orientation Handling (`canvas.rs`, `graphics.rs`)**:
+  - Implemented `Canvas`, `Paint`, `PaintStyle`, `RectF`, and `Path` with matrix transformation stack (translate, scale, save, restore) rasterizing 2D primitives directly into the 32-bit RGBA `Surface` framebuffer.
+  - Added `ScreenOrientation` configuration change handling on `DisplayMetrics` and `Surface.resize()`. Commit `3e69f51` pushed to `feat/dex-class-method-loader`.
+
 - 2026-11-07: **Managed Heap String Interning, JNI Native Extensions & Runtime Diagnostics**:
   - **Managed Heap (`heap.rs`)**: Added string interning (`intern_string`), string concatenation (`concat_strings`), substring extraction, length calculation, `array_copy` slice transfers, byte array allocation/extraction (`allocate_byte_array`, `get_byte_array`), and identity hash code generation to `ManagedHeap`. Added tests for interning and array copy.
   - **JNI Native Subsystem (`jni.rs`)**: Added local reference frame push/pop (`push_local_frame`, `pop_local_frame`), field access helpers, byte array manipulation, mangled symbol lookup (`Java_pkg_Class_method`), and standard built-ins (`java.lang.Math` min/max/abs/sqrt, `System.arraycopy`, `android.os.SystemClock.uptimeMillis`).

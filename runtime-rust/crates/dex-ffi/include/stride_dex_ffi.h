@@ -47,6 +47,16 @@ int32_t stride_runtime_load_dex(
 );
 
 /*
+ * Load and link an ELF native library (.so) into the active runtime.
+ */
+int32_t stride_runtime_load_so(
+    AndroidRuntime *runtime,
+    const char *soname,
+    const uint8_t *data,
+    size_t len
+);
+
+/*
  * Launch the application from AndroidManifest.xml and execute its main activity.
  */
 int32_t stride_runtime_launch_apk(

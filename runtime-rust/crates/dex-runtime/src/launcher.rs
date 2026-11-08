@@ -15,6 +15,7 @@ use crate::graphics::{Surface, InputQueue, DisplayMetrics};
 use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
 use crate::diagnostics::{RuntimeDiagnostics, DiagnosticSeverity};
+use crate::bionic::NativeLinker;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +52,7 @@ pub struct AndroidRuntime {
     pub active_activity_obj: Option<u32>,
     pub active_activity_class: Option<String>,
     pub diagnostics: Arc<RuntimeDiagnostics>,
+    pub native_linker: NativeLinker,
 }
 
 impl AndroidRuntime {
@@ -72,6 +74,7 @@ impl AndroidRuntime {
             active_activity_obj: None,
             active_activity_class: None,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
+            native_linker: NativeLinker::new(),
         }
     }
 
@@ -161,6 +164,19 @@ impl AndroidRuntime {
         let count = self.class_loader.load_dex(dex_data)?;
         self.class_loader.link_hierarchy(&mut self.hierarchy);
         Ok(count)
+    }
+
+    /// Loads and links an ELF shared library (.so) into the native environment.
+    pub fn load_native_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<(), String> {
+        let module = self.native_linker.load_library(soname, elf_bytes)?;
+        let count = module.exported_symbols.len();
+        self.diagnostics.record(
+            DiagnosticSeverity::Info,
+            "NativeLinker",
+            &format!("Loaded native library: {} ({} symbols)", soname, count),
+            None,
+        );
+        Ok(())
     }
 
     /// Launches an Android application package by reading its manifest and executing its main activity.

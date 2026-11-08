@@ -9,3 +9,5 @@ path = "src/lib.rs"
 [dependencies]
 stride-dex-inspector = { path = "../dex-inspector" }
 stride-axml = { path = "../axml" }
+stride-elf-inspector = { path = "../elf-inspector" }
+stride-native-loader = { path = "../native-loader" }

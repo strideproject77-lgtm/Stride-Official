@@ -106,6 +106,32 @@ pub unsafe extern "C" fn stride_runtime_load_dex(
     }
 }
 
+/// Loads and links an ELF shared library (.so) into the active Android runtime.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_load_so(
+    runtime: *mut AndroidRuntime,
+    soname: *const c_char,
+    data: *const u8,
+    len: usize,
+) -> i32 {
+    if runtime.is_null() || data.is_null() || len == 0 {
+        return 1;
+    }
+    let name = if !soname.is_null() {
+        CStr::from_ptr(soname).to_str().unwrap_or("libnative.so")
+    } else {
+        "libnative.so"
+    };
+
+    let rt = unsafe { &mut *runtime };
+    let bytes = unsafe { slice::from_raw_parts(data, len) };
+
+    match rt.load_native_library(name, bytes) {
+        Ok(_) => 0,
+        Err(_) => 2,
+    }
+}
+
 /// Launches the main Activity from AndroidManifest.xml and executes its lifecycle.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_launch_apk(

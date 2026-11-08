@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod launcher;
 pub mod diagnostics;
 pub mod canvas;
+pub mod bionic;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -37,6 +38,7 @@ pub use graphics::{
 pub use canvas::{Canvas, Paint, PaintStyle, RectF, Path};
 pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
+pub use bionic::{NativeLinker, BionicEnvironment, LoadedNativeModule, ResolvedSymbol};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
