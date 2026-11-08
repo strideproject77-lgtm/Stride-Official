@@ -367,4 +367,31 @@ mod diagnostics_tests {
         assert!(report.contains("DEX_CLASS_INSPECTION_FAILED"), "{report}");
         assert!(report.contains("Recovery:"), "{report}");
     }
+    #[test]
+    fn loads_real_pocket_ridge_lite_dex_and_keeps_launcher_code() {
+        let dex = include_bytes!("../tests/fixtures/pocket-ridge-lite-classes.dex");
+        let mut loader = AppClassLoader::new();
+        let diagnostics = RuntimeDiagnostics::new();
+
+        let classes_loaded = loader
+            .load_dex_with_diagnostics(dex, &diagnostics)
+            .expect("real Pocket Ridge DEX should load");
+
+        assert_eq!(classes_loaded, 2);
+        assert!(loader.classes.contains_key("Lcom/stride/compatgame/MainActivity;"));
+        let method_id = loader
+            .find_method(
+                "Lcom/stride/compatgame/MainActivity;",
+                "onCreate",
+                "(Landroid/os/Bundle;)V",
+            )
+            .expect("launcher onCreate method should be indexed");
+        let method = loader.methods_by_id.get(&method_id).expect("method metadata should be retained");
+        let code = method.code.as_ref().expect("launcher onCreate code item should decode");
+        assert!(!code.code_units.is_empty());
+
+        let report = diagnostics.export_text();
+        assert!(!report.contains("DEX_CODE_ITEM_REJECTED"), "{report}");
+    }
+
 }
