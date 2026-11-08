@@ -7,6 +7,7 @@ private extension UTType {
 
 struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
+    @StateObject private var diagnostics = StrideDiagnostics.shared
     @State private var showingImporter = false
     @State private var selectedTab = 0
     @State private var importError: String?
@@ -157,10 +158,65 @@ struct ContentView: View {
                 statusCard("DEX / ART execution", detail: "Not implemented", symbol: "circle.dashed", good: false)
                 statusCard("Bionic / JNI compatibility", detail: "Not implemented", symbol: "circle.dashed", good: false)
                 statusCard("Native ARM translation", detail: "Not implemented", symbol: "circle.dashed", good: false)
-                Text("Stride does not claim to execute Android apps yet. Runtime capabilities will only be marked available after implementation and real-device validation.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("DIAGNOSTIC LOG")
+                                .font(.caption.weight(.bold))
+                                .tracking(1.2)
+                            Text("\(diagnostics.issueCount) errors collected · \(diagnostics.entries.count) recent events")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\\n")
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(accent)
+                        }
+                    }
+                    if diagnostics.entries.isEmpty {
+                        Text("No diagnostic events yet. Import an APK to begin a report.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(diagnostics.entries.suffix(80)) { entry in
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text(entry.severity.rawValue)
+                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        .foregroundStyle(entry.severity == .error || entry.severity == .fatal ? .red : (entry.severity == .warning ? .orange : accent))
+                                    Text(entry.stage)
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    Text(entry.code)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(entry.message)
+                                    .font(.caption)
+                                    .textSelection(.enabled)
+                                if let recovery = entry.recovery {
+                                    Text("Recovery: " + recovery)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(panel, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    Text("Full log is saved as stride-diagnostics.log in the app's Documents folder. Diagnostics continue across independent checks; unsafe execution is never skipped.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(14)
+                .background(panel.opacity(0.7), in: RoundedRectangle(cornerRadius: 16))
+                .padding(.top, 4)
             }
             .padding(.horizontal, 18)
         }
