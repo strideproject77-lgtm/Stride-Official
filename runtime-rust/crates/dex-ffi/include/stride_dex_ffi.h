@@ -78,6 +78,33 @@ int32_t stride_runtime_dispatch_touch(
 );
 
 /*
+ * Swap active OpenGL ES buffers into presentation surface.
+ */
+int32_t stride_runtime_gl_swap_buffers(AndroidRuntime *runtime);
+
+/*
+ * Set the OpenGL ES viewport.
+ */
+int32_t stride_runtime_gl_viewport(
+    AndroidRuntime *runtime,
+    int32_t x,
+    int32_t y,
+    int32_t width,
+    int32_t height
+);
+
+/*
+ * Clear the OpenGL ES color buffer.
+ */
+int32_t stride_runtime_gl_clear(
+    AndroidRuntime *runtime,
+    float r,
+    float g,
+    float b,
+    float a
+);
+
+/*
  * Destroy the runtime instance and free its resources.
  */
 void stride_runtime_destroy(AndroidRuntime *runtime);

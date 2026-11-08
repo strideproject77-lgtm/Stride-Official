@@ -217,6 +217,52 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
     0
 }
 
+/// Swaps the active OpenGL ES / EGL buffer to the runtime surface.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_gl_swap_buffers(runtime: *mut AndroidRuntime) -> i32 {
+    if runtime.is_null() {
+        return 1;
+    }
+    let rt = unsafe { &mut *runtime };
+    let target = &mut rt.surface;
+    rt.gl_engine.egl_swap_buffers(target)
+}
+
+/// Sets the OpenGL ES viewport.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_gl_viewport(
+    runtime: *mut AndroidRuntime,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> i32 {
+    if runtime.is_null() {
+        return 1;
+    }
+    let rt = unsafe { &mut *runtime };
+    rt.gl_engine.gl_viewport(x, y, width, height);
+    0
+}
+
+/// Clears the OpenGL ES color buffer.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_gl_clear(
+    runtime: *mut AndroidRuntime,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+) -> i32 {
+    if runtime.is_null() {
+        return 1;
+    }
+    let rt = unsafe { &mut *runtime };
+    rt.gl_engine.gl_clear_color(r, g, b, a);
+    rt.gl_engine.gl_clear(GL_COLOR_BUFFER_BIT);
+    0
+}
+
 /// Destroys an Android runtime instance and frees its resources.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_destroy(runtime: *mut AndroidRuntime) {
@@ -257,6 +303,8 @@ mod tests {
             let rt = stride_runtime_create(b"com.example.test\0".as_ptr() as *const c_char);
             assert!(!rt.is_null());
             assert_eq!(stride_runtime_dispatch_touch(rt, 0, 100.0, 200.0), 0);
+            assert_eq!(stride_runtime_gl_viewport(rt, 0, 0, 800, 600), 0);
+            assert_eq!(stride_runtime_gl_clear(rt, 0.1, 0.2, 0.3, 1.0), 0);
             stride_runtime_destroy(rt);
         }
     }

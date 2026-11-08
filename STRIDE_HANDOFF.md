@@ -16,6 +16,11 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-08: **OpenGL ES & EGL Context Translation Layer (gl.rs)**:
+  - Implemented OpenGlEsEngine, EglContext, and EglWindowSurface managing EGL context state machines and window surfaces.
+  - Implemented core GLES state management (GlesState): viewport configuration, clear color handling, buffer clear commands, and draw call tracking (gl_draw_arrays).
+  - Implemented gl_swap_buffers presenting the 32-bit RGBA backbuffer directly into the Stride presentation Surface.
+  - Integrated gl_engine into AndroidRuntime (launcher.rs), exported C FFI bindings (stride_runtime_gl_swap_buffers, stride_runtime_gl_viewport, stride_runtime_gl_clear in stride_dex_ffi.h and lib.rs), and added unit tests.
 - 2026-11-08: **Bionic Libc Emulation & Native Shared Library Linker (`bionic.rs`)**:
   - Implemented `BionicEnvironment` with core symbol emulation for liblog (`__android_log_print`, `__android_log_write`), libm (`sin`, `cos`, `tan`, `atan2`, `sqrt`, `pow`, `floor`, `ceil`), and libc (`strlen`, `abort`).
   - Built `NativeLinker` connecting `stride_elf_inspector` and `stride_native_loader` to parse ELF shared libraries, resolve dynamic symbols, DT_NEEDED dependencies, and JNI function bindings.
