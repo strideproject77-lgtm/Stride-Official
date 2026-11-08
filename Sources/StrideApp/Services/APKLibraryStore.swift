@@ -82,8 +82,14 @@ final class APKLibraryStore: ObservableObject {
             }
         }
 
-        if let coordinationError { throw coordinationError }
-        if let copyError { throw copyError }
+        if let coordinationError {
+            try? fileManager.removeItem(at: destination)
+            throw coordinationError
+        }
+        if let copyError {
+            try? fileManager.removeItem(at: destination)
+            throw copyError
+        }
         guard fileManager.fileExists(atPath: destination.path) else {
             throw APKLibraryImportError.unreadableSource
         }
