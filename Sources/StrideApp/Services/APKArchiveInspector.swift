@@ -31,6 +31,7 @@ enum APKInspectionError: LocalizedError {
 struct APKArchiveInspector {
     private let knownABIs: Set<String> = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64", "armeabi", "mips", "mips64"]
 
+    @MainActor
     func inspect(_ url: URL) throws -> APKInspection {
         guard let archive = Archive(url: url, accessMode: .read) else {
             StrideDiagnostics.shared.record(.fatal, stage: "ARCHIVE", code: "ZIP_OPEN_FAILED",

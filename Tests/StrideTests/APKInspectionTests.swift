@@ -2,6 +2,7 @@ import XCTest
 @testable import Stride
 
 final class APKInspectionTests: XCTestCase {
+    @MainActor
     func testInvalidFileIsNotReportedAsRunnable() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
