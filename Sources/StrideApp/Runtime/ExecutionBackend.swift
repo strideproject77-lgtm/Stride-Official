@@ -184,6 +184,23 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             return stride_runtime_launch_apk(runtime, ptr, rawBuffer.count, 200_000, &report)
         }
 
+        // Export the complete Rust-side timeline after every launch attempt,
+        // not only when DEX loading fails. This includes missing APIs, lifecycle
+        // diagnostics, interpreter faults and bounded-history overflow.
+        let diagnosticBytesRequired = stride_runtime_diagnostics_export(runtime, nil, 0)
+        if diagnosticBytesRequired > 1 {
+            var diagnosticBuffer = [CChar](repeating: 0, count: Int(diagnosticBytesRequired))
+            let diagnosticBytesWritten = diagnosticBuffer.withUnsafeMutableBufferPointer { storage in
+                stride_runtime_diagnostics_export(runtime, storage.baseAddress, storage.count)
+            }
+            if diagnosticBytesWritten > 1 {
+                let diagnosticReport = String(cString: diagnosticBuffer)
+                for line in diagnosticReport.components(separatedBy: .newlines) where !line.isEmpty {
+                    onLog("[RUNTIME] \(line)")
+                }
+            }
+        }
+
         guard status == 0 else {
             onLog("[ERROR] Runtime launch bridge failed with status \(status)")
             throw RuntimeExecutionError.runtimeInitializationFailed

@@ -60,6 +60,26 @@ final class APKInspectionTests: XCTestCase {
         XCTAssertEqual(report.iconData, icon)
     }
 
+    func testMultidexSequenceGapIsReported() {
+        XCTAssertEqual(
+            APKArchiveInspector.multidexSequenceGaps(["classes.dex", "classes3.dex"]),
+            ["classes2.dex"]
+        )
+    }
+
+    func testContinuousMultidexSequenceHasNoGap() {
+        XCTAssertTrue(
+            APKArchiveInspector.multidexSequenceGaps(["classes.dex", "classes2.dex", "classes3.dex"]).isEmpty
+        )
+    }
+
+    func testSecondaryDexWithoutPrimaryDoesNotInventPrimaryGap() {
+        XCTAssertEqual(
+            APKArchiveInspector.multidexSequenceGaps(["classes2.dex", "classes3.dex"]),
+            []
+        )
+    }
+
     func testRuntimeBackendNeverClaimsExecution() async {
         do {
             try await UnavailableExecutionBackend().launch(

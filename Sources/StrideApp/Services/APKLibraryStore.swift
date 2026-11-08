@@ -28,18 +28,12 @@ final class APKLibraryStore: ObservableObject {
     }
 
     func importPackage(from sourceURL: URL) throws {
-        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START",
-            "Starting APK import: \(sourceURL.lastPathComponent)")
         let destination = try copyPackageToLibrary(from: sourceURL)
         do {
             let report = try inspector.inspect(destination)
             packages.removeAll { $0.fileURL == destination }
             packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
-            StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
-                "Imported \(sourceURL.lastPathComponent): \(report.dexFileCount) DEX, \(report.dexClassCount) classes, \(report.dexMethodCount) methods")
         } catch {
-            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED",
-                error.localizedDescription, recovery: "This APK was isolated and removed from the library; other packages remain available")
             try? fileManager.removeItem(at: destination)
             throw error
         }
@@ -47,8 +41,6 @@ final class APKLibraryStore: ObservableObject {
 
     /// Copies the provider document, then scans the archive away from the UI thread.
     func importPackageAsync(from sourceURL: URL) async throws {
-        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START",
-            "Starting APK import: \(sourceURL.lastPathComponent)")
         let destination = try copyPackageToLibrary(from: sourceURL)
         do {
             let archiveInspector = inspector
@@ -57,11 +49,7 @@ final class APKLibraryStore: ObservableObject {
             }.value
             packages.removeAll { $0.fileURL == destination }
             packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
-            StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
-                "Imported \(sourceURL.lastPathComponent): \(report.dexFileCount) DEX, \(report.dexClassCount) classes, \(report.dexMethodCount) methods")
         } catch {
-            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED",
-                error.localizedDescription, recovery: "This APK was isolated and removed from the library; other packages remain available")
             try? fileManager.removeItem(at: destination)
             throw error
         }
@@ -69,9 +57,6 @@ final class APKLibraryStore: ObservableObject {
 
     private func copyPackageToLibrary(from sourceURL: URL) throws -> URL {
         guard sourceURL.pathExtension.lowercased() == "apk" else {
-            StrideDiagnostics.shared.record(.warning, stage: "IMPORT", code: "UNSUPPORTED_FILE",
-                "Rejected non-APK file: \(sourceURL.lastPathComponent)",
-                recovery: "Select an .apk file; XAPK/APKS bundle support is not enabled in this import path yet")
             throw APKLibraryImportError.unsupportedFile
         }
 

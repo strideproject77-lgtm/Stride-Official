@@ -799,7 +799,6 @@ private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingExecutionScreen = false
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
     @State private var isExecuting = false
     @State private var executionResult: APKExecutionResult?
@@ -898,7 +897,6 @@ private struct APKDetailSheet: View {
                             executionError = nil
                             executionResult = nil
                             sessionLogLines = []
-                            diagnostics.beginSession(apkName: item.displayName)
                             appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
                             appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
                             do {
@@ -909,12 +907,10 @@ private struct APKDetailSheet: View {
                                 executionResult = res
                                 lastRunLabel = "Completed · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] Launch attempt completed with lifecycle \(res.lifecycleState)")
-                                diagnostics.finishSession(status: "completed")
                             } catch {
                                 executionError = error.localizedDescription
                                 lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
-                                diagnostics.finishSession(status: "failed: \(error.localizedDescription)")
                             }
                             isExecuting = false
                         }
@@ -981,49 +977,6 @@ private struct APKDetailSheet: View {
                                 ActivityViewController(activityItems: [logExportURL])
                             }
                         }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Unified Diagnostics").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                Text("\(diagnostics.entries.count) retained events · \(diagnostics.issueCount) errors")
-                                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                            }
-                            Spacer()
-                            Button {
-                                UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n")
-                            } label: {
-                                Label("COPY", systemImage: "doc.on.doc")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                            Button {
-                                logExportURL = diagnostics.logFileURL
-                                showingLogShare = true
-                            } label: {
-                                Label("EXPORT", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                        }
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 6) {
-                                ForEach(Array(diagnostics.entries.suffix(35))) { entry in
-                                    Text(entry.line)
-                                        .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(entry.severity == .fatal || entry.severity == .error ? Color.red : (entry.severity == .warning ? Color.orange : muted))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 210)
-                        .padding(10)
-                        .background(canvas, in: RoundedRectangle(cornerRadius: 11))
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1226,14 +1179,6 @@ private struct APKDetailSheet: View {
     private func appendSessionLog(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
         sessionLogLines.append("[\(stamp)] \(message)")
-        let upper = message.uppercased()
-        let severity: StrideDiagnostics.Severity =
-            upper.contains("[FATAL]") || upper.contains("[CRASH]") ? .fatal :
-            (upper.contains("[ERROR]") || upper.contains("FAILED") ? .error :
-            (upper.contains("[WARN]") ? .warning : .info))
-        let stage = message.hasPrefix("[SESSION]") ? "SESSION" :
-            (message.hasPrefix("[RUNTIME]") ? "RUST_RUNTIME" : "EXECUTION")
-        StrideDiagnostics.shared.record(severity, stage: stage, code: "RUNTIME_EVENT", message)
         let content = sessionLogLines.joined(separator: "\n") + "\n"
         let url = logFileURL()
         do {
