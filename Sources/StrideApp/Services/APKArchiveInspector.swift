@@ -55,7 +55,32 @@ struct APKArchiveInspector {
             }
         }
 
-        guard hasManifest else { throw APKInspectionError.missingManifest }
+        let diagnostics = StrideDiagnostics.shared
+        diagnostics.record(.info, stage: "ARCHIVE", code: "ENTRY_SCAN",
+                           "Scanned \(count) ZIP entries; DEX files=\(dexPaths.count); native ABIs=\(abis.sorted().joined(separator: ", "))")
+        if !hasManifest {
+            diagnostics.record(.error, stage: "ARCHIVE", code: "MANIFEST_MISSING",
+                               "AndroidManifest.xml is missing",
+                               recovery: "Manifest-dependent checks cannot run; remaining batch APKs will still be inspected")
+            throw APKInspectionError.missingManifest
+        }
+        if dexPaths.isEmpty {
+            diagnostics.record(.warning, stage: "DEX", code: "NO_DEX_FOUND",
+                               "No classes.dex found; this may be a native-only package or an incomplete APK",
+                               recovery: "Continue native-library checks; do not assume Java entry points exist")
+        } else {
+            diagnostics.record(.info, stage: "DEX", code: "DEX_INVENTORY",
+                               "Found DEX files: \(dexPaths.sorted().joined(separator: ", "))")
+        }
+        if !hasResources {
+            diagnostics.record(.warning, stage: "RESOURCES", code: "RESOURCE_TABLE_MISSING",
+                               "resources.arsc is absent; resource-table-dependent features may be unavailable",
+                               recovery: "Continue checks that do not require the Android resource table")
+        }
+        if abis.isEmpty {
+            diagnostics.record(.info, stage: "NATIVE", code: "NO_NATIVE_LIBRARIES",
+                               "No packaged native libraries; continue with DEX/runtime compatibility checks")
+        }
         return APKInspection(
             archiveEntryCount: count,
             hasAndroidManifest: hasManifest,
