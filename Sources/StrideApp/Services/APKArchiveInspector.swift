@@ -172,7 +172,9 @@ struct APKArchiveInspector: Sendable {
             return false
         }
         let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
-        return ["ic_launcher", "ic_launcher_round", "app_icon", "launcher_icon", "icon"].contains(name)
+        return ["ic_launcher", "ic_launcher_round", "ic_launcher_foreground", "ic_launcher_background", "app_icon", "launcher_icon", "icon"].contains(name)
+            || name.hasPrefix("ic_launcher_")
+            || name.contains("launcher")
     }
 
     private static func iconScore(_ path: String) -> Int {
@@ -182,6 +184,8 @@ struct APKArchiveInspector: Sendable {
         switch name {
         case "ic_launcher": nameScore = 500
         case "ic_launcher_round": nameScore = 450
+        case "ic_launcher_foreground": nameScore = 430
+        case "ic_launcher_background": nameScore = 420
         case "app_icon": nameScore = 400
         case "launcher_icon": nameScore = 350
         default: nameScore = 300
