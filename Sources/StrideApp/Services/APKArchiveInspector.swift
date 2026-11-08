@@ -200,7 +200,7 @@ struct APKArchiveInspector: Sendable {
             return number
         })
         guard let maximum = numbers.max(), maximum > 1 else { return [] }
-        return (2...maximum).filter { !numbers.contains($0) }.map { "classes\\($0).dex" }
+        return (2...maximum).filter { !numbers.contains($0) }.map { "classes\($0).dex" }
     }
 
     /// Extract conventional launcher images while preserving their original artwork.
