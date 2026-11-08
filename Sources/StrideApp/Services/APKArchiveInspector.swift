@@ -1,7 +1,7 @@
 import Foundation
 import ZIPFoundation
 
-struct APKInspection: Equatable {
+struct APKInspection: Equatable, Sendable {
     let archiveEntryCount: Int
     let hasAndroidManifest: Bool
     let hasDEX: Bool
