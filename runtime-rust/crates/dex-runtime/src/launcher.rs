@@ -214,11 +214,15 @@ impl AndroidRuntime {
             }
         };
         let count = module.exported_symbols.len();
-        self.diagnostics.record(
-            DiagnosticSeverity::Info,
-            "NativeLinker",
-            &format!("Loaded native library: {} ({} symbols)", soname, count),
-            None,
+        let details = format!(
+            "architecture={:?}; exports={}; JNI_OnLoad_present={}; DT_NEEDED_entries={:?}",
+            module.architecture, count, module.has_jni_onload, module.needed_libraries
+        );
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Warning, "NativeLinker", "ELF_PLAN_ONLY",
+            "ELF was inspected and a memory plan was generated; native code was not mapped, relocated or executed",
+            Some(&details),
+            Some("Do not treat this as native execution support; memory mapping, relocations, symbol binding and JNI_OnLoad dispatch are still required"),
         );
         Ok(())
     }

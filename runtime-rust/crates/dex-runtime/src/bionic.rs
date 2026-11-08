@@ -148,21 +148,22 @@ impl NativeLinker {
         let mut needed_libraries = Vec::new();
         let mut has_jni_onload = false;
 
-        if let Ok(dyn_info) = inspect_elf_dynamic(elf_bytes, &elf_info) {
-            for sym in dyn_info.symbols {
-                if !sym.name.is_empty() && sym.section_index != 0 {
-                    if sym.name == "JNI_OnLoad" {
-                        has_jni_onload = true;
-                    }
-                    exported_symbols.insert(sym.name, sym.value);
-                }
-            }
+        let dynamic_info = inspect_elf_dynamic(elf_bytes, &elf_info)
+            .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
 
-            for (tag, val) in dyn_info.dynamic_tags {
-                if tag == 1 { // DT_NEEDED
-                    // val is offset into string table
-                    needed_libraries.push(format!("lib_{}", val));
+        for symbol in dynamic_info.symbols {
+            if !symbol.name.is_empty() && symbol.section_index != 0 {
+                if symbol.name == "JNI_OnLoad" {
+                    has_jni_onload = true;
                 }
+                exported_symbols.insert(symbol.name, symbol.value);
+            }
+        }
+
+        for (tag, value) in dynamic_info.dynamic_tags {
+            if tag == 1 { // DT_NEEDED
+                // The inspector currently exposes the string-table offset, not the decoded SONAME.
+                needed_libraries.push(format!("DT_NEEDED string-table offset {}", value));
             }
         }
 
@@ -263,4 +264,12 @@ mod tests {
         let resolved = linker.find_jni_binding("Lcom/example/app/NativeLib;", "stringFromJNI");
         assert!(matches!(resolved, Some(ResolvedSymbol::NativeFunction { soname: "libnative-lib.so", address: 0x1000 })));
     }
+    #[test]
+    fn rejects_truncated_native_library_without_registering_a_module() {
+        let mut linker = NativeLinker::new();
+        let error = linker.load_library("libtruncated.so", &[0u8; 8]).unwrap_err();
+        assert!(error.contains("ELF inspection failed"), "{error}");
+        assert!(linker.modules.is_empty());
+    }
+
 }
