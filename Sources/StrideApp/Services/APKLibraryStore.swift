@@ -23,21 +23,23 @@ final class APKLibraryStore: ObservableObject {
             if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
         }
 
-        let folder = try libraryFolder()
-        let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
+        var destination: URL?
         do {
-            try fileManager.copyItem(at: sourceURL, to: destination)
+            let folder = try libraryFolder()
+            let target = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
+            destination = target
+            try fileManager.copyItem(at: sourceURL, to: target)
             diagnostics.record(.info, stage: "IMPORT", code: "COPY_OK", "APK copied into private library")
             diagnostics.record(.info, stage: "ARCHIVE", code: "SCAN_START", "Scanning ZIP entries and required APK structure")
-            let report = try inspector.inspect(destination)
+            let report = try inspector.inspect(target)
             diagnostics.record(.info, stage: "ARCHIVE", code: "SCAN_OK", "Archive scan complete: entries=\(report.archiveEntryCount), manifest=\(report.hasAndroidManifest), dex=\(report.dexFileCount), nativeABIs=\(report.nativeABIs.joined(separator: ", "))")
-            packages.removeAll { $0.fileURL == destination }
-            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+            packages.removeAll { $0.fileURL == target }
+            packages.insert(ImportedAPK(fileURL: target, inspection: report), at: 0)
             diagnostics.finishSession(status: "IMPORT_INSPECTION_COMPLETE")
         } catch {
             diagnostics.record(.error, stage: "IMPORT", code: "IMPORT_FAILED", error.localizedDescription,
-                               recovery: "This APK could not be added; other APKs can still be inspected")
-            try? fileManager.removeItem(at: destination)
+                               recovery: "The failed APK was isolated; continue inspecting other selected APKs")
+            if let destination { try? fileManager.removeItem(at: destination) }
             diagnostics.finishSession(status: "IMPORT_FAILED")
             throw error
         }
