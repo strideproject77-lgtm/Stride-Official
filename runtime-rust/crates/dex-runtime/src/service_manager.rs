@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use crate::framework::Intent;
-use crate::heap::ManagedHeap;
 use crate::loader::AppClassLoader;
 use crate::interpreter::ArtVm;
 use crate::types::Value;
@@ -62,7 +61,6 @@ impl ServiceManager {
     pub fn start_service(
         &mut self,
         intent: &Intent,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> Result<u32, String> {
@@ -87,7 +85,7 @@ impl ServiceManager {
                 self.next_service_id += 1;
 
                 // Allocate service instance
-                let obj_ref = heap.allocate_instance(class_name.clone()).ok();
+                let obj_ref = vm.heap.allocate_instance(&class_name).ok();
 
                 // Call onCreate()
                 Self::dispatch_method(&class_name, "onCreate", "()V", obj_ref, heap, class_loader, vm);
@@ -156,7 +154,7 @@ impl ServiceManager {
             args.push(Value::Object(0)); // Null Intent ref for basic dispatch
             args.push(Value::Int(0));    // flags = 0
             args.push(Value::Int(start_id as i32));
-            let _ = vm.execute_method(&loaded_method, &args, heap, 10_000);
+            let _ = vm.execute_method(u16::try_from(loaded_method).unwrap_or(u16::MAX), &args, 10_000);
         }
     }
 
@@ -186,14 +184,19 @@ mod tests {
     #[test]
     fn service_lifecycle_start_and_stop() {
         let mut sm = ServiceManager::new();
-        let mut heap = ManagedHeap::default();
         let mut class_loader = AppClassLoader::new();
-        let mut vm = ArtVm::new();
+        let mut heap = crate::heap::ManagedHeap::default();
+        let mut hierarchy = crate::hierarchy::ClassHierarchy::new();
+        let mut monitors = crate::sync::MonitorTable::new();
+        let mut jni = crate::jni::JniNativeRegistry::new();
+        let methods = std::collections::HashMap::new();
+        let strings: Vec<String> = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
 
-        let mut intent = Intent::new("com.example.DOWNLOAD");
-        intent.set_component("com.example.test", "DownloadService");
+        let mut intent = Intent::new(Some("com.example.DOWNLOAD"));
+        intent = intent.with_component("com.example.test", "DownloadService");
 
-        let sid = sm.start_service(&intent, &mut heap, &mut class_loader, &mut vm).unwrap();
+        let sid = sm.start_service(&intent, &mut class_loader, &mut vm).unwrap();
         assert_eq!(sid, 1);
         assert_eq!(sm.running_services_count(), 1);
 
@@ -208,7 +211,7 @@ mod tests {
         assert_eq!(s.foreground_notification_id, Some(1001));
 
         // Stop service
-        let stopped = sm.stop_service("DownloadService", &mut heap, &mut class_loader, &mut vm);
+        let stopped = sm.stop_service("DownloadService", &mut class_loader, &mut vm);
         assert!(stopped);
         assert_eq!(sm.running_services_count(), 0);
     }
