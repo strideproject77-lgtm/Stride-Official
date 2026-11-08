@@ -536,10 +536,8 @@ struct ContentView: View {
             guard let url = urls.first else { return }
             isImporting = true
             Task { @MainActor in
-                // Give SwiftUI a chance to show the in-progress state before archive inspection.
-                await Task.yield()
                 do {
-                    try library.importPackage(from: url)
+                    try await library.importPackageAsync(from: url)
                     selectedTab = 1
                     importAlertTitle = "Import complete"
                     importError = "\(url.lastPathComponent) was added to your Stride library."
