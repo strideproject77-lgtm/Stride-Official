@@ -50,6 +50,7 @@ pub struct ArtVm<'a> {
     pub jni: &'a mut JniNativeRegistry,
     pub methods: &'a HashMap<u16, MethodCode>,
     pub static_fields: HashMap<(String, String), Value>,
+    shared_static_fields: Option<&'a mut HashMap<(String, String), Value>>,
     pub strings: &'a [String],
     pub diagnostics: Option<&'a RuntimeDiagnostics>,
     pub method_references: Option<&'a [MethodReference]>,
@@ -122,10 +123,32 @@ impl<'a> ArtVm<'a> {
             jni,
             methods,
             static_fields: HashMap::new(),
+            shared_static_fields: None,
             strings,
             diagnostics: None,
             method_references: None,
             method_lookup: None,
+        }
+    }
+
+    /// Shares application static fields with the owning AndroidRuntime so values survive
+    /// separate interpreter invocations (for example onCreate -> onStart -> onResume).
+    pub fn attach_static_fields(&mut self, fields: &'a mut HashMap<(String, String), Value>) {
+        self.shared_static_fields = Some(fields);
+    }
+
+    fn read_static_field(&self, key: &(String, String)) -> Value {
+        self.shared_static_fields.as_ref()
+            .and_then(|fields| fields.get(key).copied())
+            .or_else(|| self.static_fields.get(key).copied())
+            .unwrap_or(Value::Int(0))
+    }
+
+    fn write_static_field(&mut self, key: (String, String), value: Value) {
+        if let Some(fields) = self.shared_static_fields.as_mut() {
+            (**fields).insert(key, value);
+        } else {
+            self.static_fields.insert(key, value);
         }
     }
 
@@ -851,7 +874,7 @@ impl<'a> ArtVm<'a> {
                     let field_idx = code_units[pc + 1] as usize;
                     let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
                     let key = (method_class.clone(), field_name);
-                    let val = self.static_fields.get(&key).copied().unwrap_or(Value::Int(0));
+                    let val = self.read_static_field(&key);
                     if op == 0x61 {
                         rf.write_long(a8, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
                     } else if op == 0x62 {
@@ -872,7 +895,7 @@ impl<'a> ArtVm<'a> {
                     } else {
                         Value::Int(rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?)
                     };
-                    self.static_fields.insert(key, val);
+                    self.write_static_field(key, val);
                     pc += 2;
                 }
                 0x90..=0x9a => { // int binary arithmetic
@@ -1300,6 +1323,43 @@ impl<'a> ArtVm<'a> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn application_static_fields_survive_interpreter_recreation() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let strings = vec!["counter".to_string()];
+        let methods = HashMap::from([
+            (1u16, MethodCode {
+                class_descriptor: "LTest;".into(), name: "writeCounter".into(), prototype: "()V".into(),
+                code_units: vec![0x7012, 0x0067, 0x0000, 0x000e],
+                registers_size: 1, ins_size: 0, try_blocks: vec![],
+            }),
+            (2u16, MethodCode {
+                class_descriptor: "LTest;".into(), name: "readCounter".into(), prototype: "()I".into(),
+                code_units: vec![0x0060, 0x0000, 0x000f],
+                registers_size: 1, ins_size: 0, try_blocks: vec![],
+            }),
+        ]);
+        let mut app_static_fields = HashMap::new();
+
+        {
+            let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
+            vm.attach_static_fields(&mut app_static_fields);
+            let report = vm.execute_method(1, &[], 32).expect("writer method should execute");
+            assert_eq!(report.steps_executed, 3);
+        }
+
+        {
+            let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
+            vm.attach_static_fields(&mut app_static_fields);
+            let report = vm.execute_method(2, &[], 32).expect("reader method should execute");
+            assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(7)));
+        }
+    }
+
+
     use super::*;
 
     #[test]

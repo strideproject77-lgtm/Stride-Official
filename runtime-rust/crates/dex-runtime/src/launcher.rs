@@ -3,6 +3,7 @@
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use stride_axml::parse_manifest;
 use crate::loader::AppClassLoader;
@@ -48,6 +49,8 @@ pub struct AndroidRuntime {
     pub heap: ManagedHeap,
     pub hierarchy: ClassHierarchy,
     pub monitors: MonitorTable,
+    /// App-owned static field storage shared by every interpreter invocation in this session.
+    pub static_fields: HashMap<(String, String), crate::types::Value>,
     pub jni: JniNativeRegistry,
     pub environment: AndroidEnvironment,
     pub surface: Surface,
@@ -74,6 +77,7 @@ impl AndroidRuntime {
             heap: ManagedHeap::default(),
             hierarchy: ClassHierarchy::new(),
             monitors: MonitorTable::new(),
+            static_fields: HashMap::new(),
             jni,
             environment: AndroidEnvironment::new(package_name),
             surface: Surface::new(1080, 1920),
@@ -428,6 +432,7 @@ impl AndroidRuntime {
                     &[],
                 );
                 vm.attach_diagnostics(&self.diagnostics);
+                vm.attach_static_fields(&mut self.static_fields);
                 if let Some(inventory) = self.class_loader.dex_inventories.first() {
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
@@ -523,6 +528,7 @@ impl AndroidRuntime {
                     &mut self.jni, &method_map, &[],
                 );
                 vm.attach_diagnostics(&self.diagnostics);
+                vm.attach_static_fields(&mut self.static_fields);
                 if let Some(inventory) = self.class_loader.dex_inventories.first() {
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
@@ -614,6 +620,7 @@ impl AndroidRuntime {
                     &[],
                 );
                 vm.attach_diagnostics(&self.diagnostics);
+                vm.attach_static_fields(&mut self.static_fields);
                 let args = [Value::Object(activity_obj)];
                 match vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
                     Ok(report) => {
