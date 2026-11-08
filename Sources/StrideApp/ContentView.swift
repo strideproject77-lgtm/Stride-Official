@@ -11,7 +11,8 @@ struct ContentView: View {
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
     @State private var searchText = ""
-    @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.darkBronze.rawValue
+    @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.indigoNavy.rawValue
+    @AppStorage("stride.customAccentHex") private var customAccentHex = "#4F46E5"
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
     private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .indigoNavy }
@@ -19,7 +20,7 @@ struct ContentView: View {
     private var background: Color { theme.background }
     private var panel: Color { theme.panel }
     private var raised: Color { theme.raised }
-    private var accent: Color { theme.accent }
+    private var accent: Color { Color(hex: customAccentHex) ?? theme.accent }
     private var muted: Color { theme.muted }
     private var line: Color { theme == .white ? Color.black.opacity(0.09) : Color.white.opacity(0.075) }
 
@@ -125,10 +126,9 @@ struct ContentView: View {
                                 Text(featured.displayName)
                                     .font(.system(size: 17, weight: .bold, design: .rounded))
                                     .lineLimit(2)
-                                Text(featured.inspection.summary)
+                                Text("Ready in your library")
                                     .font(.system(size: 10, weight: .medium))
                                     .foregroundStyle(muted)
-                                    .lineLimit(2)
                             }
                             Spacer(minLength: 0)
                         }
@@ -195,7 +195,6 @@ struct ContentView: View {
                 } else {
                     appCollection(Array(library.packages.prefix(4)))
                 }
-                platformNote
             }
             .padding(.horizontal, 18)
             .padding(.top, 5)
@@ -210,9 +209,6 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("YOUR LIBRARY")
                             .font(.system(size: 23, weight: .bold, design: .rounded))
-                        Text("\(library.packages.count) imported package\(library.packages.count == 1 ? "" : "s")")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(muted)
                     }
                     Spacer()
                     layoutToggle
@@ -319,11 +315,25 @@ struct ContentView: View {
                         .foregroundStyle(muted)
                 }
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("APPEARANCE")
+                    Text("THEME & ACCENT COLOR")
                         .font(.system(size: 9, weight: .heavy))
                         .kerning(1.3)
                         .foregroundStyle(muted)
-                    ForEach(StrideTheme.allCases) { option in
+                    HStack(spacing: 10) {
+                        ForEach(["#4F46E5", "#6366F1", "#22C55E", "#F97316", "#EC4899", "#06B6D4", "#EAB308", "#FFFFFF"], id: \.self) { hex in
+                            Button { customAccentHex = hex } label: {
+                                Circle().fill(Color(hex: hex) ?? .indigo).frame(width: 29, height: 29)
+                                    .overlay(Circle().stroke(Color.white.opacity(customAccentHex == hex ? 0.95 : 0.16), lineWidth: customAccentHex == hex ? 2.5 : 1))
+                                    .overlay { if customAccentHex == hex { Image(systemName: "checkmark").font(.system(size: 10, weight: .black)).foregroundStyle(hex == "#FFFFFF" ? .black : .white) } }
+                            }.buttonStyle(.plain).accessibilityLabel("Accent color \\(hex)")
+                        }
+                    }
+                    ColorPicker("Custom accent", selection: Binding(
+                        get: { Color(hex: customAccentHex) ?? theme.accent },
+                        set: { customAccentHex = $0.hexString }
+                    ), supportsOpacity: false)
+                    .font(.system(size: 12, weight: .medium))
+                    ForEach(StrideTheme.allCases.filter { $0 != .darkBronze }) { option in
                         Button { themeRawValue = option.rawValue } label: {
                             HStack(spacing: 12) {
                                 RoundedRectangle(cornerRadius: 10)
@@ -376,7 +386,6 @@ struct ContentView: View {
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }
-                platformNote
                 Text("STRIDE · EXPERIMENTAL BUILD")
                     .font(.system(size: 8, weight: .heavy))
                     .kerning(1.2)
@@ -507,6 +516,18 @@ struct ContentView: View {
 }
 
 
+private extension Color {
+    init?(hex: String) {
+        let value = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard value.count == 6, let rgb = UInt64(value, radix: 16) else { return nil }
+        self.init(.sRGB, red: Double((rgb >> 16) & 255) / 255, green: Double((rgb >> 8) & 255) / 255, blue: Double(rgb & 255) / 255, opacity: 1)
+    }
+    var hexString: String {
+        guard let c = UIColor(self).cgColor.components, c.count >= 3 else { return "#4F46E5" }
+        return String(format: "#%02X%02X%02X", Int(c[0] * 255), Int(c[1] * 255), Int(c[2] * 255))
+    }
+}
+
 private enum StrideTheme: String, CaseIterable, Identifiable {
     case blackLime
     case graphiteViolet
@@ -608,15 +629,16 @@ private struct StrideCoreMark: View {
             RoundedRectangle(cornerRadius: size * 0.29)
                 .fill(LinearGradient(colors: [accent.opacity(0.18), accent.opacity(0.045)],
                                      startPoint: .topLeading, endPoint: .bottomTrailing))
-            Image(systemName: "hexagon")
-                .font(.system(size: size * 0.72, weight: .medium))
+            Image(systemName: "speedometer")
+                .font(.system(size: size * 0.54, weight: .bold))
                 .foregroundStyle(accent)
-            Text("S")
-                .font(.system(size: size * 0.30, weight: .black, design: .rounded))
+            Image(systemName: "bolt.fill")
+                .font(.system(size: size * 0.19, weight: .black))
                 .foregroundStyle(.white)
+                .offset(x: size * 0.17, y: size * 0.16)
         }
         .frame(width: size, height: size)
-        .accessibilityLabel("Stride Core Hex logo")
+        .accessibilityLabel("Stride Dynamic Speed logo")
     }
 }
 
@@ -1164,6 +1186,7 @@ private struct APKIconView: View {
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
+                    .padding(size * 0.07)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.25)
