@@ -282,6 +282,31 @@ pub unsafe extern "C" fn stride_runtime_gl_clear(
     0
 }
 
+/// Copies the current diagnostic report into a caller-owned UTF-8 buffer.
+/// Returns the required byte count including the trailing NUL. If out is null
+/// or capacity is too small, no bytes are written; call once for size, then again.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_diagnostics_export(
+    runtime: *const AndroidRuntime,
+    out: *mut c_char,
+    capacity: usize,
+) -> usize {
+    if runtime.is_null() {
+        return 0;
+    }
+    let report = unsafe { &*runtime }.diagnostics.export_text();
+    let bytes = report.as_bytes();
+    let required = bytes.len().saturating_add(1);
+    if out.is_null() || capacity < required {
+        return required;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), out.cast::<u8>(), bytes.len());
+        out.add(bytes.len()).write(0);
+    }
+    required
+}
+
 /// Destroys an Android runtime instance and frees its resources.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_destroy(runtime: *mut AndroidRuntime) {
@@ -324,6 +349,11 @@ mod tests {
             assert_eq!(stride_runtime_dispatch_touch(rt, 0, 100.0, 200.0), 0);
             assert_eq!(stride_runtime_gl_viewport(rt, 0, 0, 800, 600), 0);
             assert_eq!(stride_runtime_gl_clear(rt, 0.1, 0.2, 0.3, 1.0), 0);
+            let required = stride_runtime_diagnostics_export(rt, std::ptr::null_mut(), 0);
+            assert!(required > 1);
+            let mut buffer = vec![0i8; required];
+            assert_eq!(stride_runtime_diagnostics_export(rt, buffer.as_mut_ptr(), buffer.len()), required);
+            assert!(CStr::from_ptr(buffer.as_ptr()).to_string_lossy().contains("STRIDE SESSION DIAGNOSTICS"));
             stride_runtime_destroy(rt);
         }
     }
