@@ -176,7 +176,7 @@ fn parse_pool(bytes: &[u8], start: usize, chunk_size: usize) -> Result<StringPoo
             let byte_length = len8(bytes, &mut cursor, data_limit)
                 .map_err(|_| AxmlError::InvalidStringLength { index })?;
             let data_end = cursor.checked_add(byte_length)
-                .filter(|end| end < data_limit)
+                .filter(|end| *end < data_limit)
                 .ok_or(AxmlError::InvalidStringLength { index })?;
             if bytes.get(data_end) != Some(&0) {
                 return Err(AxmlError::InvalidStringTerminator { index });
@@ -595,7 +595,7 @@ mod tests {
     fn reports_precise_invalid_string_pool_conditions() {
         let mut pool = string_pool(&["manifest"], true);
         // First string offset points beyond the string data.
-        pool[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+        pool[28..32].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(
             inspect_binary_xml(&xml_document(&[pool])),
             Err(AxmlError::InvalidStringOffset { index: 0, .. })
@@ -613,15 +613,15 @@ mod tests {
     #[test]
     fn rejects_invalid_utf8_and_inconsistent_utf16_lengths() {
         let mut pool = string_pool(&["x"], true);
-        let data_start = 8 + 28 + 4;
-        pool[data_start + 1] = 0xff;
+        let data_start = 28 + 4;
+        pool[data_start + 2] = 0xff;
         assert_eq!(
             inspect_binary_xml(&xml_document(&[pool])),
             Err(AxmlError::InvalidStringEncoding { index: 0 })
         );
 
         let mut pool = string_pool(&["x"], true);
-        let data_start = 8 + 28 + 4;
+        let data_start = 28 + 4;
         pool[data_start] = 2; // declared UTF-16 length, actual is one
         assert_eq!(
             inspect_binary_xml(&xml_document(&[pool])),
@@ -631,15 +631,17 @@ mod tests {
 
     #[test]
     fn parses_a_minimal_binary_manifest_and_rejects_bad_nesting() {
-        let pool = string_pool(&["manifest"], true);
+        let pool = string_pool(&["manifest", "application"], true);
         let start = element_chunk(0x0102, 0);
         let end = element_chunk(0x0103, 0);
         let parsed = parse_manifest(&xml_document(&[pool.clone(), start.clone(), end])).unwrap();
         assert_eq!(parsed.package_name, None);
         assert_eq!(parsed.components.len(), 0);
 
-        let bad_end = element_chunk(0x0103, 0);
-        let malformed = xml_document(&[pool, start, bad_end]);
+        let nested_start = element_chunk(0x0102, 1);
+        let wrong_end = element_chunk(0x0103, 0);
+        let final_end = element_chunk(0x0103, 1);
+        let malformed = xml_document(&[pool, start, nested_start, wrong_end, final_end]);
         assert_eq!(parse_manifest(&malformed), Err(AxmlError::MalformedXmlNesting));
     }
 
