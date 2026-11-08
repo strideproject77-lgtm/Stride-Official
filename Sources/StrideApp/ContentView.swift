@@ -57,7 +57,6 @@ struct ContentView: View {
             Text(importError ?? "Please try another APK file.")
         }
         .preferredColorScheme(theme == .white ? .light : .dark)
-        }
     }
 
     private var header: some View {
