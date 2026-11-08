@@ -95,9 +95,9 @@ impl ActivityManager {
             if let Some(top) = task.top_mut() {
                 if top.state == ActivityLifecycleState::Resumed {
                     top.state = ActivityLifecycleState::Paused;
-                    Self::dispatch_method(&top.class_name, "onPause", "()V", top.heap_object_ref, heap, class_loader, vm);
+                    Self::dispatch_method(&top.class_name, "onPause", "()V", top.heap_object_ref, class_loader, vm);
                     top.state = ActivityLifecycleState::Stopped;
-                    Self::dispatch_method(&top.class_name, "onStop", "()V", top.heap_object_ref, heap, class_loader, vm);
+                    Self::dispatch_method(&top.class_name, "onStop", "()V", top.heap_object_ref, class_loader, vm);
                 }
             }
         }
@@ -115,11 +115,11 @@ impl ActivityManager {
         };
 
         // 3. Dispatch onCreate -> onStart -> onResume
-        Self::dispatch_method(&class_name, "onCreate", "(Landroid/os/Bundle;)V", obj_ref, heap, class_loader, vm);
+        Self::dispatch_method(&class_name, "onCreate", "(Landroid/os/Bundle;)V", obj_ref, class_loader, vm);
         record.state = ActivityLifecycleState::Started;
-        Self::dispatch_method(&class_name, "onStart", "()V", obj_ref, heap, class_loader, vm);
+        Self::dispatch_method(&class_name, "onStart", "()V", obj_ref, class_loader, vm);
         record.state = ActivityLifecycleState::Resumed;
-        Self::dispatch_method(&class_name, "onResume", "()V", obj_ref, heap, class_loader, vm);
+        Self::dispatch_method(&class_name, "onResume", "()V", obj_ref, class_loader, vm);
 
         // 4. Push onto active task
         if let Some(task) = self.tasks.get_mut(self.current_task_index) {
@@ -133,7 +133,6 @@ impl ActivityManager {
     /// Returns true if an activity was finished, false if the stack was already empty.
     pub fn finish_top_activity(
         &mut self,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> bool {
@@ -149,18 +148,18 @@ impl ActivityManager {
         // 1. Pop top activity and dispatch pause, stop, destroy
         let mut finished = current_task.stack.pop().unwrap();
         finished.state = ActivityLifecycleState::Paused;
-        Self::dispatch_method(&finished.class_name, "onPause", "()V", finished.heap_object_ref, heap, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onPause", "()V", finished.heap_object_ref, class_loader, vm);
         finished.state = ActivityLifecycleState::Stopped;
-        Self::dispatch_method(&finished.class_name, "onStop", "()V", finished.heap_object_ref, heap, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onStop", "()V", finished.heap_object_ref, class_loader, vm);
         finished.state = ActivityLifecycleState::Destroyed;
-        Self::dispatch_method(&finished.class_name, "onDestroy", "()V", finished.heap_object_ref, heap, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onDestroy", "()V", finished.heap_object_ref, class_loader, vm);
 
         // 2. Resume new top activity if one exists
         if let Some(new_top) = current_task.top_mut() {
             new_top.state = ActivityLifecycleState::Started;
-            Self::dispatch_method(&new_top.class_name, "onStart", "()V", new_top.heap_object_ref, heap, class_loader, vm);
+            Self::dispatch_method(&new_top.class_name, "onStart", "()V", new_top.heap_object_ref, class_loader, vm);
             new_top.state = ActivityLifecycleState::Resumed;
-            Self::dispatch_method(&new_top.class_name, "onResume", "()V", new_top.heap_object_ref, heap, class_loader, vm);
+            Self::dispatch_method(&new_top.class_name, "onResume", "()V", new_top.heap_object_ref, class_loader, vm);
         }
 
         true
@@ -169,11 +168,10 @@ impl ActivityManager {
     /// Handles Android hardware back button press.
     pub fn handle_back_pressed(
         &mut self,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> bool {
-        self.finish_top_activity(heap, class_loader, vm)
+        self.finish_top_activity(class_loader, vm)
     }
 
     fn dispatch_method(
@@ -181,7 +179,6 @@ impl ActivityManager {
         method_name: &str,
         descriptor: &str,
         receiver: Option<u32>,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) {
