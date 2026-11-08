@@ -92,6 +92,16 @@ impl AndroidRuntime {
 
     /// Registers essential Android & Java core native methods.
     fn register_core_jni(jni: &mut JniNativeRegistry) {
+        // Activity lifecycle methods are framework-owned and therefore do not
+        // have app DEX MethodCode entries. The launcher owns lifecycle state
+        // transitions; this bridge safely accepts the Activity's super call.
+        jni.register(
+            "Landroid/app/Activity;",
+            "onCreate",
+            "(Landroid/os/Bundle;)V",
+            |_env, _args| Ok(None),
+        );
+
         jni.register(
             "Ljava/lang/System;",
             "currentTimeMillis",
@@ -597,5 +607,24 @@ impl AndroidRuntime {
             status: LaunchStatus::Running,
             diagnostics_summary: self.diagnostics.format_summary(),
         }
+    }
+}
+
+
+#[cfg(test)]
+mod framework_bridge_tests {
+    use super::*;
+
+    #[test]
+    fn activity_on_create_super_call_has_framework_bridge() {
+        let runtime = AndroidRuntime::new("com.stride.test");
+        assert!(
+            runtime.jni.find(
+                "Landroid/app/Activity;",
+                "onCreate",
+                "(Landroid/os/Bundle;)V"
+            ).is_some(),
+            "Activity.onCreate(Bundle) must resolve through the framework bridge"
+        );
     }
 }
