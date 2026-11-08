@@ -182,7 +182,7 @@ impl AndroidRuntime {
             Err(error) => {
                 self.diagnostics.record_detailed(
                     DiagnosticSeverity::RuntimeError, "DexLoader", "DEX_LOAD_FAILED",
-                    "DEX loading failed", Some(&error),
+                    "DEX load failed", Some(&error),
                     Some("Check DEX header, checksum, map offsets and class-data/code-item bounds"),
                 );
                 return Err(error);
