@@ -49,6 +49,8 @@ enum RuntimeExecutionError: LocalizedError {
             return "APK does not contain a DEX executable."
         case .dexLoadFailed(let index, let status):
             return "Failed to load DEX file #\(index + 1) (runtime status \(status))."
+        case .nativeLibraryLoadFailed(let name, let status):
+            return "Failed to load native library \(name) (runtime status \(status))."
         case .runtimeInitializationFailed:
             return "Failed to initialize the ART runtime engine."
         case .uncaughtException(let detail):
