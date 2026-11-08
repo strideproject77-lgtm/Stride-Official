@@ -491,9 +491,93 @@ impl AndroidRuntime {
             }
         }
 
-        // Transition through onStart() and onResume()
+        // Android lifecycle callbacks must execute in order, not just update state labels.
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Started);
         self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity started", Some(&activity_descriptor));
+
+        // Execute the app-defined onStart() callback before onResume().
+        if let Some(mid) = self.class_loader.find_method(&activity_descriptor, "onStart", "()V") {
+            if let Ok(mid16) = u16::try_from(mid) {
+                let method_map = self.class_loader.export_method_codes();
+                let mut vm = ArtVm::new(
+                    &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                    &mut self.jni, &method_map, &[],
+                );
+                vm.attach_diagnostics(&self.diagnostics);
+                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                    vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                }
+                match vm.execute_method(mid16, &[Value::Object(activity_obj)], step_budget.saturating_sub(total_steps)) {
+                    Ok(report) => {
+                        total_steps += report.steps_executed;
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info, "ART", "ONSTART_EXECUTED",
+                            "Activity onStart execution returned",
+                            Some(&format!("steps={} stop={:?}", report.steps_executed, report.stop_reason)),
+                            None,
+                        );
+                        match report.stop_reason {
+                            ExecutionStopReason::UncaughtException(ex) => {
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONSTART_UNCAUGHT_EXCEPTION",
+                                    "Activity onStart terminated with an uncaught exception",
+                                    Some(&format!("{:?}", ex)),
+                                    Some("Inspect the exception class, message and captured DEX stack trace"),
+                                );
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Started,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException { class: ex.class_descriptor, message: ex.message },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            ExecutionStopReason::StepLimitExceeded => {
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONSTART_STEP_LIMIT",
+                                    "Activity onStart exceeded the remaining instruction budget",
+                                    Some(&format!("executed={} remaining={}", report.steps_executed, step_budget.saturating_sub(total_steps))),
+                                    Some("Inspect onStart for repeated work before increasing the instruction budget"),
+                                );
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Started,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException {
+                                        class: "InstructionBudgetExceeded".into(),
+                                        message: Some("onStart exceeded the remaining instruction budget".into()),
+                                    },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(error) => {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError, "ART", "ONSTART_INTERPRETER_ERROR",
+                            "ART interpreter failed while executing Activity onStart",
+                            Some(&format!("method_id={} error={}", mid, error)),
+                            Some("Inspect the failing opcode, register indices, method reference mapping and DEX code-item bounds"),
+                        );
+                        return LaunchReport {
+                            package_name: self.environment.package_name.clone(),
+                            launcher_activity: activity_descriptor,
+                            lifecycle_state: ActivityLifecycleState::Started,
+                            total_classes_loaded: self.class_loader.classes.len(),
+                            instructions_executed: total_steps,
+                            status: LaunchStatus::UncaughtException { class: "InterpreterError".into(), message: Some(error) },
+                            diagnostics_summary: self.diagnostics.format_summary(),
+                        };
+                    }
+                }
+            }
+        }
+
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Resumed);
         self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity resumed", Some(&activity_descriptor));
 
