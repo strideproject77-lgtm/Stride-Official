@@ -761,7 +761,7 @@ private struct APKDetailSheet: View {
                     }
                     VStack(spacing: 0) {
                         detailRow("Archive", value: item.inspection.isValidPackage ? "Valid APK" : "Invalid", symbol: "archivebox")
-                        Divider().overlay(Color.primary.opacity(themeIsLight ? 0.08 : 0.05))
+                        Divider().overlay(Color.primary.opacity(0.06))
                         detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
                         Divider().overlay(Color.white.opacity(0.05))
                         detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "curlybraces")
@@ -927,7 +927,7 @@ private struct APKDetailSheet: View {
             }
         }
         .background(canvas.ignoresSafeArea())
-        .preferredColorScheme(.dark)
+        
         .onAppear(perform: loadPreviousSession)
     }
 
