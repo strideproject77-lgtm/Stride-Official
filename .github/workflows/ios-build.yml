@@ -126,7 +126,9 @@ jobs:
 
           test "$BUNDLE_ID" = "com.strideproject.stride"
           test -s "$EXECUTABLE"
-          lipo -verify_arch arm64 "$EXECUTABLE"
+          ARCHS=$(lipo -archs "$EXECUTABLE")
+          echo "Executable architectures: $ARCHS"
+          printf '%s\n' "$ARCHS" | tr ' ' '\n' | grep -Fxq arm64
 
           echo "Verified bundle: $BUNDLE_ID"
           echo "Executable: $EXECUTABLE_NAME"
