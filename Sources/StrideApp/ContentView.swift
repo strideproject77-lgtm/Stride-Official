@@ -11,8 +11,7 @@ struct ContentView: View {
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
     @State private var searchText = ""
-    @AppStorage("stride.selectedTheme.v2") private var themeRawValue = StrideTheme.white.rawValue
-    @AppStorage("stride.whiteThemeDefault.v1") private var didApplyWhiteThemeDefault = false
+    @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.darkBronze.rawValue
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
     private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .white }
@@ -57,11 +56,6 @@ struct ContentView: View {
             Text(importError ?? "Please try another APK file.")
         }
         .preferredColorScheme(theme == .white ? .light : .dark)
-        .onAppear {
-            if !didApplyWhiteThemeDefault {
-                themeRawValue = StrideTheme.white.rawValue
-                didApplyWhiteThemeDefault = true
-            }
         }
     }
 
