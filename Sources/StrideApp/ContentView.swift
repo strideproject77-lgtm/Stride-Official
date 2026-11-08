@@ -5,7 +5,6 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
     @State private var showingImporter = false
-    @State private var showingLogShare = false
     @State private var selectedPackage: ImportedAPK?
     @State private var selectedTab = 0
     @State private var importError: String?
@@ -689,6 +688,7 @@ private struct APKGridCard: View {
 
 private struct APKDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @State private var showingLogShare = false
     let item: ImportedAPK
     @State private var isExecuting = false
     @State private var executionResult: APKExecutionResult?
