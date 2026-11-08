@@ -5,6 +5,7 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
     @State private var showingImporter = false
+    @State private var showingLogShare = false
     @State private var selectedPackage: ImportedAPK?
     @State private var selectedTab = 0
     @State private var importError: String?
@@ -855,9 +856,14 @@ private struct APKDetailSheet: View {
                         .padding(10)
                         .background(canvas, in: RoundedRectangle(cornerRadius: 11))
                         if let logExportURL {
-                            ShareLink(item: logExportURL) {
+                            Button {
+                                showingLogShare = true
+                            } label: {
                                 Label("Export Logs (.txt)", systemImage: "square.and.arrow.up")
                                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                            }
+                            .sheet(isPresented: $showingLogShare) {
+                                ActivityViewController(activityItems: [logExportURL])
                             }
                         }
                     }
@@ -1034,4 +1040,15 @@ private struct APKDocumentPicker: UIViewControllerRepresentable {
             onPick(.success([]))
         }
     }
+}
+
+
+private struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
