@@ -45,13 +45,11 @@ struct ContentView: View {
         }
         .background(canvas.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .fileImporter(
-            isPresented: $showingImporter,
-            // Accept generic Files-provider items; validate the .apk extension after selection.
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false,
-            onCompletion: handleImport
-        )
+        .sheet(isPresented: $showingImporter) {
+            APKDocumentPicker { result in
+                handleImport(result)
+            }
+        }
         .sheet(item: $selectedPackage) { item in
             APKDetailSheet(item: item, accent: accent, canvas: canvas, panel: panel, raised: raised, muted: muted)
         }
@@ -85,36 +83,17 @@ struct ContentView: View {
                     .foregroundStyle(muted)
             }
             Spacer()
-            if selectedTab == 1 {
-                Button { showingImporter = true } label: {
-                    Group {
-                        if isImporting {
-                            ProgressView().tint(.black)
-                        } else {
-                            Image(systemName: "plus")
-                                .font(.system(size: 15, weight: .bold))
-                        }
-                    }
-                    .foregroundStyle(.black)
-                    .frame(width: 38, height: 38)
-                    .background(accent, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isImporting)
-                .accessibilityLabel("Import APK")
-            } else {
-                HStack(spacing: 6) {
-                    Circle().fill(accent).frame(width: 6, height: 6)
-                    Text("PREVIEW")
-                        .font(.system(size: 8, weight: .heavy))
-                        .kerning(1)
-                        .foregroundStyle(muted)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(panel, in: Capsule())
-                .overlay(Capsule().stroke(line, lineWidth: 1))
+            HStack(spacing: 6) {
+                Circle().fill(isImporting ? Color.orange : accent).frame(width: 6, height: 6)
+                Text(isImporting ? "IMPORTING" : "VERSION 0.1")
+                    .font(.system(size: 8, weight: .heavy))
+                    .kerning(1)
+                    .foregroundStyle(muted)
             }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(panel, in: Capsule())
+            .overlay(Capsule().stroke(line, lineWidth: 1))
         }
         .padding(.horizontal, 20)
         .padding(.top, 9)
@@ -367,7 +346,7 @@ struct ContentView: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Color.white.opacity(0.78))
                         .lineSpacing(3)
-                    Text("Stride · Experimental build")
+                    Text("Stride · Version 0.1")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(muted)
                         .padding(.top, 4)
@@ -471,17 +450,6 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 275)
-            Button { showingImporter = true } label: {
-                Text("IMPORT APK")
-                    .font(.system(size: 10, weight: .heavy))
-                    .kerning(1)
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 19)
-                    .frame(height: 40)
-                    .background(accent, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .padding(.top, 3)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28)
@@ -816,13 +784,48 @@ private struct APKIconView: View {
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ))
-                    Image(systemName: "app.dashed")
-                        .font(.system(size: size * 0.44, weight: .medium))
+                    Image(systemName: "square.stack.3d.up.fill")
+                        .font(.system(size: size * 0.40, weight: .medium))
                         .foregroundStyle(accent)
                 }
             }
         }
         .frame(width: size, height: size)
         .accessibilityHidden(true)
+    }
+}
+
+/// Uses the system document provider in copy mode. The selected APK is placed in
+/// Stride's sandbox before import, avoiding provider security-scope URL failures.
+private struct APKDocumentPicker: UIViewControllerRepresentable {
+    let onPick: (Result<[URL], Error>) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick)
+    }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        private let onPick: (Result<[URL], Error>) -> Void
+
+        init(onPick: @escaping (Result<[URL], Error>) -> Void) {
+            self.onPick = onPick
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onPick(.success(urls))
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onPick(.success([]))
+        }
     }
 }
