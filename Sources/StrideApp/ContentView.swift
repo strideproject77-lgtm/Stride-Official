@@ -60,7 +60,7 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 10) {
             StrideCoreMark(size: 40, accent: accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("STRIDE")
@@ -75,11 +75,20 @@ struct ContentView: View {
             if isImporting {
                 ProgressView().tint(accent).frame(width: 34, height: 34)
             } else {
-                Button { selectedTab = 2 } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 19, weight: .medium))
+                Button { selectedTab = 1 } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundStyle(accent)
-                        .frame(width: 38, height: 38)
+                        .frame(width: 37, height: 37)
+                        .background(panel, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Search games")
+                Button { selectedTab = 2 } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(accent)
+                        .frame(width: 37, height: 37)
                         .background(panel, in: Circle())
                 }
                 .buttonStyle(.plain)
@@ -88,115 +97,169 @@ struct ContentView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
-        .padding(.bottom, 15)
+        .padding(.bottom, 13)
     }
 
     private var home: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("YOUR RUNTIME SPACE")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.6)
-                        .foregroundStyle(accent)
-                    Text("Good to see you.")
-                        .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .kerning(-0.7)
-                    Text("Your Android apps, organized on iPhone.")
-                        .font(.system(size: 12, weight: .medium))
+            VStack(alignment: .leading, spacing: 19) {
+                HStack(spacing: 9) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(muted)
-                }
-                if let featured = library.packages.first {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Label("LATEST IMPORT", systemImage: "sparkle")
-                                .font(.system(size: 9, weight: .heavy))
-                                .foregroundStyle(accent)
-                            Spacer()
-                            Text("IN YOUR LIBRARY")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(muted)
-                        }
-                        HStack(spacing: 12) {
-                            APKIconView(data: featured.iconData, accent: accent, size: 58)
-                                .background(raised, in: RoundedRectangle(cornerRadius: 16))
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(featured.displayName)
-                                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                                    .lineLimit(2)
-                                Text("Ready in your library")
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(muted)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        Button { selectedPackage = featured } label: {
-                            HStack {
-                                Text("OPEN APP DETAILS")
-                                Spacer()
-                                Image(systemName: "arrow.up.right")
-                            }
-                            .font(.system(size: 10, weight: .heavy))
-                            .foregroundStyle(theme.buttonForeground)
-                            .padding(.horizontal, 14)
-                            .frame(height: 42)
-                            .background(accent, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
+                    TextField("Search your games...", text: $searchText)
+                        .font(.system(size: 13, weight: .medium))
+                        .tint(accent)
+                        .autocorrectionDisabled()
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
+                        }.buttonStyle(.plain)
                     }
-                    .padding(17)
-                    .background(theme.featured, in: RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(accent.opacity(0.24), lineWidth: 1))
-                } else {
-                    VStack(alignment: .leading, spacing: 13) {
-                        Text("A clean home for your Android apps.")
-                            .font(.system(size: 20, weight: .bold, design: .rounded))
-                        Text("Import an APK to inspect its package structure and keep it in your library.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button { showingImporter = true } label: {
-                            Label(isImporting ? "Importing…" : "Import APK", systemImage: "plus")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(theme.buttonForeground)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 46)
-                                .background(accent, in: RoundedRectangle(cornerRadius: 13))
+                }
+                .padding(.horizontal, 14)
+                .frame(height: 48)
+                .background(panel, in: RoundedRectangle(cornerRadius: 15))
+                .overlay(RoundedRectangle(cornerRadius: 15).stroke(line, lineWidth: 1))
+
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 25)
+                        .fill(LinearGradient(
+                            colors: [Color(red: 0.30, green: 0.18, blue: 0.72), Color(red: 0.20, green: 0.12, blue: 0.48), Color(red: 0.10, green: 0.09, blue: 0.25)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ))
+                    Circle()
+                        .fill(Color.purple.opacity(0.28))
+                        .frame(width: 180, height: 180)
+                        .blur(radius: 28)
+                        .offset(x: 205, y: -48)
+                    HStack(spacing: 4) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("WELCOME TO STRIDE")
+                                .font(.system(size: 9, weight: .heavy))
+                                .kerning(1.5)
+                                .foregroundStyle(Color.white.opacity(0.72))
+                            Text("Welcome to Stride")
+                                .font(.system(size: 23, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Run Android Apps on iOS")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Color.white.opacity(0.76))
+                            Button {
+                                if library.packages.isEmpty { showingImporter = true } else { selectedTab = 1 }
+                            } label: {
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 15, weight: .bold))
+                                    .foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.48))
+                                    .frame(width: 39, height: 39)
+                                    .background(.white, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(library.packages.isEmpty ? "Import your first APK" : "Open your library")
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isImporting)
+                        Spacer(minLength: 0)
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 23)
+                                .fill(Color.white.opacity(0.10))
+                                .frame(width: 91, height: 158)
+                                .overlay(RoundedRectangle(cornerRadius: 23).stroke(Color.white.opacity(0.34), lineWidth: 1.3))
+                            VStack(spacing: 10) {
+                                Capsule().fill(Color.white.opacity(0.6)).frame(width: 27, height: 3)
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color.purple.opacity(0.75), Color.blue.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    Image(systemName: "hexagon.fill")
+                                        .font(.system(size: 36, weight: .medium))
+                                        .foregroundStyle(Color.white.opacity(0.9))
+                                        .overlay {
+                                            Text("S").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(Color(red: 0.25, green: 0.16, blue: 0.56))
+                                        }
+                                }
+                                .frame(width: 57, height: 65)
+                                HStack(spacing: 5) {
+                                    Circle().fill(Color.white.opacity(0.75)).frame(width: 5, height: 5)
+                                    Capsule().fill(Color.white.opacity(0.35)).frame(width: 27, height: 4)
+                                }
+                            }
+                        }
+                        .rotationEffect(.degrees(7))
+                        .shadow(color: .black.opacity(0.25), radius: 16, y: 9)
+                        .padding(.trailing, 4)
                     }
                     .padding(19)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(theme.featured, in: RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(accent.opacity(0.22), lineWidth: 1))
                 }
+                .frame(height: 205)
+                .clipShape(RoundedRectangle(cornerRadius: 25))
 
                 HStack {
-                    Text("RECENTLY IMPORTED")
+                    Text("RECENTLY PLAYED")
                         .font(.system(size: 10, weight: .heavy))
-                        .kerning(1.3)
+                        .kerning(1.25)
                         .foregroundStyle(muted)
                     Spacer()
-                    Text("\(library.packages.count)")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(muted)
-                    if !library.packages.isEmpty {
-                        layoutToggle
-                        Button("SEE ALL") { selectedTab = 1 }
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundStyle(accent)
-                    }
+                    Text("PLAY HISTORY")
+                        .font(.system(size: 8, weight: .bold))
+                        .kerning(0.8)
+                        .foregroundStyle(muted.opacity(0.75))
                 }
-                if library.packages.isEmpty {
-                    emptyState
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Your recently played apps will appear here.")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(themeIsLight ? Color.black.opacity(0.75) : Color.white.opacity(0.82))
+                    Text("No launch history is available yet.")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(15)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+
+                HStack {
+                    Text("YOUR GAMES")
+                        .font(.system(size: 10, weight: .heavy))
+                        .kerning(1.25)
+                        .foregroundStyle(muted)
+                    Spacer()
+                    Text("\(filteredPackages.count)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(muted)
+                    Button("SEE ALL  →") { selectedTab = 1 }
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(accent)
+                }
+                if filteredPackages.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "square.grid.2x2")
+                            .font(.system(size: 25, weight: .medium))
+                            .foregroundStyle(accent)
+                        Text(searchText.isEmpty ? "Your library is empty" : "No games match your search")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(searchText.isEmpty ? "Import an APK to add your own apps." : "Try another app name.")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(muted)
+                        if searchText.isEmpty {
+                            Button { showingImporter = true } label: {
+                                Label("Import APK", systemImage: "plus")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(theme.buttonForeground)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 11)
+                                    .background(accent, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isImporting)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 25)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 17))
                 } else {
-                    appCollection(Array(library.packages.prefix(4)))
+                    appCollection(Array(filteredPackages.prefix(4)))
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 5)
+            .padding(.top, 7)
             .padding(.bottom, 22)
         }
     }
