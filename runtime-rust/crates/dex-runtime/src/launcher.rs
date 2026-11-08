@@ -173,14 +173,38 @@ impl AndroidRuntime {
 
     /// Loads one or more DEX binaries into the runtime.
     pub fn load_dex(&mut self, dex_data: &[u8]) -> Result<usize, String> {
-        let count = self.class_loader.load_dex(dex_data)?;
+        self.diagnostics.record(
+            DiagnosticSeverity::Info, "DexLoader",
+            &format!("DEX load started ({} bytes)", dex_data.len()), None,
+        );
+        let count = match self.class_loader.load_dex(dex_data) {
+            Ok(count) => count,
+            Err(error) => {
+                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "DexLoader", "DEX load failed", Some(&error));
+                return Err(error);
+            }
+        };
         self.class_loader.link_hierarchy(&mut self.hierarchy);
+        self.diagnostics.record(
+            DiagnosticSeverity::Info, "DexLoader",
+            &format!("DEX load completed ({} classes)", count), None,
+        );
         Ok(count)
     }
 
     /// Loads and links an ELF shared library (.so) into the native environment.
     pub fn load_native_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<(), String> {
-        let module = self.native_linker.load_library(soname, elf_bytes)?;
+        self.diagnostics.record(
+            DiagnosticSeverity::Info, "NativeLinker",
+            &format!("Native library load started: {} ({} bytes)", soname, elf_bytes.len()), None,
+        );
+        let module = match self.native_linker.load_library(soname, elf_bytes) {
+            Ok(module) => module,
+            Err(error) => {
+                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "NativeLinker", "Native library load failed", Some(&error));
+                return Err(error);
+            }
+        };
         let count = module.exported_symbols.len();
         self.diagnostics.record(
             DiagnosticSeverity::Info,
@@ -197,9 +221,11 @@ impl AndroidRuntime {
         manifest_bytes: &[u8],
         step_budget: usize,
     ) -> LaunchReport {
+        self.diagnostics.record(DiagnosticSeverity::Info, "Launcher", "APK launch started", Some(&format!("manifest bytes={}, step budget={}", manifest_bytes.len(), step_budget)));
         let manifest = match parse_manifest(manifest_bytes) {
             Ok(m) => m,
             Err(e) => {
+                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Manifest", "Manifest parsing failed", Some(&format!("{:?}", e)));
                 return LaunchReport {
                     package_name: self.environment.package_name.clone(),
                     launcher_activity: String::new(),
@@ -294,6 +320,7 @@ impl AndroidRuntime {
         self.active_activity_obj = Some(activity_obj);
         self.active_activity_class = Some(activity_descriptor.clone());
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Created);
+        self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity created", Some(&activity_descriptor));
 
         // Find and execute onCreate(Landroid/os/Bundle;)V if present
         let mut total_steps = 0;
@@ -371,7 +398,9 @@ impl AndroidRuntime {
 
         // Transition through onStart() and onResume()
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Started);
+        self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity started", Some(&activity_descriptor));
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Resumed);
+        self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity resumed", Some(&activity_descriptor));
 
         // Check for onResume()V
         let on_resume_mid = self.class_loader.find_method(&activity_descriptor, "onResume", "()V");
