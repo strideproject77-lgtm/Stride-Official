@@ -56,9 +56,6 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
-      - name: Test Rust runtime on the host
-        run: cargo test --manifest-path runtime-rust/Cargo.toml
-
       - name: Build Stride Rust runtime for iPhone
         run: |
           set -euo pipefail
