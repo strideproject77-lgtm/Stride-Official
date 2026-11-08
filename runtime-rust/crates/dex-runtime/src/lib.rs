@@ -23,6 +23,8 @@ pub mod activity_manager;
 pub mod service_manager;
 pub mod package;
 pub mod telemetry;
+#[cfg(test)]
+pub mod compatibility_tests;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
