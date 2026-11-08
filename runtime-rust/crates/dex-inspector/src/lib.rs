@@ -390,7 +390,7 @@ pub fn decode_instructions(bytes:&[u8])->Result<Vec<DecodedInstruction>,DecodeEr
   }
   let width=opcode_width(op).ok_or(DecodeError::InvalidOpcode(op))?;
   if width>units.len()-pc{return Err(DecodeError::TruncatedInstruction);}
-  if op==0x28 {let d=(first as u8 as i8) as isize;branches.push((pc,d));}
+  if op==0x28 {let d=((first >> 8) as u8 as i8) as isize;branches.push((pc,d));}
   else if op==0x29 {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
   else if op==0x2a {branches.push((pc,signed32(&units,pc+1)? as isize));}
   else if (0x32..=0x3d).contains(&op) {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
@@ -418,6 +418,11 @@ mod decoder_tests {
  #[test] fn rejects_unknown_opcode(){assert_eq!(decode_instructions(&words(&[0x0073])),Err(DecodeError::InvalidOpcode(0x73)));}
  #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+ #[test] fn decodes_goto_10t_signed_offset_from_high_byte(){
+  let decoded=decode_instructions(&words(&[0x0528,0x000e,0x000e,0x000e,0x000e,0x000e])).unwrap();
+  assert_eq!(decoded[0].code_unit_offset,0);
+  assert_eq!(decoded[0].opcode,0x28);
+ }
  #[test] fn rejects_branch_into_instruction_operand(){assert_eq!(decode_instructions(&words(&[0x0129,0x0001,0x000e])),Err(DecodeError::InvalidBranchTarget));}
 
  #[test] fn rejects_out_of_range_register_in_12x(){
