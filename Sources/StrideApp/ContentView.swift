@@ -1227,13 +1227,33 @@ private struct APKDetailSheet: View {
         let stamp = ISO8601DateFormatter().string(from: Date())
         sessionLogLines.append("[\(stamp)] \(message)")
         let upper = message.uppercased()
+        let baseLine = message.replacingOccurrences(of: "[RUNTIME] ", with: "")
+        let isNativeCrash = upper.contains("FATAL SIGNAL") || upper.contains("SIGSEGV") ||
+            upper.contains("SIGABRT") || upper.contains("SIGBUS") || upper.contains("SIGILL") || upper.contains("SIGFPE")
+        let isSyscall = upper.contains("SYSTEM CALL") && (upper.contains("ENOSYS") || upper.contains("NOT PROVIDED"))
+        let isUnresolvedImport = upper.contains("UNRESOLVED IMPORT")
+        let isNetworkTelemetry = upper.contains("FIREBASELOGGING") ||
+            (upper.contains("CONNECTEXCEPTION") && upper.contains(":443"))
+        let isRelocation = upper.contains("RELOCATION") && (upper.contains("FAILED") || upper.contains("UNRESOLVED"))
+        let isInterpreterFailure = upper.contains("UNSUPPORTED OPCODE") || upper.contains("INTERPRETER FAULT")
         let severity: StrideDiagnostics.Severity =
-            upper.contains("[FATAL]") || upper.contains("[CRASH]") ? .fatal :
+            isNativeCrash || upper.contains("[FATAL]") || upper.contains("[CRASH]") ? .fatal :
             (upper.contains("[ERROR]") || upper.contains("FAILED") ? .error :
-            (upper.contains("[WARN]") ? .warning : .info))
-        let stage = message.hasPrefix("[SESSION]") ? "SESSION" :
-            (message.hasPrefix("[RUNTIME]") ? "RUST_RUNTIME" : "EXECUTION")
-        StrideDiagnostics.shared.record(severity, stage: stage, code: "RUNTIME_EVENT", message)
+            (upper.contains("[WARN]") || isSyscall || isUnresolvedImport || isNetworkTelemetry ? .warning : .info))
+        let code = isNativeCrash ? "NATIVE_CRASH" :
+            (isSyscall ? "UNSUPPORTED_SYSCALL" :
+            (isUnresolvedImport ? "UNRESOLVED_NATIVE_IMPORT" :
+            (isNetworkTelemetry ? "NETWORK_TELEMETRY_FAILURE" :
+            (isRelocation ? "RELOCATION_FAILURE" :
+            (isInterpreterFailure ? "RUNTIME_INTERPRETER_FAILURE" : "RUNTIME_EVENT")))))
+        let stage = isNativeCrash ? "NATIVE_CRASH" :
+            (isNetworkTelemetry ? "NETWORK" :
+            (message.hasPrefix("[SESSION]") ? "SESSION" :
+            (message.hasPrefix("[RUNTIME]") ? "RUST_RUNTIME" : "EXECUTION")))
+        let recovery: String? = isNativeCrash ? "Preserve the complete signal, fault address, register set, module offsets and backtrace; symbolize against the exact library build." :
+            (isSyscall ? "Check syscall compatibility and implement the guest syscall only when its semantics are understood." :
+            (isUnresolvedImport ? "Resolve the import against a compatible Bionic/libc implementation; do not silently bind behavior-changing stubs." : nil))
+        StrideDiagnostics.shared.record(severity, stage: stage, code: code, baseLine, recovery: recovery)
         let content = sessionLogLines.joined(separator: "\n") + "\n"
         let url = logFileURL()
         do {
