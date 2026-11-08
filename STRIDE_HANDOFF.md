@@ -16,6 +16,11 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-08: **ActivityManager Task Backstack, ServiceManager & XAPK Package Handler (ctivity_manager.rs, service_manager.rs, package.rs)**:
+  - Implemented ActivityManager with multi-task support, Activity backstack pushing and popping, transition state machines (onCreate -> onStart -> onResume / onPause -> onStop -> onDestroy), and hardware back key dispatch (handle_back_pressed).
+  - Implemented ServiceManager managing background/foreground Android Services (ServiceRecord), startService lifecycle (onCreate, onStartCommand), stop_service (onDestroy), and foreground notification promotion (start_foreground).
+  - Implemented package.rs supporting .obb expansion file parsing (ObbFile) and XAPK bundle container assembly (XapkBundle) handling split APKs (ABI/density splits).
+  - Integrated ctivity_manager and service_manager into AndroidRuntime (launcher.rs), and added unit tests.
 - 2026-11-08: **OpenGL ES & EGL Context Translation Layer (gl.rs)**:
   - Implemented OpenGlEsEngine, EglContext, and EglWindowSurface managing EGL context state machines and window surfaces.
   - Implemented core GLES state management (GlesState): viewport configuration, clear color handling, buffer clear commands, and draw call tracking (gl_draw_arrays).

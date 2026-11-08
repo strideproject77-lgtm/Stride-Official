@@ -17,6 +17,8 @@ use crate::types::Value;
 use crate::diagnostics::{RuntimeDiagnostics, DiagnosticSeverity};
 use crate::bionic::NativeLinker;
 use crate::gl::OpenGlEsEngine;
+use crate::activity_manager::ActivityManager;
+use crate::service_manager::ServiceManager;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +57,8 @@ pub struct AndroidRuntime {
     pub diagnostics: Arc<RuntimeDiagnostics>,
     pub native_linker: NativeLinker,
     pub gl_engine: OpenGlEsEngine,
+    pub activity_manager: ActivityManager,
+    pub service_manager: ServiceManager,
 }
 
 impl AndroidRuntime {
@@ -78,6 +82,8 @@ impl AndroidRuntime {
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
             native_linker: NativeLinker::new(),
             gl_engine: OpenGlEsEngine::new(),
+            activity_manager: ActivityManager::new(),
+            service_manager: ServiceManager::new(),
         }
     }
 

@@ -19,6 +19,9 @@ pub mod diagnostics;
 pub mod canvas;
 pub mod bionic;
 pub mod gl;
+pub mod activity_manager;
+pub mod service_manager;
+pub mod package;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -41,6 +44,9 @@ pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
 pub use bionic::{NativeLinker, BionicEnvironment, LoadedNativeModule, ResolvedSymbol};
 pub use gl::{OpenGlEsEngine, EglContext, EglWindowSurface, GlesState, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_STENCIL_BUFFER_BIT, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN, GL_LINES, GL_POINTS, EGL_SUCCESS, EGL_NOT_INITIALIZED};
+pub use activity_manager::{ActivityManager, ActivityRecord, ActivityTask};
+pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
+pub use package::{XapkBundle, ObbFile};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
