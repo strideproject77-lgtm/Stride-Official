@@ -237,7 +237,6 @@ struct ContentView: View {
             if let action {
                 Button(action, action: onAction)
                     .font(.system(size: 9, weight: .heavy))
-                    .kerning(0.8)
                     .foregroundStyle(accent)
                     .buttonStyle(.plain)
             }
