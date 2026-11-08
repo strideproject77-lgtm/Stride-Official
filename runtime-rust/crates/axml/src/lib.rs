@@ -660,4 +660,29 @@ mod tests {
             Err(AxmlError::MissingXmlRoot)
         );
     }
+    #[test]
+    fn parses_real_pocket_ridge_lite_manifest_from_latest_game_artifact() {
+        let bytes = include_bytes!("../tests/fixtures/pocket-ridge-manifest.axml");
+        let document = inspect_binary_xml(bytes).expect("real APK AXML should parse");
+        assert_eq!(document.file_size as usize, bytes.len());
+        assert_eq!(document.chunk_count, 18);
+
+        let manifest = parse_manifest(bytes).expect("real APK manifest should parse");
+        assert_eq!(manifest.package_name.as_deref(), Some("com.stride.compatgame"));
+        assert_eq!(manifest.version_name.as_deref(), Some("1.0"));
+        assert_eq!(manifest.version_code, Some(1));
+        assert_eq!(manifest.min_sdk, Some(23));
+        assert_eq!(manifest.target_sdk, Some(28));
+        assert_eq!(
+            manifest.launcher_activity.as_deref(),
+            Some("com.stride.compatgame.MainActivity")
+        );
+        assert!(manifest.components.iter().any(|component| {
+            component.kind == "activity"
+                && component.name == "com.stride.compatgame.MainActivity"
+                && component.exported == Some(true)
+                && component.has_launcher_intent
+        }));
+    }
+
 }
