@@ -11,7 +11,7 @@ struct ContentView: View {
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
     @State private var searchText = ""
-    @AppStorage("stride.selectedTheme") private var themeRawValue = StrideTheme.darkBronze.rawValue
+    @AppStorage("stride.selectedTheme.v2") private var themeRawValue = StrideTheme.darkBronze.rawValue
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
     private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .blackLime }
