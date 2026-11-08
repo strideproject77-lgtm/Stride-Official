@@ -33,7 +33,7 @@ fn register(j:&mut JniNativeRegistry){
    Ok(None)
   });
  }
- j.register("Landroid/graphics/Paint;","setColor","(I)V",|e,a|{let p=id(a)?;let c=int(a,1,0xff000000);e.set_object_field(p,"mColor",Value::Int(c))?;e.set_object_field(p,"mAlpha",Value::Int(((c as u32)>>24) as i32))?;Ok(None)});
+ j.register("Landroid/graphics/Paint;","setColor","(I)V",|e,a|{let p=id(a)?;let c=int(a,1,0xff000000u32 as i32);e.set_object_field(p,"mColor",Value::Int(c))?;e.set_object_field(p,"mAlpha",Value::Int(((c as u32)>>24) as i32))?;Ok(None)});
  j.register("Landroid/graphics/Paint;","getColor","()I",|e,a|Ok(Some(e.get_object_field(id(a)?,"mColor")?)));
  j.register("Landroid/graphics/Paint;","setAlpha","(I)V",|e,a|{let p=id(a)?;let alpha=int(a,1,255).clamp(0,255);let c=e.get_object_field(p,"mColor")?.as_int() as u32;let next=((alpha as u32)<<24)|(c&0xffffff);e.set_object_field(p,"mColor",Value::Int(next as i32))?;e.set_object_field(p,"mAlpha",Value::Int(alpha))?;Ok(None)});
  j.register("Landroid/graphics/Paint;","getAlpha","()I",|e,a|Ok(Some(e.get_object_field(id(a)?,"mAlpha")?)));
