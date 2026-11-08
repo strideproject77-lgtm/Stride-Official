@@ -82,6 +82,13 @@ jobs:
           test -s runtime-rust/target/StrideDexFFI.xcframework/Info.plist
           plutil -lint runtime-rust/target/StrideDexFFI.xcframework/Info.plist
 
+      - name: Generate Stride Home Screen icon
+        run: |
+          set -euo pipefail
+          swift Scripts/generate-app-icon.swift
+          test -s Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
+          sips -g pixelWidth -g pixelHeight Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
+
       - name: Generate Xcode project
         run: |
           set -euo pipefail
