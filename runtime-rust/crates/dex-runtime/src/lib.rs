@@ -16,6 +16,7 @@ pub mod loader;
 pub mod graphics;
 pub mod launcher;
 pub mod diagnostics;
+pub mod canvas;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -31,8 +32,9 @@ pub use interpreter::{ArtVm, MethodCode, InterpreterReport, ExecutionStopReason}
 pub use loader::{AppClassLoader, LoadedClass, LoadedMethod, ClassInitState};
 pub use graphics::{
     Surface, DisplayMetrics, MotionEvent, PointerCoords, KeyEvent, InputQueue, AudioTrack, AudioTrackState,
-    ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL, KEYCODE_BACK,
+    ScreenOrientation, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL, KEYCODE_BACK,
 };
+pub use canvas::{Canvas, Paint, PaintStyle, RectF, Path};
 pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
 

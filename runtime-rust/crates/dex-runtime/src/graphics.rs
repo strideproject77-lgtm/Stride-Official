@@ -3,6 +3,15 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
+/// Screen orientation matching Android Configuration.ORIENTATION_*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenOrientation {
+    Portrait = 0,
+    Landscape = 1,
+    ReversePortrait = 2,
+    ReverseLandscape = 3,
+}
+
 /// Screen display metrics matching Android android.util.DisplayMetrics.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DisplayMetrics {
@@ -13,6 +22,7 @@ pub struct DisplayMetrics {
     pub scaled_density: f32,
     pub xdpi: f32,
     pub ydpi: f32,
+    pub orientation: ScreenOrientation,
 }
 
 impl Default for DisplayMetrics {
@@ -25,7 +35,19 @@ impl Default for DisplayMetrics {
             scaled_density: 3.0,
             xdpi: 480.0,
             ydpi: 480.0,
+            orientation: ScreenOrientation::Portrait,
         }
+    }
+}
+
+impl DisplayMetrics {
+    pub fn set_orientation(&mut self, orientation: ScreenOrientation) {
+        let is_landscape = matches!(orientation, ScreenOrientation::Landscape | ScreenOrientation::ReverseLandscape);
+        let currently_landscape = self.width_pixels > self.height_pixels;
+        if is_landscape != currently_landscape {
+            std::mem::swap(&mut self.width_pixels, &mut self.height_pixels);
+        }
+        self.orientation = orientation;
     }
 }
 
@@ -45,6 +67,21 @@ impl Surface {
             height,
             pixels: vec![0xff000000; size], // opaque black
         }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+        let size = (width as usize).saturating_mul(height as usize);
+        self.pixels.resize(size, 0xff000000);
+    }
+
+    pub fn as_ptr(&self) -> *const u32 {
+        self.pixels.as_ptr()
+    }
+
+    pub fn as_slice(&self) -> &[u32] {
+        &self.pixels
     }
 
     pub fn clear(&mut self, color: u32) {
@@ -197,5 +234,49 @@ impl AudioTrack {
     pub fn write(&mut self, audio_data: &[i16]) -> usize {
         self.buffer.extend_from_slice(audio_data);
         audio_data.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn surface_and_orientation_handling() {
+        let mut dm = DisplayMetrics::default();
+        assert_eq!(dm.width_pixels, 1080);
+        assert_eq!(dm.height_pixels, 1920);
+
+        dm.set_orientation(ScreenOrientation::Landscape);
+        assert_eq!(dm.width_pixels, 1920);
+        assert_eq!(dm.height_pixels, 1080);
+
+        let mut surface = Surface::new(10, 10);
+        surface.set_pixel(2, 3, 0xffaabbcc);
+        assert_eq!(surface.get_pixel(2, 3), Some(0xffaabbcc));
+        surface.resize(20, 20);
+        assert_eq!(surface.width, 20);
+        assert_eq!(surface.height, 20);
+    }
+
+    #[test]
+    fn input_queue_and_audiotrack() {
+        let q = InputQueue::new();
+        q.enqueue_motion(MotionEvent {
+            action: ACTION_DOWN,
+            event_time_ms: 100,
+            pointers: vec![PointerCoords { id: 0, x: 50.0, y: 75.0, pressure: 1.0 }],
+        });
+        let ev = q.poll_motion().unwrap();
+        assert_eq!(ev.action, ACTION_DOWN);
+        assert_eq!(ev.pointers[0].x, 50.0);
+
+        let mut audio = AudioTrack::new(44100, 2);
+        audio.play();
+        assert_eq!(audio.state, AudioTrackState::Playing);
+        assert_eq!(audio.write(&[100, 200, 300]), 3);
+        audio.stop();
+        assert_eq!(audio.state, AudioTrackState::Stopped);
+        assert!(audio.buffer.is_empty());
     }
 }
