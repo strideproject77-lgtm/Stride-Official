@@ -33,6 +33,7 @@ enum RuntimeExecutionError: LocalizedError {
     case missingManifest
     case missingDex
     case dexLoadFailed(index: Int, status: Int32)
+    case nativeLibraryLoadFailed(name: String, status: Int32)
     case runtimeInitializationFailed
     case uncaughtException(String)
     case activityNotFound(String)
@@ -137,12 +138,17 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         // Load native shared libraries (.so) into the Bionic/ELF linker
         for (soName, soData) in soDataList {
             onLog("[INFO] Loading native library \(soName) (\(soData.count) bytes)")
-            _ = soData.withUnsafeBytes { rawBuffer in
-                if let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) {
-                    _ = soName.withCString { namePtr in
-                        stride_runtime_load_so(runtime, namePtr, ptr, rawBuffer.count)
-                    }
+            let nativeStatus = soData.withUnsafeBytes { rawBuffer -> Int32 in
+                guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                    return 1
                 }
+                return soName.withCString { namePtr in
+                    stride_runtime_load_so(runtime, namePtr, ptr, rawBuffer.count)
+                }
+            }
+            guard nativeStatus == 0 else {
+                onLog("[ERROR] Native library \\(soName) load failed with status \\(nativeStatus)")
+                throw RuntimeExecutionError.nativeLibraryLoadFailed(name: soName, status: nativeStatus)
             }
         }
 
@@ -183,7 +189,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             throw RuntimeExecutionError.manifestError("Failed to parse AndroidManifest binary XML")
         }
 
-        onLog("[INFO] Execution attempt finished; this backend currently returns after its bounded launch step budget")
+        onLog("[INFO] Lifecycle launch attempt returned. This is not yet a persistent Android app session.")
         return APKExecutionResult(
             statusCode: report.status_code,
             totalClassesLoaded: report.total_classes_loaded,
