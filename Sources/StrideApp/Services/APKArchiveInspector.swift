@@ -1,14 +1,20 @@
 import Foundation
+import UIKit
 import ZIPFoundation
 
-struct APKInspection: Equatable {
+struct APKInspection: Equatable, Sendable {
     let archiveEntryCount: Int
     let hasAndroidManifest: Bool
     let hasDEX: Bool
     let dexFileCount: Int
+    let analyzedDexFileCount: Int
+    let skippedDexFileCount: Int
+    let dexClassCount: UInt64
+    let dexMethodCount: UInt64
     let nativeABIs: [String]
     let hasResourceTable: Bool
     let isValidPackage: Bool
+    let iconData: Data?
 
     var summary: String {
         guard isValidPackage else { return "Invalid APK archive" }
@@ -28,7 +34,13 @@ enum APKInspectionError: LocalizedError {
     }
 }
 
-struct APKArchiveInspector {
+struct APKArchiveInspector: Sendable {
+    // Bound decompression and FFI input for untrusted APKs.
+    private let maxDEXEntryBytes: UInt64 = 64 * 1_024 * 1_024
+    private let maxTotalDEXBytes: UInt64 = 128 * 1_024 * 1_024
+    private let maxDEXFileCount = 32
+    private let maxIconEntryBytes: UInt64 = 8 * 1_024 * 1_024
+
     func inspect(_ url: URL) throws -> APKInspection {
         guard let archive = Archive(url: url, accessMode: .read) else {
             throw APKInspectionError.unreadableArchive
@@ -36,7 +48,8 @@ struct APKArchiveInspector {
 
         var count = 0
         var hasManifest = false
-        var dexPaths: [String] = []
+        var dexEntries: [Entry] = []
+        var iconEntries: [Entry] = []
         var abis = Set<String>()
         var hasResources = false
 
@@ -44,8 +57,9 @@ struct APKArchiveInspector {
             count += 1
             if entry.path == "AndroidManifest.xml" { hasManifest = true }
             if entry.path == "resources.arsc" { hasResources = true }
+            if Self.isLauncherIconCandidate(entry.path) { iconEntries.append(entry) }
             if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
-                dexPaths.append(entry.path)
+                dexEntries.append(entry)
             }
             if entry.path.hasPrefix("lib/") {
                 let parts = entry.path.split(separator: "/")
@@ -56,14 +70,184 @@ struct APKArchiveInspector {
         }
 
         guard hasManifest else { throw APKInspectionError.missingManifest }
+
+        var analyzedDexCount = 0
+        var skippedDexCount = 0
+        var dexClassCount: UInt64 = 0
+        var dexMethodCount: UInt64 = 0
+        var declaredDEXBytes: UInt64 = 0
+
+        for entry in dexEntries.prefix(maxDEXFileCount) {
+            let declaredSize = UInt64(entry.uncompressedSize)
+            guard declaredSize <= maxDEXEntryBytes,
+                  declaredDEXBytes <= maxTotalDEXBytes,
+                  declaredSize <= maxTotalDEXBytes - declaredDEXBytes else {
+                skippedDexCount += 1
+                continue
+            }
+            declaredDEXBytes += declaredSize
+
+            var dexData = Data()
+            dexData.reserveCapacity(Int(declaredSize))
+            var extractedBytes: UInt64 = 0
+            var exceededLimit = false
+            do {
+                _ = try archive.extract(entry) { chunk in
+                    let (newSize, overflow) = extractedBytes.addingReportingOverflow(UInt64(chunk.count))
+                    guard !overflow, newSize <= maxDEXEntryBytes else {
+                        exceededLimit = true
+                        return
+                    }
+                    dexData.append(chunk)
+                    extractedBytes = newSize
+                }
+            } catch {
+                skippedDexCount += 1
+                continue
+            }
+            guard !exceededLimit else {
+                skippedDexCount += 1
+                continue
+            }
+
+            do {
+                let inventory = try StrideDexInventory.inspect(dexData)
+                analyzedDexCount += 1
+                dexClassCount += UInt64(inventory.classCount)
+                dexMethodCount += UInt64(inventory.methodCount)
+            } catch {
+                skippedDexCount += 1
+            }
+        }
+        skippedDexCount += max(0, dexEntries.count - min(dexEntries.count, maxDEXFileCount))
+
+        let iconData = extractIcon(from: iconEntries, in: archive)
         return APKInspection(
             archiveEntryCount: count,
             hasAndroidManifest: hasManifest,
-            hasDEX: !dexPaths.isEmpty,
-            dexFileCount: dexPaths.count,
+            hasDEX: !dexEntries.isEmpty,
+            dexFileCount: dexEntries.count,
+            analyzedDexFileCount: analyzedDexCount,
+            skippedDexFileCount: skippedDexCount,
+            dexClassCount: dexClassCount,
+            dexMethodCount: dexMethodCount,
             nativeABIs: abis.sorted(),
             hasResourceTable: hasResources,
-            isValidPackage: true
+            isValidPackage: true,
+            iconData: iconData
         )
+    }
+
+    /// Extract conventional launcher images while preserving their original artwork.
+    /// Adaptive-icon XML is not rasterized; density-specific image fallbacks are used.
+    private func extractIcon(from entries: [Entry], in archive: Archive) -> Data? {
+        let candidates = entries
+            .filter { UInt64($0.uncompressedSize) <= maxIconEntryBytes }
+            .sorted { Self.iconScore($0.path) > Self.iconScore($1.path) }
+
+        // Adaptive launcher icons often store foreground and background as
+        // separate transparent raster assets. Composite them before displaying.
+        let foregroundEntry = candidates.first {
+            URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent.lowercased() == "ic_launcher_foreground"
+        }
+        let backgroundEntry = candidates.first {
+            URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent.lowercased() == "ic_launcher_background"
+        }
+
+        if let foregroundEntry, let backgroundEntry,
+           let foregroundData = readIconImage(foregroundEntry, in: archive),
+           let backgroundData = readIconImage(backgroundEntry, in: archive),
+           let foreground = UIImage(data: foregroundData),
+           let background = UIImage(data: backgroundData) {
+            let size = CGSize(
+                width: max(foreground.size.width, background.size.width),
+                height: max(foreground.size.height, background.size.height)
+            )
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = false
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            let composed = renderer.image { _ in
+                let rect = CGRect(origin: .zero, size: size)
+                background.draw(in: rect)
+                foreground.draw(in: rect)
+            }
+            if let png = composed.pngData() { return png }
+        }
+
+        for entry in candidates {
+            if let data = readIconImage(entry, in: archive) { return data }
+        }
+        return nil
+    }
+
+    private func readIconImage(_ entry: Entry, in archive: Archive) -> Data? {
+        var data = Data()
+        data.reserveCapacity(Int(entry.uncompressedSize))
+        var exceededLimit = false
+        do {
+            _ = try archive.extract(entry) { chunk in
+                guard data.count + chunk.count <= Int(self.maxIconEntryBytes) else {
+                    exceededLimit = true
+                    return
+                }
+                data.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+        guard !exceededLimit, Self.looksLikeSupportedImage(data) else { return nil }
+        return data
+    }
+
+    private static func isLauncherIconCandidate(_ path: String) -> Bool {
+        let lower = path.lowercased()
+        guard lower.hasPrefix("res/"),
+              ["png", "webp", "jpg", "jpeg"].contains(URL(fileURLWithPath: lower).pathExtension) else {
+            return false
+        }
+        let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
+        return ["ic_launcher", "ic_launcher_round", "ic_launcher_foreground", "ic_launcher_background", "app_icon", "launcher_icon", "icon"].contains(name)
+            || name.hasPrefix("ic_launcher_")
+            || name.contains("launcher")
+    }
+
+    private static func iconScore(_ path: String) -> Int {
+        let lower = path.lowercased()
+        let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
+        let nameScore: Int
+        switch name {
+        case "ic_launcher": nameScore = 500
+        case "ic_launcher_round": nameScore = 450
+        case "ic_launcher_foreground": nameScore = 430
+        case "ic_launcher_background": nameScore = 420
+        case "app_icon": nameScore = 400
+        case "launcher_icon": nameScore = 350
+        default: nameScore = 300
+        }
+        let densityScore: Int
+        if lower.contains("xxxhdpi") { densityScore = 80 }
+        else if lower.contains("xxhdpi") { densityScore = 70 }
+        else if lower.contains("xhdpi") { densityScore = 60 }
+        else if lower.contains("hdpi") { densityScore = 50 }
+        else if lower.contains("mdpi") { densityScore = 40 }
+        else if lower.contains("tvdpi") { densityScore = 35 }
+        else if lower.contains("nodpi") { densityScore = 30 }
+        else { densityScore = 20 }
+        let formatScore = lower.hasSuffix(".png") ? 3 : (lower.hasSuffix(".webp") ? 2 : 1)
+        return nameScore + densityScore + formatScore
+    }
+
+    private static func looksLikeSupportedImage(_ data: Data) -> Bool {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 8, bytes[0...7].elementsEqual([137, 80, 78, 71, 13, 10, 26, 10]) {
+            return true
+        }
+        if bytes.count >= 12,
+           String(bytes: bytes[0...3], encoding: .ascii) == "RIFF",
+           String(bytes: bytes[8...11], encoding: .ascii) == "WEBP" {
+            return true
+        }
+        return bytes.count >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF
     }
 }

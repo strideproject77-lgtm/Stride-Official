@@ -1,7 +1,13 @@
 //! DEX code_item structural reader. It exposes bounded instruction bytes; it is not a
 //! Dalvik interpreter and deliberately does not claim bytecode execution.
+
+pub mod classes;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CodeItemError { Truncated, InvalidOffset, InstructionDataOutOfBounds, InvalidTryPadding, TryItemsOutOfBounds }
+pub enum CodeItemError {
+    Truncated, InvalidOffset, InstructionDataOutOfBounds, InvalidTryPadding,
+    TryItemsOutOfBounds, InvalidTryRange, InvalidHandlerList, InvalidHandlerOffset,
+    InvalidHandlerAddress, InvalidInstructions,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeItem<'a> {
@@ -24,6 +30,68 @@ fn u32le(b:&[u8], o:usize)->Result<u32,CodeItemError>{
     Ok(u32::from_le_bytes([s[0],s[1],s[2],s[3]]))
 }
 
+fn read_uleb128(bytes: &[u8], offset: &mut usize) -> Result<u32, CodeItemError> {
+    let mut value = 0u32;
+    for index in 0..5 {
+        let byte = *bytes.get(*offset).ok_or(CodeItemError::InvalidHandlerList)?;
+        *offset += 1;
+        if index == 4 && (byte & 0xf0) != 0 {
+            return Err(CodeItemError::InvalidHandlerList);
+        }
+        value |= u32::from(byte & 0x7f) << (index * 7);
+        if byte & 0x80 == 0 { return Ok(value); }
+    }
+    Err(CodeItemError::InvalidHandlerList)
+}
+
+fn read_sleb128(bytes: &[u8], offset: &mut usize) -> Result<i32, CodeItemError> {
+    let mut value = 0i64;
+    let mut shift = 0;
+    let mut byte;
+    loop {
+        if shift >= 35 { return Err(CodeItemError::InvalidHandlerList); }
+        byte = *bytes.get(*offset).ok_or(CodeItemError::InvalidHandlerList)?;
+        *offset += 1;
+        value |= i64::from(byte & 0x7f) << shift;
+        shift += 7;
+        if byte & 0x80 == 0 { break; }
+    }
+    if shift < 64 && (byte & 0x40) != 0 { value |= (!0i64) << shift; }
+    i32::try_from(value).map_err(|_| CodeItemError::InvalidHandlerList)
+}
+
+fn validate_handler_list(
+    bytes: &[u8],
+    list_start: usize,
+    insns_size: u32,
+    instruction_boundaries: &[usize],
+) -> Result<Vec<usize>, CodeItemError> {
+    let mut cursor = list_start;
+    let count = usize::try_from(read_uleb128(bytes, &mut cursor)?)
+        .map_err(|_| CodeItemError::InvalidHandlerList)?;
+    if count == 0 { return Err(CodeItemError::InvalidHandlerList); }
+    let mut offsets = Vec::with_capacity(count.min(1024));
+    for _ in 0..count {
+        offsets.push(cursor.checked_sub(list_start).ok_or(CodeItemError::InvalidHandlerList)?);
+        let signed_count = read_sleb128(bytes, &mut cursor)?;
+        let typed_count = signed_count.checked_abs().ok_or(CodeItemError::InvalidHandlerList)?;
+        for _ in 0..typed_count {
+            let _type_idx = read_uleb128(bytes, &mut cursor)?;
+            let address = read_uleb128(bytes, &mut cursor)?;
+            if address >= insns_size || !instruction_boundaries.contains(&(address as usize)) {
+                return Err(CodeItemError::InvalidHandlerAddress);
+            }
+        }
+        if signed_count <= 0 {
+            let catch_all = read_uleb128(bytes, &mut cursor)?;
+            if catch_all >= insns_size || !instruction_boundaries.contains(&(catch_all as usize)) {
+                return Err(CodeItemError::InvalidHandlerAddress);
+            }
+        }
+    }
+    Ok(offsets)
+}
+
 /// Reads one code_item at a DEX file offset and validates its instruction and try-item ranges.
 pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemError>{
     let start=usize::try_from(offset).map_err(|_|CodeItemError::InvalidOffset)?;
@@ -37,13 +105,42 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
     let insns_start=start+16;
     let insns_bytes=usize::try_from(insns_size).ok().and_then(|n|n.checked_mul(2)).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let insns_end=insns_start.checked_add(insns_bytes).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
+    let decoded = decode_instructions(&bytes[insns_start..insns_end])
+        .map_err(|_| CodeItemError::InvalidInstructions)?;
+    let instruction_boundaries: Vec<usize> = decoded.iter()
+        .filter(|instruction| instruction.kind == InstructionKind::Opcode)
+        .map(|instruction| instruction.code_unit_offset)
+        .collect();
     let tries_offset=if tries_size==0 {None} else {
         let aligned=if insns_size%2==1 {insns_end.checked_add(2).ok_or(CodeItemError::TryItemsOutOfBounds)?} else {insns_end};
         if aligned>bytes.len(){return Err(CodeItemError::InvalidTryPadding);}
         if insns_size%2==1 && bytes[insns_end..aligned]!=[0,0]{return Err(CodeItemError::InvalidTryPadding);}
         let count=usize::from(tries_size);
         let end=aligned.checked_add(count.checked_mul(8).ok_or(CodeItemError::TryItemsOutOfBounds)?).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::TryItemsOutOfBounds)?;
-        let _=end;
+        let mut previous_end = 0u32;
+        for index in 0..count {
+            let item = aligned + index * 8;
+            let start_addr = u32le(bytes, item)?;
+            let insn_count = u32::from(u16le(bytes, item + 4)?);
+            let handler_off = usize::from(u16le(bytes, item + 6)?);
+            let range_end = start_addr.checked_add(insn_count).ok_or(CodeItemError::InvalidTryRange)?;
+            if insn_count == 0 || range_end > insns_size
+                || !instruction_boundaries.contains(&(start_addr as usize))
+                || (range_end != insns_size && !instruction_boundaries.contains(&(range_end as usize)))
+                || (index > 0 && start_addr < previous_end) {
+                return Err(CodeItemError::InvalidTryRange);
+            }
+            previous_end = range_end;
+            let _ = handler_off;
+        }
+        let valid_handler_offsets = validate_handler_list(bytes, end, insns_size, &instruction_boundaries)?;
+        for index in 0..count {
+            let item = aligned + index * 8;
+            let handler_off = usize::from(u16le(bytes, item + 6)?);
+            if !valid_handler_offsets.contains(&handler_off) {
+                return Err(CodeItemError::InvalidHandlerOffset);
+            }
+        }
         Some(aligned)
     };
     Ok(CodeItem{registers_size,ins_size,outs_size,tries_size,debug_info_off,insns_size,instructions:&bytes[insns_start..insns_end],tries_offset})
@@ -61,6 +158,38 @@ mod code_item_tests {
  #[test] fn reads_code_item(){let b=sample(2,0);let c=read_code_item(&b,0x70).unwrap();assert_eq!(c.registers_size,4);assert_eq!(c.insns_size,2);assert_eq!(c.instructions.len(),4);}
  #[test] fn rejects_truncated_instructions(){let mut b=sample(3,0);b.truncate(b.len()-2);assert_eq!(read_code_item(&b,0x70),Err(CodeItemError::InstructionDataOutOfBounds));}
  #[test] fn rejects_missing_try_items(){let b=sample(2,1);let mut b=b;b.truncate(b.len()-1);assert_eq!(read_code_item(&b,0x70),Err(CodeItemError::TryItemsOutOfBounds));}
+ #[test] fn validates_try_ranges_and_catch_handlers(){
+  let mut b=vec![0u8;0x70+16+4+8+4];
+  let o=0x70;
+  b[o+6..o+8].copy_from_slice(&1u16.to_le_bytes());
+  b[o+12..o+16].copy_from_slice(&2u32.to_le_bytes());
+  b[o+16..o+18].copy_from_slice(&0x0013u16.to_le_bytes()); // const/16 occupies both code units
+  let tr=o+16+4;
+  b[tr..tr+4].copy_from_slice(&0u32.to_le_bytes());
+  b[tr+4..tr+6].copy_from_slice(&2u16.to_le_bytes());
+  b[tr+6..tr+8].copy_from_slice(&1u16.to_le_bytes());
+  // Handler list: one handler, one typed catch (type 0 -> address 0).
+  b[tr+8..tr+12].copy_from_slice(&[1,1,0,0]);
+  assert!(read_code_item(&b,0x70).is_ok());
+
+  let mut bad_range=b.clone();
+  bad_range[tr..tr+4].copy_from_slice(&1u32.to_le_bytes());
+  bad_range[tr+4..tr+6].copy_from_slice(&2u16.to_le_bytes());
+  assert_eq!(read_code_item(&bad_range,0x70),Err(CodeItemError::InvalidTryRange));
+
+  let mut bad_boundary=b.clone();
+  bad_boundary[tr..tr+4].copy_from_slice(&1u32.to_le_bytes());
+  bad_boundary[tr+4..tr+6].copy_from_slice(&1u16.to_le_bytes());
+  assert_eq!(read_code_item(&bad_boundary,0x70),Err(CodeItemError::InvalidTryRange));
+
+  let mut bad_offset=b.clone();
+  bad_offset[tr+6..tr+8].copy_from_slice(&0u16.to_le_bytes());
+  assert_eq!(read_code_item(&bad_offset,0x70),Err(CodeItemError::InvalidHandlerOffset));
+
+  let mut bad_address=b.clone();
+  bad_address[tr+11]=2;
+  assert_eq!(read_code_item(&bad_address,0x70),Err(CodeItemError::InvalidHandlerAddress));
+ }
 }
 
 
@@ -71,7 +200,7 @@ pub enum InstructionKind { Opcode, PackedSwitchPayload, SparseSwitchPayload, Arr
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedInstruction { pub code_unit_offset: usize, pub opcode: u8, pub width: usize, pub kind: InstructionKind }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DecodeError { OddByteLength, TruncatedInstruction, InvalidOpcode(u8), InvalidPayload, InvalidBranchTarget, InvalidPayloadTarget }
+pub enum DecodeError { OddByteLength, TruncatedInstruction, InvalidOpcode(u8), InvalidPayload, InvalidBranchTarget, InvalidPayloadTarget, InvalidRegister }
 
 fn unit_at(units:&[u16], at:usize)->Result<u16,DecodeError>{units.get(at).copied().ok_or(DecodeError::TruncatedInstruction)}
 fn signed32(units:&[u16], at:usize)->Result<i32,DecodeError>{
@@ -91,6 +220,153 @@ fn opcode_width(op:u8)->Option<usize>{
   0xfa|0xfb => 4,
   _ => return None,
  })
+}
+
+/// Checks encoded register indices for the instruction formats handled here.
+/// This is a deliberately partial operand check, not the Dalvik verifier.
+pub fn validate_register_operands(
+    bytes: &[u8],
+    registers_size: u16,
+) -> Result<(), DecodeError> {
+    if bytes.len() % 2 != 0 { return Err(DecodeError::OddByteLength); }
+    let units: Vec<u16> = bytes.chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
+    let decoded = decode_instructions(bytes)?;
+    let limit = usize::from(registers_size);
+    let check = |register: usize| {
+        if register < limit { Ok(()) } else { Err(DecodeError::InvalidRegister) }
+    };
+    let check_wide = |register: usize| {
+        if register.checked_add(1).filter(|end| *end < limit).is_some() {
+            Ok(())
+        } else {
+            Err(DecodeError::InvalidRegister)
+        }
+    };
+    for instruction in decoded {
+        if instruction.kind != InstructionKind::Opcode { continue; }
+        let pc = instruction.code_unit_offset;
+        let first = unit_at(&units, pc)?;
+        let op = instruction.opcode;
+        let a8 = usize::from((first >> 8) & 0xff);
+        let a4 = usize::from((first >> 8) & 0x0f);
+        let b4 = usize::from((first >> 12) & 0x0f);
+        match op {
+            // 12x: two four-bit register operands.
+            0x01 | 0x04 | 0x07 | 0x7b..=0x8f | 0xb0..=0xcf => {
+                check(a4)?; check(b4)?;
+            }
+            // 11x and 11n: one byte or four-bit register.
+            0x0a..=0x0d | 0x0f..=0x11 | 0x1d | 0x1e | 0x27 => check(a8)?,
+            0x12 => check(a4)?,
+            // 22x: A is a byte, B is the next full code unit.
+            0x02 | 0x05 | 0x08 => {
+                check(a8)?; check(usize::from(unit_at(&units, pc + 1)?))?;
+            }
+            // 32x: two full code-unit register indices.
+            0x03 | 0x06 | 0x09 => {
+                check(usize::from(unit_at(&units, pc + 1)?))?;
+                check(usize::from(unit_at(&units, pc + 2)?))?;
+            }
+            // 21* formats: one byte register in the first unit.
+            0x13 | 0x14 | 0x15 | 0x16 | 0x17 | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1f |
+            0x22 | 0x26 | 0x29 | 0x2a | 0x2b | 0x2c | 0x60..=0x6d |
+            0x38..=0x3d | 0xfe | 0xff => check(a8)?,
+            // 22t/22c/22s formats: two four-bit registers.
+            0x20 | 0x23 | 0x32..=0x37 | 0x52..=0x5f | 0xd0..=0xd7 => {
+                check(a4)?; check(b4)?;
+            }
+            // 23x formats: A is in first unit, B/C in second.
+            0x2d..=0x31 | 0x44..=0x51 | 0x90..=0xaf => {
+                let second = unit_at(&units, pc + 1)?;
+                check(a8)?;
+                check(usize::from(second & 0xff))?;
+                check(usize::from(second >> 8))?;
+            }
+            // 22b formats: A byte in first unit, B byte in second.
+            0xd8..=0xe2 => {
+                check(a8)?;
+                check(usize::from(unit_at(&units, pc + 1)? & 0xff))?;
+            }
+            // 35c / 45cc: up to five explicit four-bit register operands.
+            // A is the argument count; G is the fifth register slot.
+            0x24 | 0x6e..=0x72 | 0xfa | 0xfc => {
+                let count = usize::from(first >> 12);
+                if count > 5 { return Err(DecodeError::InvalidRegister); }
+                let packed = unit_at(&units, pc + 2)?;
+                let registers = [
+                    usize::from(packed & 0x0f),
+                    usize::from((packed >> 4) & 0x0f),
+                    usize::from((packed >> 8) & 0x0f),
+                    usize::from(packed >> 12),
+                    usize::from((first >> 8) & 0x0f),
+                ];
+                for register in registers.into_iter().take(count) { check(register)?; }
+            }
+            // 3rc / 4rcc: a contiguous register window beginning at C.
+            0x25 | 0x74..=0x78 | 0xfb | 0xfd => {
+                let count = usize::from(first >> 8);
+                let start = usize::from(unit_at(&units, pc + 2)?);
+                if start.checked_add(count).filter(|end| *end <= limit).is_none() {
+                    return Err(DecodeError::InvalidRegister);
+                }
+            }
+            // Other formats are decoded for width/targets, but operand checks are not
+            // claimed until their encoding-specific register layouts are implemented.
+            _ => {}
+        }
+
+        // Wide values occupy two consecutive virtual registers. Validate only
+        // opcodes whose wide operand positions are defined by their format.
+        match op {
+            // move-wide vA, vB (12x); both operands are wide.
+            0x04 => { check_wide(a4)?; check_wide(b4)?; }
+            // move-wide/from16 and move-wide/16.
+            0x05 => { check_wide(a8)?; check_wide(usize::from(unit_at(&units, pc + 1)?))?; }
+            0x06 => {
+                check_wide(usize::from(unit_at(&units, pc + 1)?))?;
+                check_wide(usize::from(unit_at(&units, pc + 2)?))?;
+            }
+            // move-result-wide and const-wide variants.
+            0x0b | 0x16 | 0x17 | 0x18 => check_wide(a8)?,
+            // aget-wide / aput-wide: A is the wide value register.
+            0x45 | 0x4c => check_wide(a8)?,
+            // iget-wide / iput-wide and sget-wide / sput-wide.
+            0x53 | 0x5a | 0x61 | 0x68 => check_wide(a4)?,
+            // Unary wide operations/conversions (12x).
+            0x7d | 0x7e | 0x80 => { check_wide(a4)?; check_wide(b4)?; }
+            0x81 | 0x83 | 0x88 | 0x89 => check_wide(a4)?,
+            0x84 | 0x85 | 0x8a | 0x8c => check_wide(b4)?,
+            0x86 | 0x8b => { check_wide(a4)?; check_wide(b4)?; }
+            // Long binary arithmetic: A and B are wide; C is wide except shifts.
+            0x9b..=0xa2 => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check_wide(usize::from(second >> 8))?;
+            }
+            0xa3..=0xa5 => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check(usize::from(second >> 8))?;
+            }
+            // Double binary arithmetic: all three operands are wide.
+            0xab..=0xaf => {
+                let second = unit_at(&units, pc + 1)?;
+                check_wide(a8)?;
+                check_wide(usize::from(second & 0xff))?;
+                check_wide(usize::from(second >> 8))?;
+            }
+            // 2addr long operations and double operations.
+            0xbb..=0xc5 | 0xcb..=0xcf => {
+                check_wide(a4)?;
+                check_wide(b4)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Decodes every code unit in a DEX instruction stream, validating instruction widths,
@@ -114,7 +390,7 @@ pub fn decode_instructions(bytes:&[u8])->Result<Vec<DecodedInstruction>,DecodeEr
   }
   let width=opcode_width(op).ok_or(DecodeError::InvalidOpcode(op))?;
   if width>units.len()-pc{return Err(DecodeError::TruncatedInstruction);}
-  if op==0x28 {let d=(first as u8 as i8) as isize;branches.push((pc,d));}
+  if op==0x28 {let d=((first >> 8) as u8 as i8) as isize;branches.push((pc,d));}
   else if op==0x29 {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
   else if op==0x2a {branches.push((pc,signed32(&units,pc+1)? as isize));}
   else if (0x32..=0x3d).contains(&op) {branches.push((pc,unit_at(&units,pc+1)? as i16 as isize));}
@@ -142,7 +418,59 @@ mod decoder_tests {
  #[test] fn rejects_unknown_opcode(){assert_eq!(decode_instructions(&words(&[0x0073])),Err(DecodeError::InvalidOpcode(0x73)));}
  #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+ #[test] fn decodes_goto_10t_signed_offset_from_high_byte(){
+  let decoded=decode_instructions(&words(&[0x0528,0x000e,0x000e,0x000e,0x000e,0x000e])).unwrap();
+  assert_eq!(decoded[0].code_unit_offset,0);
+  assert_eq!(decoded[0].opcode,0x28);
+ }
  #[test] fn rejects_branch_into_instruction_operand(){assert_eq!(decode_instructions(&words(&[0x0129,0x0001,0x000e])),Err(DecodeError::InvalidBranchTarget));}
 
+ #[test] fn rejects_out_of_range_register_in_12x(){
+  assert_eq!(validate_register_operands(&words(&[0x0012,0x000e]),1),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0112,0x000e]),1),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_registers_in_22x_and_23x(){
+  assert_eq!(validate_register_operands(&words(&[0x0002,0x0001,0x000e]),2),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0002,0x0002,0x000e]),2),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x0044,0x0201,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0044,0x0301,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_field_access_register_formats(){
+  // iget v1, v2, field@0 uses 22c.
+  assert_eq!(validate_register_operands(&words(&[0x2152,0,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x3152,0,0x000e]),3),Err(DecodeError::InvalidRegister));
+  // sget v2, field@0 uses 21c.
+  assert_eq!(validate_register_operands(&words(&[0x0260,0,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x0360,0,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_invoke_35c_register_list(){
+  // invoke-virtual {v0, v1}, method@0
+  assert_eq!(validate_register_operands(&words(&[0x206e,0,0x0010,0x000e]),2),Ok(()));
+  // The second listed register is v2, outside a two-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x206e,0,0x0020,0x000e]),2),Err(DecodeError::InvalidRegister));
+  // A count of six cannot be represented by the 35c register list.
+  assert_eq!(validate_register_operands(&words(&[0x606e,0,0,0x000e]),8),Err(DecodeError::InvalidRegister));
+ }
+ #[test] fn validates_invoke_range_register_window(){
+  // invoke-virtual/range {v1 .. v3}
+  assert_eq!(validate_register_operands(&words(&[0x0374,0,1,0x000e]),4),Ok(()));
+  // v2..v4 exceeds a four-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x0374,0,2,0x000e]),4),Err(DecodeError::InvalidRegister));
+  // Zero arguments is valid when the start is at the end of the frame.
+  assert_eq!(validate_register_operands(&words(&[0x0074,0,4,0x000e]),4),Ok(()));
+ }
+ #[test] fn validates_wide_register_pairs(){
+  // move-wide v0, v1 is valid in a two-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x1004,0x000e]),4),Ok(()));
+  // The destination pair v1/v2 exceeds the frame.
+  assert_eq!(validate_register_operands(&words(&[0x1104,0x000e]),2),Err(DecodeError::InvalidRegister));
+  // move-result-wide requires two destination registers.
+  assert_eq!(validate_register_operands(&words(&[0x000b,0x000e]),1),Err(DecodeError::InvalidRegister));
+  // const-wide/16 destination pair must fit.
+  assert_eq!(validate_register_operands(&words(&[0x0016,0x0000,0x000e]),1),Err(DecodeError::InvalidRegister));
+  // add-long uses wide A/B/C operands.
+  assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),3),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),4),Ok(()));
+ }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }

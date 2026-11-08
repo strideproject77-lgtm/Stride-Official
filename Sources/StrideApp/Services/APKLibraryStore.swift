@@ -2,6 +2,20 @@ import Foundation
 import Combine
 import SwiftUI
 
+enum APKLibraryImportError: LocalizedError {
+    case unsupportedFile
+    case unreadableSource
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedFile:
+            return "Please choose an .apk file. Other file types cannot be imported."
+        case .unreadableSource:
+            return "iOS could not access this file. Save it in Files and try importing it again."
+        }
+    }
+}
+
 @MainActor
 final class APKLibraryStore: ObservableObject {
     @Published private(set) var packages: [ImportedAPK] = []
@@ -14,15 +28,7 @@ final class APKLibraryStore: ObservableObject {
     }
 
     func importPackage(from sourceURL: URL) throws {
-        let didAccess = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
-        }
-
-        let folder = try libraryFolder()
-        let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-        try fileManager.copyItem(at: sourceURL, to: destination)
-
+        let destination = try copyPackageToLibrary(from: sourceURL)
         do {
             let report = try inspector.inspect(destination)
             packages.removeAll { $0.fileURL == destination }
@@ -31,6 +37,59 @@ final class APKLibraryStore: ObservableObject {
             try? fileManager.removeItem(at: destination)
             throw error
         }
+    }
+
+    /// Copies the provider document, then scans the archive away from the UI thread.
+    func importPackageAsync(from sourceURL: URL) async throws {
+        let destination = try copyPackageToLibrary(from: sourceURL)
+        do {
+            let archiveInspector = inspector
+            let report = try await Task.detached(priority: .userInitiated) {
+                try archiveInspector.inspect(destination)
+            }.value
+            packages.removeAll { $0.fileURL == destination }
+            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+    }
+
+    private func copyPackageToLibrary(from sourceURL: URL) throws -> URL {
+        guard sourceURL.pathExtension.lowercased() == "apk" else {
+            throw APKLibraryImportError.unsupportedFile
+        }
+
+        let didAccess = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
+        }
+
+        guard sourceURL.isFileURL,
+              fileManager.isReadableFile(atPath: sourceURL.path) else {
+            throw APKLibraryImportError.unreadableSource
+        }
+
+        let folder = try libraryFolder()
+        let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
+
+        // UIDocumentPicker is configured with asCopy=true, so provider-backed
+        // files arrive as a local sandbox copy. Copy directly while any optional
+        // security-scoped access is active; coordinating the already-local copy
+        // can cause a successful picker selection to produce no library item.
+        do {
+            try fileManager.copyItem(at: sourceURL, to: destination)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+
+        guard fileManager.fileExists(atPath: destination.path),
+              fileManager.isReadableFile(atPath: destination.path) else {
+            try? fileManager.removeItem(at: destination)
+            throw APKLibraryImportError.unreadableSource
+        }
+        return destination
     }
 
     private func reload() {

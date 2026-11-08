@@ -1,58 +1,118 @@
-name: iOS Build
+name: Stride iOS IPA Builder
 
 on:
-  push:
-    branches: [main]
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  push:
+    branches:
+      - feat/dex-class-method-loader
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Keep only the newest main-branch build pending; avoid a queue of stale IPA builds.
+# PRs run the fast Rust checks. A manual run always performs the complete iOS IPA build.
 concurrency:
-  group: stride-ios-build-${{ github.ref }}
-  cancel-in-progress: true
+  group: stride-ipa-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build unsigned iOS IPA
-    runs-on: macos-15
-    timeout-minutes: 60
+  rust-tests:
+    name: Rust runtime tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - name: Checkout main revision
+      - name: Checkout Stride source
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run complete Rust test suite
+        run: cargo test --manifest-path runtime-rust/Cargo.toml
+
+  build-ipa:
+    name: Build and verify unsigned iOS IPA
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    needs: rust-tests
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Stride source
+        uses: actions/checkout@v4
+
+      - name: Select stable Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
       - name: Install XcodeGen
-        run: brew install xcodegen
+        run: |
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Install Rust for iOS device
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Build Stride Rust runtime for iPhone
+        run: |
+          set -euo pipefail
+          cargo build \
+            --manifest-path runtime-rust/Cargo.toml \
+            -p stride-dex-ffi \
+            --release \
+            --target aarch64-apple-ios
+
+          RUST_LIBRARY="runtime-rust/target/aarch64-apple-ios/release/libstride_dex_ffi.a"
+          test -s "$RUST_LIBRARY"
+          echo "Rust iOS library:"
+          ls -lh "$RUST_LIBRARY"
+          file "$RUST_LIBRARY"
+
+      - name: Create device XCFramework
+        run: |
+          set -euo pipefail
+          RUST_LIBRARY="runtime-rust/target/aarch64-apple-ios/release/libstride_dex_ffi.a"
+          xcodebuild -create-xcframework \
+            -library "$RUST_LIBRARY" \
+            -headers runtime-rust/crates/dex-ffi/include \
+            -output runtime-rust/target/StrideDexFFI.xcframework
+          test -s runtime-rust/target/StrideDexFFI.xcframework/Info.plist
+          plutil -lint runtime-rust/target/StrideDexFFI.xcframework/Info.plist
+
+      - name: Generate Stride Home Screen icon
+        run: |
+          set -euo pipefail
+          swift Scripts/generate-app-icon.swift
+          test -s Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
+          sips -g pixelWidth -g pixelHeight Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
 
       - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Run Rust unit tests
-        run: cargo test --manifest-path runtime-rust/Cargo.toml
-
-      - name: Run Swift unit tests
         run: |
-          xcodebuild test \
+          set -euo pipefail
+          xcodegen generate
+          test -s Stride.xcodeproj/project.pbxproj
+
+      - name: Resolve iOS package dependencies
+        run: |
+          xcodebuild \
+            -resolvePackageDependencies \
             -project Stride.xcodeproj \
-            -scheme Stride \
-            -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-            -derivedDataPath "$RUNNER_TEMP/StrideTestDerivedData" \
-            CODE_SIGNING_ALLOWED=NO
+            -scheme Stride
 
-      - name: Build for physical iOS devices
+      - name: Compile Stride for physical iPhones
         run: |
+          set -euo pipefail
           xcodebuild \
             -project Stride.xcodeproj \
             -scheme Stride \
             -configuration Release \
+            -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/StrideDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
@@ -60,23 +120,83 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Package unsigned IPA
+      - name: Verify built iOS application
         run: |
+          set -euo pipefail
           APP_PATH="$RUNNER_TEMP/StrideDerivedData/Build/Products/Release-iphoneos/Stride.app"
-          test -d "$APP_PATH"
-          plutil -lint "$APP_PATH/Info.plist"
-          STAGING="$RUNNER_TEMP/stride-ipa"
-          mkdir -p "$STAGING/Payload"
-          cp -R "$APP_PATH" "$STAGING/Payload/Stride.app"
-          cd "$STAGING"
-          /usr/bin/zip -qry "$GITHUB_WORKSPACE/Stride-unsigned.ipa" Payload
-          test -s "$GITHUB_WORKSPACE/Stride-unsigned.ipa"
-          unzip -l "$GITHUB_WORKSPACE/Stride-unsigned.ipa"
+          PLIST="$APP_PATH/Info.plist"
 
-      - name: Upload unsigned IPA
+          test -d "$APP_PATH"
+          test -s "$PLIST"
+          plutil -lint "$PLIST"
+
+          EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PLIST")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")
+          EXECUTABLE="$APP_PATH/$EXECUTABLE_NAME"
+
+          test "$BUNDLE_ID" = "com.strideproject.stride"
+          test -s "$EXECUTABLE"
+          ARCHS=$(lipo -archs "$EXECUTABLE")
+          echo "Executable architectures: $ARCHS"
+          printf '%s\n' "$ARCHS" | tr ' ' '\n' | grep -Fxq arm64
+
+          echo "Verified bundle: $BUNDLE_ID"
+          echo "Executable: $EXECUTABLE_NAME"
+          file "$EXECUTABLE"
+          ls -lh "$EXECUTABLE"
+          du -sh "$APP_PATH"
+
+      - name: Package and validate unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/StrideDerivedData/Build/Products/Release-iphoneos/Stride.app"
+          STAGING="$RUNNER_TEMP/stride-ipa"
+          IPA="$GITHUB_WORKSPACE/Stride-unsigned.ipa"
+
+          rm -rf "$STAGING" "$IPA"
+          mkdir -p "$STAGING/Payload"
+          ditto "$APP_PATH" "$STAGING/Payload/Stride.app"
+
+          cd "$STAGING"
+          /usr/bin/zip -qry "$IPA" Payload
+
+          test -s "$IPA"
+          unzip -t "$IPA"
+          unzip -Z1 "$IPA" | grep -Fx "Payload/Stride.app/Info.plist"
+          unzip -Z1 "$IPA" | grep -Fx "Payload/Stride.app/Stride"
+
+          echo "IPA size:"
+          ls -lh "$IPA"
+          echo "Uncompressed app contents:"
+          du -sh "$STAGING/Payload/Stride.app"
+          shasum -a 256 "$IPA"
+
+      - name: Write build verification report
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/StrideDerivedData/Build/Products/Release-iphoneos/Stride.app"
+          EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Info.plist")
+          {
+            echo "Stride unsigned iOS build"
+            echo "Commit: $GITHUB_SHA"
+            echo "Branch: $GITHUB_REF_NAME"
+            echo "Run: $GITHUB_RUN_NUMBER"
+            echo "Bundle ID: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")"
+            echo "Executable: $EXECUTABLE_NAME"
+            echo "Executable bytes: $(stat -f%z "$APP_PATH/$EXECUTABLE_NAME")"
+            echo "App bundle bytes: $(du -sk "$APP_PATH" | awk '{print $1 * 1024}')"
+            echo "IPA bytes: $(stat -f%z "$GITHUB_WORKSPACE/Stride-unsigned.ipa")"
+            echo "IPA SHA-256: $(shasum -a 256 "$GITHUB_WORKSPACE/Stride-unsigned.ipa" | awk '{print $1}')"
+            echo "Signing: Disabled (unsigned IPA)"
+          } > "$GITHUB_WORKSPACE/Stride-Build-Report.txt"
+          cat "$GITHUB_WORKSPACE/Stride-Build-Report.txt"
+
+      - name: Upload IPA and verification report
         uses: actions/upload-artifact@v4
         with:
-          name: Stride-unsigned-IPA
-          path: Stride-unsigned.ipa
+          name: Stride-unsigned-IPA-${{ github.run_number }}
+          path: |
+            Stride-unsigned.ipa
+            Stride-Build-Report.txt
           if-no-files-found: error
           retention-days: 14
