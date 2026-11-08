@@ -706,6 +706,7 @@ private struct APKGridCard: View {
 
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
+    @State private var showingExecutionScreen = false
     @Environment(\.dismiss) private var dismiss
     let item: ImportedAPK
     @State private var isExecuting = false
@@ -799,6 +800,7 @@ private struct APKDetailSheet: View {
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
 
                     Button {
+                        showingExecutionScreen = true
                         Task {
                             isExecuting = true
                             executionError = nil
@@ -895,7 +897,7 @@ private struct APKDetailSheet: View {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
                                 Text("Runtime report").font(.system(size: 13, weight: .bold))
                             }
-                            Text("Status: \(res.statusCode == 0 ? "Running" : "Finished") · Lifecycle: \(res.lifecycleState)")
+                            Text("Launch result: \(res.statusCode == 0 ? "Lifecycle reached" : "Finished") · Lifecycle: \(res.lifecycleState)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)
                             Text("Classes: \(res.totalClassesLoaded) · Instructions: \(res.instructionsExecuted) · Missing APIs: \(res.missingApisCount)")
@@ -927,8 +929,152 @@ private struct APKDetailSheet: View {
             }
         }
         .background(canvas.ignoresSafeArea())
-        
+        .overlay {
+            if showingExecutionScreen {
+                executionScreen
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+        }
         .onAppear(perform: loadPreviousSession)
+    }
+
+    private var executionScreen: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    APKIconView(data: item.iconData, accent: accent, size: 46)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.displayName)
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text("STRIDE · ANDROID EXECUTION")
+                            .font(.system(size: 9, weight: .heavy))
+                            .kerning(1.1)
+                            .foregroundStyle(.white.opacity(0.48))
+                    }
+                    Spacer()
+                    Button {
+                        showingExecutionScreen = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.1), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.bottom, 24)
+
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(isExecuting ? Color.orange : (executionError == nil && executionResult != nil ? Color.green : Color.red))
+                        .frame(width: 8, height: 8)
+                    Text(isExecuting ? "STARTING RUNTIME" : (executionError == nil && executionResult != nil ? "LAUNCH ATTEMPT COMPLETE" : (executionError != nil ? "LAUNCH FAILED" : "READY")))
+                        .font(.system(size: 10, weight: .heavy))
+                        .kerning(1.2)
+                        .foregroundStyle(.white.opacity(0.78))
+                    Spacer()
+                    Text("\(sessionLogLines.count) EVENTS")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.42))
+                }
+                .padding(.bottom, 12)
+
+                if let result = executionResult {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("ACTIVITY LIFECYCLE")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.45))
+                        Text(result.lifecycleState)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("\(result.instructionsExecuted) instructions · \(result.totalClassesLoaded) classes · \(result.missingApisCount) missing APIs")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.55))
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.bottom, 18)
+                } else if let error = executionError {
+                    Text(error)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.red.opacity(0.95))
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.bottom, 18)
+                } else if isExecuting {
+                    HStack(spacing: 10) {
+                        ProgressView().tint(.white)
+                        Text("Preparing APK and starting runtime…")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(.bottom, 18)
+                }
+
+                Text("LIVE SESSION LOG")
+                    .font(.system(size: 9, weight: .heavy))
+                    .kerning(1.2)
+                    .foregroundStyle(.white.opacity(0.48))
+                    .padding(.bottom, 9)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 7) {
+                        ForEach(Array(sessionLogLines.enumerated()), id: \.offset) { _, line in
+                            Text(line)
+                                .font(.system(size: 10, weight: .regular, design: .monospaced))
+                                .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red : Color.white.opacity(0.76))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(13)
+                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+
+                HStack(spacing: 12) {
+                    Button {
+                        showingExecutionScreen = false
+                    } label: {
+                        Text("BACK TO DETAILS")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+                    }
+                    .buttonStyle(.plain)
+                    if logExportURL != nil {
+                        Button {
+                            showingLogShare = true
+                        } label: {
+                            Label("EXPORT TXT", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                                .background(.white, in: RoundedRectangle(cornerRadius: 11))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 14)
+            }
+            .padding(20)
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingLogShare) {
+            if let logExportURL {
+                ActivityViewController(activityItems: [logExportURL])
+            }
+        }
     }
 
     private func logFileURL() -> URL {
