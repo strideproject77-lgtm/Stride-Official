@@ -23,6 +23,7 @@ pub mod activity_manager;
 pub mod service_manager;
 pub mod package;
 pub mod telemetry;
+pub mod view;
 #[cfg(test)]
 pub mod compatibility_tests;
 

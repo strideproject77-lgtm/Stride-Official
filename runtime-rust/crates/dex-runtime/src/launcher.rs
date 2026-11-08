@@ -179,6 +179,8 @@ impl AndroidRuntime {
         jni.register("Landroid/util/Log;", "e", "(Ljava/lang/String;Ljava/lang/String;)I", log_handler);
         jni.register("Landroid/util/Log;", "w", "(Ljava/lang/String;Ljava/lang/String;)I", log_handler);
         jni.register("Landroid/util/Log;", "v", "(Ljava/lang/String;Ljava/lang/String;)I", log_handler);
+
+        crate::view::register_core_view_methods(jni);
     }
 
     /// Loads one or more DEX binaries into the runtime.
