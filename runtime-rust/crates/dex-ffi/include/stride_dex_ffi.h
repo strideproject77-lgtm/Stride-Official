@@ -112,6 +112,16 @@ int32_t stride_runtime_gl_clear(
 );
 
 /*
+ * Export a UTF-8 diagnostics report. Returns required capacity including NUL.
+ * Call with out=NULL/capacity=0 to query size, then provide a buffer.
+ */
+size_t stride_runtime_diagnostics_export(
+    const AndroidRuntime *runtime,
+    char *out,
+    size_t capacity
+);
+
+/*
  * Destroy the runtime instance and free its resources.
  */
 void stride_runtime_destroy(AndroidRuntime *runtime);
