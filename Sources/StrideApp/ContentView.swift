@@ -687,8 +687,8 @@ private struct APKGridCard: View {
 }
 
 private struct APKDetailSheet: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var showingLogShare = false
+    @Environment(\.dismiss) private var dismiss
     let item: ImportedAPK
     @State private var isExecuting = false
     @State private var executionResult: APKExecutionResult?
