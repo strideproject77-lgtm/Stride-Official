@@ -19,6 +19,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources/StrideApp
+      - path: Assets.xcassets
     dependencies:
       - package: ZIPFoundation
         product: ZIPFoundation
@@ -28,6 +29,9 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride
         INFOPLIST_KEY_CFBundleDisplayName: Stride
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.utilities
         INFOPLIST_KEY_UIFileSharingEnabled: YES
         INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
