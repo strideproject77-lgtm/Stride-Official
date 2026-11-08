@@ -279,10 +279,19 @@ struct ContentView: View {
     private func handleImport(_ result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            do {
-                for url in urls { try library.importPackage(from: url) }
-            } catch {
-                importError = error.localizedDescription
+            var failures: [String] = []
+            for url in urls {
+                do {
+                    try library.importPackage(from: url)
+                } catch {
+                    failures.append("\(url.lastPathComponent): \(error.localizedDescription)")
+                    StrideDiagnostics.shared.record(.warning, stage: "BATCH_IMPORT",
+                        code: "ITEM_SKIPPED", "\(url.lastPathComponent) failed; continuing with remaining selected APKs",
+                        recovery: "Skipped only this file; next selected APK will still be inspected")
+                }
+            }
+            if !failures.isEmpty {
+                importError = failures.joined(separator: "\\n")
             }
         case .failure(let error):
             importError = error.localizedDescription
