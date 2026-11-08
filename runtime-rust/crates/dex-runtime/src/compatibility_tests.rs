@@ -36,7 +36,7 @@ mod tests {
         prefs.put_int("high_score", 95000);
         prefs.commit();
 
-        let loaded_prefs = runtime.environment.get_shared_preferences("user_settings");
+        let loaded_prefs = runtime.environment.get_preferences("user_settings");
         assert_eq!(loaded_prefs.get_string_value("username", ""), "player1");
         assert_eq!(loaded_prefs.get_int("high_score", 0), 95000);
 
@@ -107,6 +107,8 @@ mod tests {
         );
         assert!(stopped);
         assert_eq!(runtime.service_manager.running_services_count(), 0);
+
+        drop(vm);
 
         // 7. Validate Performance Telemetry & ANR Watchdog
         runtime.telemetry.record_frame(16.6);
