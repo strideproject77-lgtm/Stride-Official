@@ -87,13 +87,20 @@ struct ContentView: View {
             Spacer()
             if selectedTab == 1 {
                 Button { showingImporter = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(.black)
-                        .frame(width: 38, height: 38)
-                        .background(accent, in: Circle())
+                    Group {
+                        if isImporting {
+                            ProgressView().tint(.black)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 15, weight: .bold))
+                        }
+                    }
+                    .foregroundStyle(.black)
+                    .frame(width: 38, height: 38)
+                    .background(accent, in: Circle())
                 }
                 .buttonStyle(.plain)
+                .disabled(isImporting)
                 .accessibilityLabel("Import APK")
             } else {
                 HStack(spacing: 6) {
@@ -528,16 +535,20 @@ struct ContentView: View {
         case .success(let urls):
             guard let url = urls.first else { return }
             isImporting = true
-            do {
-                try library.importPackage(from: url)
-                selectedTab = 1
-                importAlertTitle = "Import complete"
-                importError = "\(url.lastPathComponent) was added to your Stride library."
-            } catch {
-                importAlertTitle = "Import failed"
-                importError = "\(url.lastPathComponent): \(error.localizedDescription)"
+            Task { @MainActor in
+                // Give SwiftUI a chance to show the in-progress state before archive inspection.
+                await Task.yield()
+                do {
+                    try library.importPackage(from: url)
+                    selectedTab = 1
+                    importAlertTitle = "Import complete"
+                    importError = "\(url.lastPathComponent) was added to your Stride library."
+                } catch {
+                    importAlertTitle = "Import failed"
+                    importError = "\(url.lastPathComponent): \(error.localizedDescription)"
+                }
+                isImporting = false
             }
-            isImporting = false
         case .failure(let error):
             importAlertTitle = "Import failed"
             importError = error.localizedDescription
