@@ -28,6 +28,33 @@ final class APKLibraryStore: ObservableObject {
     }
 
     func importPackage(from sourceURL: URL) throws {
+        let destination = try copyPackageToLibrary(from: sourceURL)
+        do {
+            let report = try inspector.inspect(destination)
+            packages.removeAll { $0.fileURL == destination }
+            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+    }
+
+    /// Copies the provider document, then scans the archive away from the UI thread.
+    func importPackageAsync(from sourceURL: URL) async throws {
+        let destination = try copyPackageToLibrary(from: sourceURL)
+        do {
+            let report = try await Task.detached(priority: .userInitiated) {
+                try inspector.inspect(destination)
+            }.value
+            packages.removeAll { $0.fileURL == destination }
+            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
+        }
+    }
+
+    private func copyPackageToLibrary(from sourceURL: URL) throws -> URL {
         guard sourceURL.pathExtension.lowercased() == "apk" else {
             throw APKLibraryImportError.unsupportedFile
         }
@@ -39,13 +66,10 @@ final class APKLibraryStore: ObservableObject {
 
         let folder = try libraryFolder()
         let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-
-        // File-provider URLs (iCloud Drive / On My iPhone / third-party providers)
-        // must be coordinated before copying. A direct copyItem can fail while the
-        // provider is still materializing the selected document.
         let coordinator = NSFileCoordinator(filePresenter: nil)
         var coordinationError: NSError?
         var copyError: Error?
+
         coordinator.coordinate(readingItemAt: sourceURL, options: [], error: &coordinationError) { readableURL in
             do {
                 guard fileManager.fileExists(atPath: readableURL.path) else {
@@ -59,15 +83,10 @@ final class APKLibraryStore: ObservableObject {
 
         if let coordinationError { throw coordinationError }
         if let copyError { throw copyError }
-
-        do {
-            let report = try inspector.inspect(destination)
-            packages.removeAll { $0.fileURL == destination }
-            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
-        } catch {
-            try? fileManager.removeItem(at: destination)
-            throw error
+        guard fileManager.fileExists(atPath: destination.path) else {
+            throw APKLibraryImportError.unreadableSource
         }
+        return destination
     }
 
     private func reload() {
