@@ -180,7 +180,11 @@ impl AndroidRuntime {
         let count = match self.class_loader.load_dex(dex_data) {
             Ok(count) => count,
             Err(error) => {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "DexLoader", "DEX load failed", Some(&error));
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::RuntimeError, "DexLoader", "DEX_LOAD_FAILED",
+                    "DEX loading failed", Some(&error),
+                    Some("Check DEX header, checksum, map offsets and class-data/code-item bounds"),
+                );
                 return Err(error);
             }
         };
@@ -201,7 +205,11 @@ impl AndroidRuntime {
         let module = match self.native_linker.load_library(soname, elf_bytes) {
             Ok(module) => module,
             Err(error) => {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "NativeLinker", "Native library load failed", Some(&error));
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::RuntimeError, "NativeLinker", "ELF_LOAD_FAILED",
+                    "Native library inspection or load planning failed", Some(&error),
+                    Some("Verify ELF class, machine ABI, program headers, dynamic table and dependencies"),
+                );
                 return Err(error);
             }
         };
@@ -225,7 +233,11 @@ impl AndroidRuntime {
         let manifest = match parse_manifest(manifest_bytes) {
             Ok(m) => m,
             Err(e) => {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Manifest", "Manifest parsing failed", Some(&format!("{:?}", e)));
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::RuntimeError, "Manifest", "AXML_PARSE_FAILED",
+                    "Binary Android manifest parsing failed", Some(&format!("{:?}", e)),
+                    Some("Inspect the reported AXML chunk/string-pool field; compare it with the real manifest fixture"),
+                );
                 return LaunchReport {
                     package_name: self.environment.package_name.clone(),
                     launcher_activity: String::new(),
@@ -262,11 +274,15 @@ impl AndroidRuntime {
             });
         }
 
-        self.diagnostics.record(DiagnosticSeverity::Info, "Manifest", "Manifest parsed", Some(&format!("package={}, activities={}, services={}", self.environment.package_name, manifest.components.iter().filter(|c| c.kind == "activity").count(), manifest.components.iter().filter(|c| c.kind == "service").count())));
         let activity_class_raw = match manifest.launcher_activity {
             Some(a) => a,
             None => {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Launcher", "Launcher activity missing", Some("Manifest contains no MAIN/LAUNCHER activity"));
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::RuntimeError, "Launcher", "LAUNCHER_ACTIVITY_MISSING",
+                    "Manifest contains no MAIN/LAUNCHER activity",
+                    Some("No launchable activity was extracted from AndroidManifest.xml"),
+                    Some("Check the activity intent-filter for MAIN action and LAUNCHER category"),
+                );
                 return LaunchReport {
                     package_name: self.environment.package_name.clone(),
                     launcher_activity: String::new(),
@@ -296,7 +312,11 @@ impl AndroidRuntime {
             &mut self.jni,
             &[],
         ) {
-            self.diagnostics.record(DiagnosticSeverity::RuntimeError, "ClassInit", "Activity class initialization failed", Some(&error));
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::RuntimeError, "ClassInitializer", "CLASS_INITIALIZATION_FAILED",
+                "Launcher class static initialization failed", Some(&error),
+                Some("Inspect <clinit>, static field references and unresolved superclass dependencies"),
+            );
             return LaunchReport {
                 package_name: self.environment.package_name.clone(),
                 launcher_activity: activity_descriptor,
@@ -314,10 +334,36 @@ impl AndroidRuntime {
         // Allocate Activity object
         let activity_obj = match self.heap.allocate_instance(&activity_descriptor) {
             Ok(id) => id,
-            Err(error) => {
-                self.diagnostics.record(DiagnosticSeverity::Warning, "Heap", "Activity allocation used framework fallback", Some(&format!("{:?}", error)));
-                // If the class is not defined in loaded DEX, allocate generic Activity instance
-                self.heap.allocate_instance("Landroid/app/Activity;").unwrap_or(1)
+            Err(primary_error) => {
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::Warning, "Heap", "ACTIVITY_ALLOCATION_FALLBACK",
+                    "Could not allocate the app Activity class; trying generic Activity fallback",
+                    Some(&format!("{:?}", primary_error)),
+                    Some("Check managed heap usage and whether the Activity class was linked"),
+                );
+                match self.heap.allocate_instance("Landroid/app/Activity;") {
+                    Ok(id) => id,
+                    Err(fallback_error) => {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::FatalCrash, "Heap", "ACTIVITY_ALLOCATION_FAILED",
+                            "Activity allocation failed, including the generic fallback",
+                            Some(&format!("primary={:?}; fallback={:?}", primary_error, fallback_error)),
+                            Some("Stop this launch session; inspect heap limit, allocation accounting and object growth"),
+                        );
+                        return LaunchReport {
+                            package_name: self.environment.package_name.clone(),
+                            launcher_activity: activity_descriptor,
+                            lifecycle_state: ActivityLifecycleState::NotStarted,
+                            total_classes_loaded: self.class_loader.classes.len(),
+                            instructions_executed: 0,
+                            status: LaunchStatus::UncaughtException {
+                                class: "OutOfMemoryError".into(),
+                                message: Some(format!("{:?}", fallback_error)),
+                            },
+                            diagnostics_summary: self.diagnostics.format_summary(),
+                        };
+                    }
+                }
             }
         };
 
@@ -334,9 +380,6 @@ impl AndroidRuntime {
             "(Landroid/os/Bundle;)V",
         );
 
-        if on_create_mid.is_none() {
-            self.diagnostics.record(DiagnosticSeverity::Warning, "Lifecycle", "onCreate(Bundle) method not found", Some(&activity_descriptor));
-        }
         if let Some(mid) = on_create_mid {
             if let Ok(mid16) = u16::try_from(mid) {
                 let method_map = self.class_loader.export_method_codes();
@@ -353,9 +396,20 @@ impl AndroidRuntime {
                 match vm.execute_method(mid16, &args, step_budget) {
                     Ok(report) => {
                         total_steps += report.steps_executed;
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info, "ART", "ONCREATE_EXECUTED",
+                            "Activity onCreate execution returned",
+                            Some(&format!("steps={} stop={:?}", report.steps_executed, report.stop_reason)),
+                            None,
+                        );
                         match report.stop_reason {
                             ExecutionStopReason::UncaughtException(ex) => {
-                                self.diagnostics.record(DiagnosticSeverity::FatalCrash, "Interpreter", "Uncaught exception in onCreate", Some(&format!("{}: {:?}", ex.class_descriptor, ex.message)));
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONCREATE_UNCAUGHT_EXCEPTION",
+                                    "Activity onCreate terminated with an uncaught exception",
+                                    Some(&format!("{:?}", ex)),
+                                    Some("Inspect the exception class, message and captured DEX stack trace"),
+                                );
                                 return LaunchReport {
                                     package_name: self.environment.package_name.clone(),
                                     launcher_activity: activity_descriptor,
@@ -370,7 +424,12 @@ impl AndroidRuntime {
                                 };
                             }
                             ExecutionStopReason::StepLimitExceeded => {
-                                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Interpreter", "Instruction budget exceeded in onCreate", Some(&format!("budget={}", step_budget)));
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONCREATE_STEP_LIMIT",
+                                    "Activity onCreate exceeded the instruction budget",
+                                    Some(&format!("executed={} budget={}", report.steps_executed, step_budget)),
+                                    Some("Inspect the current method for an infinite loop or unusually expensive initialization before raising the budget"),
+                                );
                                 return LaunchReport {
                                     package_name: self.environment.package_name.clone(),
                                     launcher_activity: activity_descriptor,
@@ -388,7 +447,12 @@ impl AndroidRuntime {
                         }
                     }
                     Err(error) => {
-                        self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Interpreter", "onCreate execution failed", Some(&error));
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError, "ART", "ONCREATE_INTERPRETER_ERROR",
+                            "ART interpreter failed while executing Activity onCreate",
+                            Some(&format!("method_id={} error={}", mid, error)),
+                            Some("Inspect the failing opcode, register indices, method reference mapping and DEX code-item bounds"),
+                        );
                         return LaunchReport {
                             package_name: self.environment.package_name.clone(),
                             launcher_activity: activity_descriptor,
@@ -403,8 +467,6 @@ impl AndroidRuntime {
                         };
                     }
                 }
-            } else {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Lifecycle", "onCreate method index exceeds runtime limit", Some(&mid.to_string()));
             }
         }
 
@@ -416,9 +478,6 @@ impl AndroidRuntime {
 
         // Check for onResume()V
         let on_resume_mid = self.class_loader.find_method(&activity_descriptor, "onResume", "()V");
-        if on_resume_mid.is_none() {
-            self.diagnostics.record(DiagnosticSeverity::Warning, "Lifecycle", "onResume() method not found", Some(&activity_descriptor));
-        }
         if let Some(mid) = on_resume_mid {
             if let Ok(mid16) = u16::try_from(mid) {
                 let method_map = self.class_loader.export_method_codes();
@@ -434,9 +493,20 @@ impl AndroidRuntime {
                 match vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
                     Ok(report) => {
                         total_steps += report.steps_executed;
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info, "ART", "ONRESUME_EXECUTED",
+                            "Activity onResume execution returned",
+                            Some(&format!("steps={} stop={:?}", report.steps_executed, report.stop_reason)),
+                            None,
+                        );
                         match report.stop_reason {
                             ExecutionStopReason::UncaughtException(ex) => {
-                                self.diagnostics.record(DiagnosticSeverity::FatalCrash, "Interpreter", "Uncaught exception in onResume", Some(&format!("{}: {:?}", ex.class_descriptor, ex.message)));
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONRESUME_UNCAUGHT_EXCEPTION",
+                                    "Activity onResume terminated with an uncaught exception",
+                                    Some(&format!("{:?}", ex)),
+                                    Some("Inspect the exception class, message and captured DEX stack trace"),
+                                );
                                 return LaunchReport {
                                     package_name: self.environment.package_name.clone(),
                                     launcher_activity: activity_descriptor,
@@ -451,7 +521,12 @@ impl AndroidRuntime {
                                 };
                             }
                             ExecutionStopReason::StepLimitExceeded => {
-                                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Interpreter", "Instruction budget exceeded in onResume", Some(&format!("executed={}, budget={}", total_steps, step_budget)));
+                                self.diagnostics.record_detailed(
+                                    DiagnosticSeverity::RuntimeError, "ART", "ONRESUME_STEP_LIMIT",
+                                    "Activity onResume exceeded the remaining instruction budget",
+                                    Some(&format!("executed={} remaining={}", report.steps_executed, step_budget.saturating_sub(total_steps))),
+                                    Some("Inspect onResume for repeated work or a loop; do not increase the budget without confirming progress"),
+                                );
                                 return LaunchReport {
                                     package_name: self.environment.package_name.clone(),
                                     launcher_activity: activity_descriptor,
@@ -469,7 +544,12 @@ impl AndroidRuntime {
                         }
                     }
                     Err(error) => {
-                        self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Interpreter", "onResume execution failed", Some(&error));
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError, "ART", "ONRESUME_INTERPRETER_ERROR",
+                            "ART interpreter failed while executing Activity onResume",
+                            Some(&format!("method_id={} error={}", mid, error)),
+                            Some("Inspect the failing opcode, register indices, method reference mapping and DEX code-item bounds"),
+                        );
                         return LaunchReport {
                             package_name: self.environment.package_name.clone(),
                             launcher_activity: activity_descriptor,
@@ -484,12 +564,21 @@ impl AndroidRuntime {
                         };
                     }
                 }
-            } else {
-                self.diagnostics.record(DiagnosticSeverity::RuntimeError, "Lifecycle", "onResume method index exceeds runtime limit", Some(&mid.to_string()));
             }
         }
 
-        self.diagnostics.record(DiagnosticSeverity::Info, "Interpreter", "Lifecycle dispatch completed", Some(&format!("instructions={}, heap_bytes={}/{}", total_steps, self.heap.allocated_bytes(), self.heap.max_heap_bytes())));
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Info, "Launcher", "LAUNCH_PIPELINE_RETURNED",
+            "APK launch pipeline reached the resumed lifecycle state",
+            Some(&format!(
+                "instructions={} classes={} heap_bytes={} missing_api_events={}",
+                total_steps,
+                self.class_loader.classes.len(),
+                self.heap.allocated_bytes(),
+                self.diagnostics.count_by_severity(DiagnosticSeverity::MissingApi)
+            )),
+            Some("This confirms lifecycle dispatch only; it does not prove a persistent app session or rendered frames"),
+        );
         LaunchReport {
             package_name: self.environment.package_name.clone(),
             launcher_activity: activity_descriptor,

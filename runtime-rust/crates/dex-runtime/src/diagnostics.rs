@@ -37,8 +37,10 @@ pub struct DiagnosticRecord {
     pub timestamp_ms: u128,
     pub severity: DiagnosticSeverity,
     pub component: String,
+    pub code: Option<String>,
     pub message: String,
     pub details: Option<String>,
+    pub recovery: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -79,6 +81,32 @@ impl RuntimeDiagnostics {
     }
 
     pub fn record(&self, severity: DiagnosticSeverity, component: &str, message: &str, details: Option<&str>) {
+        self.record_internal(severity, component, None, message, details, None);
+    }
+
+    /// Records a classified fault with a stable code and a concrete recovery hint.
+    /// The extra strings are only formatted during export, not on execution hot paths.
+    pub fn record_detailed(
+        &self,
+        severity: DiagnosticSeverity,
+        component: &str,
+        code: &str,
+        message: &str,
+        details: Option<&str>,
+        recovery: Option<&str>,
+    ) {
+        self.record_internal(severity, component, Some(code), message, details, recovery);
+    }
+
+    fn record_internal(
+        &self,
+        severity: DiagnosticSeverity,
+        component: &str,
+        code: Option<&str>,
+        message: &str,
+        details: Option<&str>,
+        recovery: Option<&str>,
+    ) {
         let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -95,8 +123,10 @@ impl RuntimeDiagnostics {
                 timestamp_ms,
                 severity,
                 component: component.to_owned(),
+                code: code.map(str::to_owned),
                 message: message.to_owned(),
                 details: details.map(str::to_owned),
+                recovery: recovery.map(str::to_owned),
             });
         }
     }
@@ -193,12 +223,19 @@ impl RuntimeDiagnostics {
         output.push_str(&format!("Retained events: {}\nDropped older events: {}\n", records.len(), dropped));
         output.push_str("\nEVENT TIMELINE\n");
         for event in records {
+            let code = event.code.as_deref()
+                .map(|value| format!(" [{}]", value))
+                .unwrap_or_default();
             output.push_str(&format!(
-                "[{}] #{} [{}] {}: {}",
-                event.timestamp_ms, event.sequence, event.severity.as_str(), event.component, event.message
+                "[{}] #{} [{}] {}{}: {}",
+                event.timestamp_ms, event.sequence, event.severity.as_str(),
+                event.component, code, event.message
             ));
             if let Some(details) = event.details {
                 output.push_str(&format!(" | {}", details));
+            }
+            if let Some(recovery) = event.recovery {
+                output.push_str(&format!(" | Recovery: {}", recovery));
             }
             output.push('\n');
         }
@@ -264,4 +301,21 @@ mod tests {
         assert!(events[0].timestamp_ms > 0);
         assert_eq!(events[1].sequence, events[0].sequence + 1);
     }
+    #[test]
+    fn detailed_faults_export_code_details_and_recovery() {
+        let diagnostics = RuntimeDiagnostics::new();
+        diagnostics.record_detailed(
+            DiagnosticSeverity::RuntimeError,
+            "Manifest",
+            "AXML_STRING_OFFSET_INVALID",
+            "Manifest parsing failed",
+            Some("string index 7 points outside the pool"),
+            Some("Verify string-pool offsets against the containing chunk"),
+        );
+        let report = diagnostics.export_text();
+        assert!(report.contains("[Manifest [AXML_STRING_OFFSET_INVALID]: Manifest parsing failed"));
+        assert!(report.contains("string index 7 points outside the pool"));
+        assert!(report.contains("Recovery: Verify string-pool offsets"));
+    }
+
 }
