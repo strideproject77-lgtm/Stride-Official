@@ -313,7 +313,7 @@ mod tests {
             Some("Verify string-pool offsets against the containing chunk"),
         );
         let report = diagnostics.export_text();
-        assert!(report.contains("[Manifest [AXML_STRING_OFFSET_INVALID]: Manifest parsing failed"));
+        assert!(report.contains("Manifest [AXML_STRING_OFFSET_INVALID]: Manifest parsing failed"));
         assert!(report.contains("string index 7 points outside the pool"));
         assert!(report.contains("Recovery: Verify string-pool offsets"));
     }
