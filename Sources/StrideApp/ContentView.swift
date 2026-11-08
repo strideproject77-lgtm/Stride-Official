@@ -506,6 +506,9 @@ private struct APKDetailSheet: View {
                             Text("Classes: \(res.totalClassesLoaded) · Instructions: \(res.instructionsExecuted) · Missing APIs: \(res.missingApisCount)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)
+                            Text("Performance: \(String(format: "%.1f", res.averageFps)) FPS · RAM: \(res.heapAllocatedBytes / 1024) KB")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(muted)
                         }
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)

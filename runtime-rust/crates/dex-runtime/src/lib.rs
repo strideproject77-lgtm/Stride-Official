@@ -22,6 +22,7 @@ pub mod gl;
 pub mod activity_manager;
 pub mod service_manager;
 pub mod package;
+pub mod telemetry;
 
 pub use heap::{ManagedHeap, HeapObject, HeapError, InstanceObject, ArrayObject, StringObject, GcReport};
 pub use types::{Value, RegisterFile};
@@ -47,6 +48,7 @@ pub use gl::{OpenGlEsEngine, EglContext, EglWindowSurface, GlesState, GL_COLOR_B
 pub use activity_manager::{ActivityManager, ActivityRecord, ActivityTask};
 pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
 pub use package::{XapkBundle, ObbFile};
+pub use telemetry::{PerformanceTelemetry, RuntimeTelemetrySnapshot, AnrWatchdog};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{

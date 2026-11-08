@@ -20,7 +20,7 @@ pub struct StrideDexSummary {
 
 /// Execution report returned from the ART runtime launch pipeline.
 #[repr(C)]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct StrideLaunchReport {
     /// 0: running, 1: finished normally, 2: uncaught exception, 3: activity not found, 4: manifest error
     pub status_code: i32,
@@ -29,6 +29,8 @@ pub struct StrideLaunchReport {
     /// 0: not started, 1: created, 2: started, 3: resumed, 4: paused, 5: stopped, 6: destroyed
     pub lifecycle_state: i32,
     pub missing_apis_count: u32,
+    pub average_fps: f32,
+    pub heap_allocated_bytes: u32,
 }
 
 /// Inspect one DEX buffer and return the total class and encoded method counts.
@@ -176,6 +178,8 @@ pub unsafe extern "C" fn stride_runtime_launch_apk(
         instructions_executed: report.instructions_executed as u32,
         lifecycle_state,
         missing_apis_count,
+        average_fps: rt.telemetry.current_fps(),
+        heap_allocated_bytes: rt.heap.allocated_bytes() as u32,
     };
 
     unsafe { out_report.write(summary) };
@@ -215,6 +219,20 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
 
     rt.input_queue.enqueue_motion(event);
     0
+}
+
+/// Records a completed frame time and returns the updated rolling FPS.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_record_frame(
+    runtime: *mut AndroidRuntime,
+    duration_ms: f32,
+) -> f32 {
+    if runtime.is_null() {
+        return 0.0;
+    }
+    let rt = unsafe { &mut *runtime };
+    rt.telemetry.record_frame(duration_ms);
+    rt.telemetry.current_fps()
 }
 
 /// Swaps the active OpenGL ES / EGL buffer to the runtime surface.

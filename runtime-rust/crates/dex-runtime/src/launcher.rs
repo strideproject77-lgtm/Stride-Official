@@ -19,6 +19,7 @@ use crate::bionic::NativeLinker;
 use crate::gl::OpenGlEsEngine;
 use crate::activity_manager::ActivityManager;
 use crate::service_manager::ServiceManager;
+use crate::telemetry::PerformanceTelemetry;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,6 +60,7 @@ pub struct AndroidRuntime {
     pub gl_engine: OpenGlEsEngine,
     pub activity_manager: ActivityManager,
     pub service_manager: ServiceManager,
+    pub telemetry: PerformanceTelemetry,
 }
 
 impl AndroidRuntime {
@@ -84,6 +86,7 @@ impl AndroidRuntime {
             gl_engine: OpenGlEsEngine::new(),
             activity_manager: ActivityManager::new(),
             service_manager: ServiceManager::new(),
+            telemetry: PerformanceTelemetry::default(),
         }
     }
 

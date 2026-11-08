@@ -16,6 +16,11 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 
 ## Completed
 
+- 2026-11-08: **Performance Telemetry, FPS Tracking, ANR Watchdog & Swift Metrics (	elemetry.rs, ExecutionBackend.swift, ContentView.swift)**:
+  - Implemented PerformanceTelemetry with rolling 60-frame FPS estimation and 1% low frame-time calculation (one_percent_low_fps).
+  - Implemented Android 5-second AnrWatchdog tracking main-thread dispatch duration and flagging application hangs.
+  - Exposed stride_runtime_record_frame in C FFI, expanded StrideLaunchReport with verage_fps and heap_allocated_bytes.
+  - Updated StrideArtExecutionBackend and ContentView.swift in the iOS app UI to report live FPS and managed heap RAM usage alongside lifecycle and opcode execution statistics.
 - 2026-11-08: **ActivityManager Task Backstack, ServiceManager & XAPK Package Handler (ctivity_manager.rs, service_manager.rs, package.rs)**:
   - Implemented ActivityManager with multi-task support, Activity backstack pushing and popping, transition state machines (onCreate -> onStart -> onResume / onPause -> onStop -> onDestroy), and hardware back key dispatch (handle_back_pressed).
   - Implemented ServiceManager managing background/foreground Android Services (ServiceRecord), startService lifecycle (onCreate, onStartCommand), stop_service (onDestroy), and foreground notification promotion (start_foreground).

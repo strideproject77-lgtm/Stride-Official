@@ -19,6 +19,8 @@ typedef struct StrideLaunchReport {
     uint32_t instructions_executed;
     int32_t lifecycle_state;
     uint32_t missing_apis_count;
+    float average_fps;
+    uint32_t heap_allocated_bytes;
 } StrideLaunchReport;
 
 typedef struct AndroidRuntime AndroidRuntime;
@@ -76,6 +78,11 @@ int32_t stride_runtime_dispatch_touch(
     float x,
     float y
 );
+
+/*
+ * Record a completed frame duration (ms) and return current rolling FPS.
+ */
+float stride_runtime_record_frame(AndroidRuntime *runtime, float duration_ms);
 
 /*
  * Swap active OpenGL ES buffers into presentation surface.
