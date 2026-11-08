@@ -43,8 +43,9 @@ final class APKLibraryStore: ObservableObject {
     func importPackageAsync(from sourceURL: URL) async throws {
         let destination = try copyPackageToLibrary(from: sourceURL)
         do {
+            let archiveInspector = inspector
             let report = try await Task.detached(priority: .userInitiated) {
-                try inspector.inspect(destination)
+                try archiveInspector.inspect(destination)
             }.value
             packages.removeAll { $0.fileURL == destination }
             packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
