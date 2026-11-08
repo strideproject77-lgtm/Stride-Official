@@ -42,7 +42,12 @@ struct APKArchiveInspector: Sendable {
     private let maxIconEntryBytes: UInt64 = 8 * 1_024 * 1_024
 
     func inspect(_ url: URL) throws -> APKInspection {
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "ARCHIVE", code: "SCAN_START",
+            message: "Inspecting APK archive: \(url.lastPathComponent)")
         guard let archive = Archive(url: url, accessMode: .read) else {
+            StrideDiagnostics.recordAsync(severity: "FATAL", stage: "ARCHIVE", code: "ZIP_OPEN_FAILED",
+                message: "Selected file is not a readable ZIP/APK archive",
+                recovery: "Keep the original file and verify that it is a complete APK")
             throw APKInspectionError.unreadableArchive
         }
 
@@ -52,9 +57,12 @@ struct APKArchiveInspector: Sendable {
         var iconEntries: [Entry] = []
         var abis = Set<String>()
         var hasResources = false
+        var seenPaths = Set<String>()
+        var duplicatePaths = Set<String>()
 
         for entry in archive {
             count += 1
+            if !seenPaths.insert(entry.path).inserted { duplicatePaths.insert(entry.path) }
             if entry.path == "AndroidManifest.xml" { hasManifest = true }
             if entry.path == "resources.arsc" { hasResources = true }
             if Self.isLauncherIconCandidate(entry.path) { iconEntries.append(entry) }
@@ -69,7 +77,45 @@ struct APKArchiveInspector: Sendable {
             }
         }
 
-        guard hasManifest else { throw APKInspectionError.missingManifest }
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "ARCHIVE", code: "ENTRY_SCAN",
+            message: "Scanned \(count) entries; DEX=\(dexEntries.count); native ABIs=\(abis.sorted().joined(separator: ", "))")
+        if !duplicatePaths.isEmpty {
+            StrideDiagnostics.recordAsync(severity: "WARN", stage: "ARCHIVE", code: "DUPLICATE_ENTRIES",
+                message: "Duplicate ZIP paths: \(duplicatePaths.sorted().joined(separator: ", "))",
+                recovery: "Treat duplicate-path packages as ambiguous; do not silently select one copy")
+        }
+        if !hasManifest {
+            StrideDiagnostics.recordAsync(severity: "ERROR", stage: "MANIFEST", code: "MANIFEST_MISSING",
+                message: "AndroidManifest.xml is missing",
+                recovery: "Manifest-based execution cannot continue; independent archive findings were still collected")
+            throw APKInspectionError.missingManifest
+        }
+        if dexEntries.isEmpty {
+            StrideDiagnostics.recordAsync(severity: "WARN", stage: "DEX", code: "NO_DEX_FOUND",
+                message: "No classes.dex or secondary DEX file was found",
+                recovery: "This may be a native-only package; inspect native libraries separately")
+        } else {
+            let paths = dexEntries.map(\.path)
+            let gaps = APKArchiveInspector.multidexSequenceGaps(paths)
+            StrideDiagnostics.recordAsync(severity: "INFO", stage: "DEX", code: "DEX_INVENTORY",
+                message: "Found DEX entries: \(paths.sorted().joined(separator: ", "))")
+            if !gaps.isEmpty {
+                StrideDiagnostics.recordAsync(severity: "WARN", stage: "DEX", code: "MULTIDEX_GAP",
+                    message: "Potential multidex numbering gaps: \(gaps.joined(separator: ", "))",
+                    recovery: "Verify split/multidex packaging before attempting execution")
+            }
+        }
+        if !hasResources {
+            StrideDiagnostics.recordAsync(severity: "WARN", stage: "RESOURCES", code: "RESOURCE_TABLE_MISSING",
+                message: "resources.arsc is absent; resource-table-dependent features may be unavailable")
+        }
+        if abis.isEmpty {
+            StrideDiagnostics.recordAsync(severity: "INFO", stage: "NATIVE", code: "NO_NATIVE_LIBRARIES",
+                message: "No native .so libraries were found")
+        } else {
+            StrideDiagnostics.recordAsync(severity: "INFO", stage: "NATIVE", code: "NATIVE_INVENTORY",
+                message: "Native ABI folders: \(abis.sorted().joined(separator: ", "))")
+        }
 
         var analyzedDexCount = 0
         var skippedDexCount = 0
@@ -121,6 +167,13 @@ struct APKArchiveInspector: Sendable {
         }
         skippedDexCount += max(0, dexEntries.count - min(dexEntries.count, maxDEXFileCount))
 
+        if skippedDexCount > 0 {
+            StrideDiagnostics.recordAsync(severity: "WARN", stage: "DEX", code: "DEX_SCAN_PARTIAL",
+                message: "Analyzed \(analyzedDexCount) DEX file(s); skipped \(skippedDexCount)",
+                recovery: "Check DEX size limits, archive extraction integrity and DEX parser diagnostics")
+        }
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "PREFLIGHT", code: "PREFLIGHT_COMPLETE",
+            message: "APK preflight complete: entries=\(count), DEX=\(dexEntries.count), analyzed=\(analyzedDexCount), classes=\(dexClassCount), methods=\(dexMethodCount)")
         let iconData = extractIcon(from: iconEntries, in: archive)
         return APKInspection(
             archiveEntryCount: count,
@@ -136,6 +189,18 @@ struct APKArchiveInspector: Sendable {
             isValidPackage: true,
             iconData: iconData
         )
+    }
+
+    static func multidexSequenceGaps(_ paths: [String]) -> [String] {
+        let numbers = Set(paths.compactMap { path -> Int? in
+            if path == "classes.dex" { return 1 }
+            guard path.hasPrefix("classes"), path.hasSuffix(".dex") else { return nil }
+            let digits = path.dropFirst("classes".count).dropLast(".dex".count)
+            guard let number = Int(digits), number >= 2 else { return nil }
+            return number
+        })
+        guard let maximum = numbers.max(), maximum > 1 else { return [] }
+        return (2...maximum).filter { !numbers.contains($0) }.map { "classes\\($0).dex" }
     }
 
     /// Extract conventional launcher images while preserving their original artwork.
