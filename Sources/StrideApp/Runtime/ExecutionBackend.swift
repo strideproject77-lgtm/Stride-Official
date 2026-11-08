@@ -74,6 +74,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
     func launch(packageAt url: URL, onLog: @escaping (String) -> Void = { _ in }) async throws -> APKExecutionResult {
         onLog("[INFO] Launch requested for \(url.lastPathComponent)")
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "ARCHIVE", code: "OPEN", message: "Opening APK \(url.lastPathComponent)")
         onLog("[INFO] Opening APK archive")
         guard let archive = Archive(url: url, accessMode: .read) else {
             throw RuntimeExecutionError.unreadableArchive
@@ -105,13 +106,16 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "ARCHIVE", code: "INVENTORY", message: "manifest=\(!manifestData.isEmpty), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
         guard !manifestData.isEmpty else {
+            StrideDiagnostics.recordAsync(severity: "ERROR", stage: "ARCHIVE", code: "MISSING_MANIFEST", message: "AndroidManifest.xml is absent or empty", recovery: "Re-export a valid Android APK.")
             throw RuntimeExecutionError.missingManifest
         }
 
         let packageName = url.deletingPathExtension().lastPathComponent
         onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
+            StrideDiagnostics.recordAsync(severity: "FATAL", stage: "RUNTIME", code: "CREATE_FAILED", message: "Rust runtime creation returned null")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
         defer {
@@ -120,6 +124,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         // A manifest without executable DEX code cannot enter the managed runtime.
         guard !dexDataList.isEmpty else {
+            StrideDiagnostics.recordAsync(severity: "ERROR", stage: "DEX", code: "MISSING_DEX", message: "No classes*.dex entries found in APK")
             throw RuntimeExecutionError.missingDex
         }
 
@@ -170,6 +175,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 }
             }
             guard nativeStatus == 0 else {
+                StrideDiagnostics.recordAsync(severity: "ERROR", stage: "ELF", code: "LOAD_FAILED", message: "\(soName) load failed with status \(nativeStatus)", recovery: "Inspect ELF ABI, relocations and unresolved dependencies in the runtime log.")
                 onLog("[ERROR] Native library \(soName) load failed with status \(nativeStatus)")
                 throw RuntimeExecutionError.nativeLibraryLoadFailed(name: soName, status: nativeStatus)
             }
@@ -202,6 +208,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         guard status == 0 else {
+            StrideDiagnostics.recordAsync(severity: "FATAL", stage: "FFI", code: "LAUNCH_BRIDGE_FAILED", message: "Runtime launch bridge returned status \(status)")
             onLog("[ERROR] Runtime launch bridge failed with status \(status)")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
@@ -219,12 +226,15 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         onLog("[INFO] Runtime returned status=\(report.status_code), lifecycle=\(report.lifecycle_state), classes=\(report.total_classes_loaded), instructions=\(report.instructions_executed), missing APIs=\(report.missing_apis_count)")
         if report.status_code == 2 {
+            StrideDiagnostics.recordAsync(severity: "FATAL", stage: "LIFECYCLE", code: "UNCAUGHT_EXCEPTION", message: "Uncaught Activity lifecycle exception")
             onLog("[CRASH] Runtime reported an uncaught Activity lifecycle exception")
             throw RuntimeExecutionError.uncaughtException("Runtime reported uncaught exception during Activity lifecycle")
         } else if report.status_code == 3 {
+            StrideDiagnostics.recordAsync(severity: "ERROR", stage: "LIFECYCLE", code: "ACTIVITY_NOT_FOUND", message: "Launcher Activity was not found")
             onLog("[ERROR] Launcher Activity was not found")
             throw RuntimeExecutionError.activityNotFound("Launcher Activity not found in DEX")
         } else if report.status_code == 4 {
+            StrideDiagnostics.recordAsync(severity: "ERROR", stage: "MANIFEST", code: "BINARY_XML_FAILED", message: "Binary Android manifest parsing failed", recovery: "Check AXML chunk sizes, string pool offsets and manifest encoding.")
             onLog("[ERROR] Binary Android manifest parsing failed")
             throw RuntimeExecutionError.manifestError("Failed to parse AndroidManifest binary XML")
         }
