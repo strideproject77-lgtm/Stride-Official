@@ -100,7 +100,7 @@ fn parse_pool(bytes: &[u8], start: usize, chunk_size: usize) -> Result<StringPoo
         return Err(AxmlError::InvalidStringPoolHeader);
     }
 
-    let header_size = u16le(bytes, start)? as usize;
+    let header_size = u16le(bytes, start + 2)? as usize;
     let string_count = u32le(bytes, start + 8)? as usize;
     let style_count = u32le(bytes, start + 12)? as usize;
     let flags = u32le(bytes, start + 16)?;
