@@ -358,6 +358,28 @@ mod tests {
     }
 
     #[test]
+    fn exports_exact_dex_loader_failure_to_session_diagnostics() {
+        unsafe {
+            let rt = stride_runtime_create(b"com.stride.diagnostic.test\\0".as_ptr() as *const c_char);
+            assert!(!rt.is_null());
+            let invalid_dex = [0u8; 8];
+            assert_eq!(stride_runtime_load_dex(rt, invalid_dex.as_ptr(), invalid_dex.len()), 2);
+
+            let required = stride_runtime_diagnostics_export(rt, std::ptr::null_mut(), 0);
+            assert!(required > 1);
+            let mut buffer = vec![0i8; required];
+            assert_eq!(
+                stride_runtime_diagnostics_export(rt, buffer.as_mut_ptr(), buffer.len()),
+                required
+            );
+            let report = CStr::from_ptr(buffer.as_ptr()).to_string_lossy();
+            assert!(report.contains("DEX load failed"), "{report}");
+            assert!(report.contains("DEX class inspection failed: TruncatedHeader"), "{report}");
+            stride_runtime_destroy(rt);
+        }
+    }
+
+    #[test]
     fn creates_and_destroys_runtime() {
         unsafe {
             let rt = stride_runtime_create(b"com.example.test\0".as_ptr() as *const c_char);
