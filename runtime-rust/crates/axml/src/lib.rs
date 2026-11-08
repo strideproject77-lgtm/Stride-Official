@@ -11,7 +11,7 @@ fn u32le(b:&[u8],o:usize)->Result<u32,AxmlError>{let s=b.get(o..o.checked_add(4)
 fn len8(b:&[u8],p:&mut usize)->Result<usize,AxmlError>{let x=*b.get(*p).ok_or(AxmlError::Truncated)? as usize;*p+=1;if x&0x80==0{Ok(x)}else{let y=*b.get(*p).ok_or(AxmlError::Truncated)? as usize;*p+=1;Ok(((x&0x7f)<<8)|y)}}
 fn len16(b:&[u8],p:&mut usize)->Result<usize,AxmlError>{let x=u16le(b,*p)? as usize;*p+=2;if x&0x8000==0{Ok(x)}else{let y=u16le(b,*p)? as usize;*p+=2;Ok(((x&0x7fff)<<16)|y)}}
 fn parse_pool(b:&[u8],start:usize,size:usize)->Result<StringPool,AxmlError>{
- let hs=u16le(b,start)? as usize;let _=u16le(b,start+2)?;let count=u32le(b,start+8)? as usize;let styles=u32le(b,start+12)? as usize;let flags=u32le(b,start+16)?;let strings_start=u32le(b,start+20)? as usize;
+ let _=u16le(b,start)?;let hs=u16le(b,start+2)? as usize;let count=u32le(b,start+8)? as usize;let styles=u32le(b,start+12)? as usize;let flags=u32le(b,start+16)?;let strings_start=u32le(b,start+20)? as usize;
  if hs<28||hs>size||count>1_000_000{return Err(AxmlError::InvalidStringPool);}
  let offsets_start=start.checked_add(hs).ok_or(AxmlError::InvalidStringPool)?;
  let offsets_end=offsets_start.checked_add(count.checked_mul(4).ok_or(AxmlError::InvalidStringPool)?).filter(|e|*e<=start+size).ok_or(AxmlError::InvalidStringPool)?;
@@ -53,6 +53,7 @@ pub fn inspect_binary_xml(b:&[u8])->Result<XmlDocument,AxmlError>{
 }
 #[cfg(test)] mod tests{
  use super::*;
+ #[test]fn parses_utf16_string_pool_header_fields(){let mut b=vec![0u8;38];b[0..2].copy_from_slice(&1u16.to_le_bytes());b[2..4].copy_from_slice(&28u16.to_le_bytes());b[4..8].copy_from_slice(&38u32.to_le_bytes());b[8..12].copy_from_slice(&1u32.to_le_bytes());b[20..24].copy_from_slice(&32u32.to_le_bytes());b[28..32].copy_from_slice(&0u32.to_le_bytes());b[32..34].copy_from_slice(&1u16.to_le_bytes());b[34..36].copy_from_slice(&(b'x' as u16).to_le_bytes());let pool=parse_pool(&b,0,38).unwrap();assert_eq!(pool.strings,vec!["x"]);}
  #[test]fn rejects_plain_xml(){assert_eq!(inspect_binary_xml(b"<manifest/>"),Err(AxmlError::InvalidMagic));}
  #[test]fn rejects_truncated_chunk(){let b=vec![3,0,8,0,16,0,0,0,1,0,8,0,20,0,0,0];assert_eq!(inspect_binary_xml(&b),Err(AxmlError::InvalidChunk));}
  #[test]fn accepts_empty_xml_container(){let b=[3,0,8,0,8,0,0,0];let d=inspect_binary_xml(&b).unwrap();assert_eq!(d.chunk_count,0);}
