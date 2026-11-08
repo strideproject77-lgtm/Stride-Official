@@ -108,7 +108,6 @@ struct ContentView: View {
                         HStack {
                             Label("LATEST IMPORT", systemImage: "sparkle")
                                 .font(.system(size: 9, weight: .heavy))
-                                .kerning(1.1)
                                 .foregroundStyle(accent)
                             Spacer()
                             Text("IN YOUR LIBRARY")
@@ -137,7 +136,6 @@ struct ContentView: View {
                                 Image(systemName: "arrow.up.right")
                             }
                             .font(.system(size: 10, weight: .heavy))
-                            .kerning(0.6)
                             .foregroundStyle(theme.buttonForeground)
                             .padding(.horizontal, 14)
                             .frame(height: 42)
