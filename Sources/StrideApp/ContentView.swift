@@ -24,6 +24,9 @@ struct ContentView: View {
             background.ignoresSafeArea()
             VStack(spacing: 0) {
                 header
+                    .sheet(isPresented: $showingImporter) {
+                        APKDocumentPicker { result in handleImport(result) }
+                    }
                 Group {
                     if selectedTab == 0 {
                         home
@@ -33,15 +36,12 @@ struct ContentView: View {
                         runtimeView
                     }
                 }
+                .sheet(item: $selectedPackage) { item in
+                    APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted)
+                }
                 Spacer(minLength: 12)
                 tabBar
             }
-        }
-        .sheet(isPresented: $showingImporter) {
-            APKDocumentPicker { result in handleImport(result) }
-        }
-        .sheet(item: $selectedPackage) { item in
-            APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted)
         }
         .alert(importAlertTitle, isPresented: Binding(
             get: { importError != nil },
