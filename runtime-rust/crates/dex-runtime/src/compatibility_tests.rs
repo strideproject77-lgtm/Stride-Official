@@ -14,8 +14,8 @@
 #[cfg(test)]
 mod tests {
     use crate::launcher::AndroidRuntime;
-    use crate::framework::{Intent, Bundle};
-    use crate::canvas::{Canvas, Paint, PaintStyle};
+    use crate::framework::Intent;
+    use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
     use crate::graphics::{MotionEvent, PointerCoords, ACTION_DOWN, ACTION_UP};
     use crate::gl::GL_COLOR_BUFFER_BIT;
     use crate::service_manager::ServiceState;
@@ -31,21 +31,22 @@ mod tests {
         assert!(log_sym.is_some(), "__android_log_print should be resolved by Bionic");
 
         // 2. Validate SharedPreferences persistence
-        let mut prefs = runtime.environment.get_shared_preferences("user_settings");
-        prefs.put_string("username", "player1");
+        let mut prefs = runtime.environment.get_preferences("user_settings");
+        prefs.put_string_value("username", "player1");
         prefs.put_int("high_score", 95000);
         prefs.commit();
 
         let loaded_prefs = runtime.environment.get_shared_preferences("user_settings");
-        assert_eq!(loaded_prefs.get_string("username", ""), "player1");
+        assert_eq!(loaded_prefs.get_string_value("username", ""), "player1");
         assert_eq!(loaded_prefs.get_int("high_score", 0), 95000);
 
         // 3. Validate Canvas 2D Rasterization into Runtime Surface
         {
             let mut canvas = Canvas::new(&mut runtime.surface);
-            let mut paint = Paint::new(0xffff8800); // Orange
+            let mut paint = Paint::new();
+            paint.set_color(0xffff8800); // Orange
             paint.style = PaintStyle::Fill;
-            canvas.draw_rect(10.0, 10.0, 100.0, 100.0, &paint);
+            canvas.draw_rect(RectF::new(10.0, 10.0, 100.0, 100.0), &paint);
         }
         let orange_pixel = runtime.surface.get_pixel(50, 50).expect("pixel within rect");
         assert_eq!(orange_pixel, 0xffff8800);
@@ -73,13 +74,21 @@ mod tests {
         assert_eq!(dequeued.unwrap().action, ACTION_DOWN);
 
         // 6. Validate ServiceManager Lifecycle
-        let mut service_intent = Intent::new("android.intent.action.START_SERVICE");
-        service_intent.set_component("com.stride.compat.test", "BackgroundSyncService");
-        let mut vm = crate::interpreter::ArtVm::new();
+        let service_intent = Intent::new(Some("android.intent.action.START_SERVICE"))
+            .with_component("com.stride.compat.test", "BackgroundSyncService");
+        let methods = std::collections::HashMap::new();
+        let strings: Vec<String> = Vec::new();
+        let mut vm = crate::interpreter::ArtVm::new(
+            &mut runtime.heap,
+            &mut runtime.hierarchy,
+            &mut runtime.monitors,
+            &mut runtime.jni,
+            &methods,
+            &strings,
+        );
 
         let s_id = runtime.service_manager.start_service(
             &service_intent,
-            &mut runtime.heap,
             &mut runtime.class_loader,
             &mut vm,
         ).expect("start service");
@@ -93,7 +102,6 @@ mod tests {
 
         let stopped = runtime.service_manager.stop_service(
             "BackgroundSyncService",
-            &mut runtime.heap,
             &mut runtime.class_loader,
             &mut vm,
         );
