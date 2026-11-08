@@ -69,7 +69,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
     )
 
     func launch(packageAt url: URL, onLog: @escaping (String) -> Void = { _ in }) async throws -> APKExecutionResult {
-        onLog("[INFO] Launch requested for \\(url.lastPathComponent)")
+        onLog("[INFO] Launch requested for \(url.lastPathComponent)")
         onLog("[INFO] Opening APK archive")
         guard let archive = Archive(url: url, accessMode: .read) else {
             throw RuntimeExecutionError.unreadableArchive
@@ -100,7 +100,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
-        onLog("[INFO] Archive scan complete: manifest=\\(!manifestData.isEmpty), DEX=\\(dexDataList.count), native libraries=\\(soDataList.count)")
+        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
         guard !manifestData.isEmpty else {
             throw RuntimeExecutionError.missingManifest
         }
@@ -121,7 +121,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         // Load every DEX and stop immediately if the runtime rejects one.
         for (index, dex) in dexDataList.enumerated() {
-            onLog("[INFO] Loading DEX file \\(index + 1)/\\(dexDataList.count) (\\(dex.count) bytes)")
+            onLog("[INFO] Loading DEX file \(index + 1)/\(dexDataList.count) (\(dex.count) bytes)")
             let dexStatus = dex.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                     return 1
@@ -129,14 +129,14 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 return stride_runtime_load_dex(runtime, ptr, rawBuffer.count)
             }
             guard dexStatus == 0 else {
-                onLog("[ERROR] DEX \\(index + 1) load failed with status \\(dexStatus)")
+                onLog("[ERROR] DEX \(index + 1) load failed with status \(dexStatus)")
                 throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus)
             }
         }
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
         for (soName, soData) in soDataList {
-            onLog("[INFO] Loading native library \\(soName) (\\(soData.count) bytes)")
+            onLog("[INFO] Loading native library \(soName) (\(soData.count) bytes)")
             _ = soData.withUnsafeBytes { rawBuffer in
                 if let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) {
                     _ = soName.withCString { namePtr in
@@ -156,7 +156,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         guard status == 0 else {
-            onLog("[ERROR] Runtime launch bridge failed with status \\(status)")
+            onLog("[ERROR] Runtime launch bridge failed with status \(status)")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
 
@@ -171,7 +171,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         default: lifecycleDescription = "Destroyed"
         }
 
-        onLog("[INFO] Runtime returned status=\\(report.status_code), lifecycle=\\(report.lifecycle_state), classes=\\(report.total_classes_loaded), instructions=\\(report.instructions_executed), missing APIs=\\(report.missing_apis_count)")
+        onLog("[INFO] Runtime returned status=\(report.status_code), lifecycle=\(report.lifecycle_state), classes=\(report.total_classes_loaded), instructions=\(report.instructions_executed), missing APIs=\(report.missing_apis_count)")
         if report.status_code == 2 {
             onLog("[CRASH] Runtime reported an uncaught Activity lifecycle exception")
             throw RuntimeExecutionError.uncaughtException("Runtime reported uncaught exception during Activity lifecycle")
