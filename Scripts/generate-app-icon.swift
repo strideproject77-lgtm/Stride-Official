@@ -2,87 +2,81 @@ import AppKit
 import Foundation
 
 // Stride app icon — Option 2: Dynamic Speed.
-// Black rounded-square field, a white-to-violet speed "S", and motion streaks.
 let canvas = 1024
 let image = NSImage(size: NSSize(width: canvas, height: canvas))
 image.lockFocus()
 
 let bounds = NSRect(x: 0, y: 0, width: canvas, height: canvas)
-NSColor(calibratedRed: 0.008, green: 0.009, blue: 0.016, alpha: 1).setFill()
-bounds.fill()
-
-// Very subtle dark graphite vignette.
 NSGradient(colors: [
-    NSColor(calibratedWhite: 0.10, alpha: 0.42),
-    NSColor(calibratedWhite: 0.005, alpha: 0.0)
-])!.draw(in: NSRect(x: 70, y: 70, width: 884, height: 884), relativeCenterPosition: NSPoint(x: 0, y: 0))
+    NSColor(calibratedWhite: 0.055, alpha: 1),
+    NSColor(calibratedWhite: 0.005, alpha: 1)
+])!.draw(in: bounds, angle: 45)
 
-// Main dynamic S mark. The broad, angular silhouette follows option 2.
-let mark = NSBezierPath()
-mark.move(to: NSPoint(x: 700, y: 735))
-mark.line(to: NSPoint(x: 405, y: 735))
-mark.curve(to: NSPoint(x: 282, y: 625),
-           controlPoint1: NSPoint(x: 332, y: 735),
-           controlPoint2: NSPoint(x: 250, y: 682))
-mark.curve(to: NSPoint(x: 365, y: 500),
-           controlPoint1: NSPoint(x: 285, y: 555),
-           controlPoint2: NSPoint(x: 315, y: 510))
-mark.line(to: NSPoint(x: 625, y: 500))
-mark.curve(to: NSPoint(x: 688, y: 438),
-           controlPoint1: NSPoint(x: 690, y: 500),
-           controlPoint2: NSPoint(x: 708, y: 462))
-mark.curve(to: NSPoint(x: 600, y: 365),
-           controlPoint1: NSPoint(x: 670, y: 400),
-           controlPoint2: NSPoint(x: 642, y: 365))
-mark.line(to: NSPoint(x: 342, y: 365))
-mark.line(to: NSPoint(x: 430, y: 275))
-mark.line(to: NSPoint(x: 705, y: 275))
-mark.curve(to: NSPoint(x: 825, y: 405),
-           controlPoint1: NSPoint(x: 780, y: 275),
-           controlPoint2: NSPoint(x: 850, y: 332))
-mark.curve(to: NSPoint(x: 730, y: 545),
-           controlPoint1: NSPoint(x: 825, y: 478),
-           controlPoint2: NSPoint(x: 790, y: 530))
-mark.line(to: NSPoint(x: 470, y: 545))
-mark.curve(to: NSPoint(x: 405, y: 610),
-           controlPoint1: NSPoint(x: 405, y: 545),
-           controlPoint2: NSPoint(x: 385, y: 590))
-mark.curve(to: NSPoint(x: 490, y: 650),
-           controlPoint1: NSPoint(x: 425, y: 650),
-           controlPoint2: NSPoint(x: 455, y: 650))
-mark.line(to: NSPoint(x: 790, y: 650))
-mark.close()
+// Restrained purple light behind the mark.
+NSGradient(colors: [
+    NSColor(calibratedRed: 0.34, green: 0.04, blue: 0.72, alpha: 0.20),
+    NSColor(calibratedRed: 0.12, green: 0.015, blue: 0.28, alpha: 0.0)
+])!.draw(in: NSRect(x: 180, y: 170, width: 680, height: 680),
+         relativeCenterPosition: NSPoint(x: 0, y: 0))
 
-let markGradient = NSGradient(colors: [
-    NSColor(calibratedRed: 0.99, green: 0.99, blue: 1.0, alpha: 1),
-    NSColor(calibratedRed: 0.88, green: 0.83, blue: 1.0, alpha: 1),
-    NSColor(calibratedRed: 0.67, green: 0.12, blue: 0.98, alpha: 1)
-])!
-markGradient.draw(in: mark, angle: -35)
-
-// Fast violet streaks: upper-right and lower-left, matching the reference.
-func streak(_ points: [NSPoint], width: CGFloat, alpha: CGFloat) {
-    let path = NSBezierPath()
-    path.move(to: points[0])
-    for point in points.dropFirst() { path.line(to: point) }
-    path.lineWidth = width
-    path.lineCapStyle = .round
-    path.lineJoinStyle = .round
-    NSColor(calibratedRed: 0.69, green: 0.16, blue: 1.0, alpha: alpha).setStroke()
-    path.stroke()
-}
-
-streak([NSPoint(x: 720, y: 790), NSPoint(x: 835, y: 900)], width: 17, alpha: 0.95)
-streak([NSPoint(x: 755, y: 750), NSPoint(x: 900, y: 875)], width: 9, alpha: 0.8)
-streak([NSPoint(x: 285, y: 245), NSPoint(x: 165, y: 135)], width: 17, alpha: 0.95)
-streak([NSPoint(x: 330, y: 270), NSPoint(x: 215, y: 165)], width: 9, alpha: 0.8)
-
-// Fine inner edge gives the black icon a restrained premium finish.
-let inset = NSBezierPath(roundedRect: NSRect(x: 24, y: 24, width: 976, height: 976),
-                         xRadius: 205, yRadius: 205)
-NSColor(calibratedWhite: 1, alpha: 0.075).setStroke()
+// Rounded app-tile edge.
+let inset = NSBezierPath(roundedRect: NSRect(x: 28, y: 28, width: 968, height: 968),
+                         xRadius: 215, yRadius: 215)
+NSColor(calibratedWhite: 1, alpha: 0.10).setStroke()
 inset.lineWidth = 3
 inset.stroke()
+
+// Fast diagonal speed streaks behind the S.
+func streak(_ points: [NSPoint], width: CGFloat, alpha: CGFloat) {
+    let path = NSBezierPath()
+    guard let first = points.first else { return }
+    path.move(to: first)
+    for point in points.dropFirst() { path.line(to: point) }
+    path.lineCapStyle = .round
+    path.lineJoinStyle = .round
+    path.lineWidth = width
+    NSColor(calibratedRed: 0.58, green: 0.12, blue: 0.98, alpha: alpha).setStroke()
+    path.stroke()
+}
+streak([NSPoint(x: 650, y: 790), NSPoint(x: 820, y: 930)], width: 15, alpha: 0.95)
+streak([NSPoint(x: 700, y: 755), NSPoint(x: 900, y: 915)], width: 7, alpha: 0.72)
+streak([NSPoint(x: 130, y: 180), NSPoint(x: 330, y: 355)], width: 14, alpha: 0.90)
+streak([NSPoint(x: 105, y: 125), NSPoint(x: 250, y: 255)], width: 7, alpha: 0.65)
+
+// Bold, angular S mark, matching the second reference icon.
+let mark = NSBezierPath()
+mark.move(to: NSPoint(x: 690, y: 690))
+mark.line(to: NSPoint(x: 445, y: 690))
+mark.curve(to: NSPoint(x: 365, y: 585),
+           controlPoint1: NSPoint(x: 365, y: 690),
+           controlPoint2: NSPoint(x: 330, y: 625))
+mark.line(to: NSPoint(x: 625, y: 470))
+mark.curve(to: NSPoint(x: 690, y: 365),
+           controlPoint1: NSPoint(x: 715, y: 425),
+           controlPoint2: NSPoint(x: 690, y: 365))
+mark.line(to: NSPoint(x: 405, y: 365))
+mark.lineCapStyle = .round
+mark.lineJoinStyle = .round
+mark.lineWidth = 112
+
+// Purple outer glow, then a white-to-violet face.
+NSColor(calibratedRed: 0.52, green: 0.10, blue: 0.95, alpha: 0.38).setStroke()
+let glow = mark.copy() as! NSBezierPath
+glow.lineWidth = 150
+glow.stroke()
+
+NSGraphicsContext.saveGraphicsState()
+mark.addClip()
+NSGradient(colors: [
+    NSColor(calibratedRed: 0.98, green: 0.98, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.88, green: 0.80, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.56, green: 0.12, blue: 0.98, alpha: 1)
+])!.draw(in: bounds, angle: 90)
+NSGraphicsContext.restoreGraphicsState()
+
+// Small speed cuts at the lower-left and upper-right of the mark.
+streak([NSPoint(x: 300, y: 300), NSPoint(x: 455, y: 430)], width: 10, alpha: 0.95)
+streak([NSPoint(x: 580, y: 600), NSPoint(x: 735, y: 735)], width: 8, alpha: 0.90)
 
 image.unlockFocus()
 
@@ -98,4 +92,4 @@ try FileManager.default.createDirectory(
     withIntermediateDirectories: true
 )
 try png.write(to: output, options: .atomic)
-print("Generated Stride Option 2 — Dynamic Speed icon at \(output.path) (\(png.count) bytes)")
+print("Generated selected Stride Dynamic Speed icon at \(output.path) (\(png.count) bytes)")
