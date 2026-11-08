@@ -32,7 +32,7 @@ enum RuntimeExecutionError: LocalizedError {
     case unreadableArchive
     case missingManifest
     case missingDex
-    case dexLoadFailed(index: Int, status: Int32)
+    case dexLoadFailed(index: Int, status: Int32, detail: String?)
     case nativeLibraryLoadFailed(name: String, status: Int32)
     case runtimeInitializationFailed
     case uncaughtException(String)
@@ -47,8 +47,9 @@ enum RuntimeExecutionError: LocalizedError {
             return "APK is missing AndroidManifest.xml."
         case .missingDex:
             return "APK does not contain a DEX executable."
-        case .dexLoadFailed(let index, let status):
-            return "Failed to load DEX file #\(index + 1) (runtime status \(status))."
+        case .dexLoadFailed(let index, let status, let detail):
+            let reason = detail?.isEmpty == false ? detail! : "Runtime did not provide a detailed diagnostic."
+            return "Failed to load DEX file #\(index + 1) (runtime status \(status)): \(reason)"
         case .nativeLibraryLoadFailed(let name, let status):
             return "Failed to load native library \(name) (runtime status \(status))."
         case .runtimeInitializationFailed:
@@ -133,7 +134,27 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             guard dexStatus == 0 else {
                 onLog("[ERROR] DEX \(index + 1) load failed with status \(dexStatus)")
-                throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus)
+
+                // Rust records the underlying parser/loader error in the runtime's
+                // bounded diagnostic timeline. Export it before destroying runtime.
+                let required = stride_runtime_diagnostics_export(runtime, nil, 0)
+                var report = ""
+                if required > 1 {
+                    var buffer = [CChar](repeating: 0, count: Int(required))
+                    let written = buffer.withUnsafeMutableBufferPointer { storage in
+                        stride_runtime_diagnostics_export(runtime, storage.baseAddress, storage.count)
+                    }
+                    if written > 1 {
+                        report = String(cString: buffer)
+                        for line in report.components(separatedBy: .newlines) where !line.isEmpty {
+                            onLog("[RUNTIME] \(line)")
+                        }
+                    }
+                }
+                let detail = report.components(separatedBy: .newlines)
+                    .last(where: { $0.contains("DEX load failed") || $0.contains("DEX class inspection failed") })
+                    ?? "No detailed DEX diagnostic was recorded."
+                throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus, detail: detail)
             }
         }
 
