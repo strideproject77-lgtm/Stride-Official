@@ -291,7 +291,7 @@ struct ContentView: View {
                 }
             }
             if !failures.isEmpty {
-                importError = failures.joined(separator: "\\n")
+                importError = failures.joined(separator: "\n")
             }
         case .failure(let error):
             importError = error.localizedDescription
