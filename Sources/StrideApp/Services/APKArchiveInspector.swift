@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import ZIPFoundation
 
 struct APKInspection: Equatable, Sendable {
@@ -144,25 +145,59 @@ struct APKArchiveInspector: Sendable {
             .filter { UInt64($0.uncompressedSize) <= maxIconEntryBytes }
             .sorted { Self.iconScore($0.path) > Self.iconScore($1.path) }
 
-        for entry in candidates {
-            var data = Data()
-            data.reserveCapacity(Int(entry.uncompressedSize))
-            var exceededLimit = false
-            do {
-                _ = try archive.extract(entry) { chunk in
-                    guard data.count + chunk.count <= Int(self.maxIconEntryBytes) else {
-                        exceededLimit = true
-                        return
-                    }
-                    data.append(chunk)
-                }
-            } catch {
-                continue
+        // Adaptive launcher icons often store foreground and background as
+        // separate transparent raster assets. Composite them before displaying.
+        let foregroundEntry = candidates.first {
+            URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent.lowercased() == "ic_launcher_foreground"
+        }
+        let backgroundEntry = candidates.first {
+            URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent.lowercased() == "ic_launcher_background"
+        }
+
+        if let foregroundEntry, let backgroundEntry,
+           let foregroundData = readIconImage(foregroundEntry, in: archive),
+           let backgroundData = readIconImage(backgroundEntry, in: archive),
+           let foreground = UIImage(data: foregroundData),
+           let background = UIImage(data: backgroundData) {
+            let size = CGSize(
+                width: max(foreground.size.width, background.size.width),
+                height: max(foreground.size.height, background.size.height)
+            )
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            format.opaque = false
+            let renderer = UIGraphicsImageRenderer(size: size, format: format)
+            let composed = renderer.image { _ in
+                let rect = CGRect(origin: .zero, size: size)
+                background.draw(in: rect)
+                foreground.draw(in: rect)
             }
-            guard !exceededLimit, Self.looksLikeSupportedImage(data) else { continue }
-            return data
+            if let png = composed.pngData() { return png }
+        }
+
+        for entry in candidates {
+            if let data = readIconImage(entry, in: archive) { return data }
         }
         return nil
+    }
+
+    private func readIconImage(_ entry: Entry, in archive: Archive) -> Data? {
+        var data = Data()
+        data.reserveCapacity(Int(entry.uncompressedSize))
+        var exceededLimit = false
+        do {
+            _ = try archive.extract(entry) { chunk in
+                guard data.count + chunk.count <= Int(self.maxIconEntryBytes) else {
+                    exceededLimit = true
+                    return
+                }
+                data.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+        guard !exceededLimit, Self.looksLikeSupportedImage(data) else { return nil }
+        return data
     }
 
     private static func isLauncherIconCandidate(_ path: String) -> Bool {
