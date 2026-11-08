@@ -33,7 +33,7 @@ enum APKInspectionError: LocalizedError {
     }
 }
 
-struct APKArchiveInspector {
+struct APKArchiveInspector: Sendable {
     // Bound decompression and FFI input for untrusted APKs.
     private let maxDEXEntryBytes: UInt64 = 64 * 1_024 * 1_024
     private let maxTotalDEXBytes: UInt64 = 128 * 1_024 * 1_024
