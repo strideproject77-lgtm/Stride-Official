@@ -177,7 +177,7 @@ impl AndroidRuntime {
             DiagnosticSeverity::Info, "DexLoader",
             &format!("DEX load started ({} bytes)", dex_data.len()), None,
         );
-        let count = match self.class_loader.load_dex(dex_data) {
+        let count = match self.class_loader.load_dex_with_diagnostics(dex_data, &self.diagnostics) {
             Ok(count) => count,
             Err(error) => {
                 self.diagnostics.record_detailed(

@@ -3,7 +3,7 @@
 //! Handles class definitions across one or more DEX files, links class hierarchies,
 //! resolves method/field references, and executes static initializers (<clinit>).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{ClassInventory, inspect_classes};
 use stride_dex_inspector::read_code_item;
 use crate::hierarchy::{ClassHierarchy, RuntimeClass};
@@ -12,6 +12,7 @@ use crate::heap::ManagedHeap;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 use crate::types::Value;
+use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 /// Initialization state of a class in the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,10 +70,56 @@ impl AppClassLoader {
         }
     }
 
-    /// Loads a DEX binary into the class loader, indexing classes and method definitions.
+    /// Loads a DEX binary without a session recorder (useful for isolated loader tests).
     pub fn load_dex(&mut self, dex_bytes: &[u8]) -> Result<usize, String> {
-        let inventory = inspect_classes(dex_bytes)
-            .map_err(|e| format!("DEX class inspection failed: {:?}", e))?;
+        self.load_dex_internal(dex_bytes, None)
+    }
+
+    /// Loads a DEX binary and records parser, duplicate-definition and code-item faults.
+    pub fn load_dex_with_diagnostics(
+        &mut self,
+        dex_bytes: &[u8],
+        diagnostics: &RuntimeDiagnostics,
+    ) -> Result<usize, String> {
+        self.load_dex_internal(dex_bytes, Some(diagnostics))
+    }
+
+    fn load_dex_internal(
+        &mut self,
+        dex_bytes: &[u8],
+        diagnostics: Option<&RuntimeDiagnostics>,
+    ) -> Result<usize, String> {
+        let inventory = match inspect_classes(dex_bytes) {
+            Ok(inventory) => inventory,
+            Err(error) => {
+                let detail = format!("DEX class inspection failed: {:?}", error);
+                if let Some(diagnostics) = diagnostics {
+                    diagnostics.record_detailed(
+                        DiagnosticSeverity::RuntimeError, "DexLoader", "DEX_CLASS_INSPECTION_FAILED",
+                        "DEX metadata inspection failed", Some(&detail),
+                        Some("Verify DEX magic/version, file size, checksum, map list, identifier tables and class-data offsets"),
+                    );
+                }
+                return Err(detail);
+            }
+        };
+
+        // Reject duplicate class definitions before mutating the loader, avoiding partial overwrite.
+        let mut seen_classes = HashSet::new();
+        for class_def in &inventory.classes {
+            let descriptor = class_def.descriptor.as_str();
+            if self.classes.contains_key(descriptor) || !seen_classes.insert(descriptor.to_owned()) {
+                let detail = format!("Duplicate class definition across DEX inputs: {}", descriptor);
+                if let Some(diagnostics) = diagnostics {
+                    diagnostics.record_detailed(
+                        DiagnosticSeverity::RuntimeError, "ClassLoader", "DUPLICATE_CLASS_DEFINITION",
+                        "DEX contains a duplicate class definition", Some(&detail),
+                        Some("Remove duplicate class definitions or inspect split/multidex packaging before loading"),
+                    );
+                }
+                return Err(detail);
+            }
+        }
 
         let mut classes_loaded = 0;
 
@@ -98,7 +145,28 @@ impl AppClassLoader {
 
             for m in &class_def.methods {
                 let mid = self.next_method_id;
-                self.next_method_id += 1;
+                let Some(next_method_id) = self.next_method_id.checked_add(1) else {
+                    let detail = format!("Runtime method ID space exhausted while loading {}->{}{}", descriptor, m.name, m.prototype);
+                    if let Some(diagnostics) = diagnostics {
+                        diagnostics.record_detailed(
+                            DiagnosticSeverity::FatalCrash, "ClassLoader", "METHOD_ID_SPACE_EXHAUSTED",
+                            "Runtime method ID counter overflowed", Some(&detail),
+                            Some("Stop loading this package; reduce method count or widen the runtime method-ID representation"),
+                        );
+                    }
+                    return Err(detail);
+                };
+                self.next_method_id = next_method_id;
+                if mid > u16::MAX as u32 {
+                    if let Some(diagnostics) = diagnostics {
+                        diagnostics.record_detailed(
+                            DiagnosticSeverity::Warning, "ClassLoader", "METHOD_ID_EXCEEDS_VM_LIMIT",
+                            "Loaded method cannot be represented by the current 16-bit interpreter ID",
+                            Some(&format!("method_id={} {}->{}{}", mid, descriptor, m.name, m.prototype)),
+                            Some("Widen interpreter method IDs or provide an explicit DEX-reference-to-runtime-ID map"),
+                        );
+                    }
+                }
 
                 let code = if m.code_offset != 0 {
                     match read_code_item(dex_bytes, m.code_offset) {
@@ -117,7 +185,20 @@ impl AppClassLoader {
                                 try_blocks: Vec::new(),
                             })
                         }
-                        Err(_) => None,
+                        Err(error) => {
+                            if let Some(diagnostics) = diagnostics {
+                                diagnostics.record_detailed(
+                                    DiagnosticSeverity::Warning, "DexLoader", "DEX_CODE_ITEM_REJECTED",
+                                    "Method code item could not be decoded; method metadata was retained without executable code",
+                                    Some(&format!(
+                                        "{}->{}{} code_offset={} error={:?}",
+                                        descriptor, m.name, m.prototype, m.code_offset, error
+                                    )),
+                                    Some("Inspect code-item bounds, instruction length, try/catch data and DEX integrity; this method will not execute"),
+                                );
+                            }
+                            None
+                        },
                     }
                 } else {
                     None
@@ -225,23 +306,41 @@ impl AppClassLoader {
 
         // Initialize superclass first
         let super_desc = self.classes.get(class_descriptor).and_then(|c| c.super_descriptor.clone());
-        if let Some(ref s) = super_desc {
-            let _ = self.initialize_class(s, heap, hierarchy, monitors, jni, strings);
+        if let Some(ref superclass) = super_desc {
+            if let Err(error) = self.initialize_class(superclass, heap, hierarchy, monitors, jni, strings) {
+                if let Some(class) = self.classes.get_mut(class_descriptor) {
+                    class.init_state = ClassInitState::Error;
+                }
+                return Err(format!(
+                    "Superclass initialization failed ({} -> {}): {}",
+                    class_descriptor, superclass, error
+                ));
+            }
         }
 
         // Look for <clinit>()V
         let clinit_id = self.find_method(class_descriptor, "<clinit>", "()V");
         if let Some(mid) = clinit_id {
-            if let Ok(id16) = u16::try_from(mid) {
-                let method_map = self.export_method_codes();
-                let mut vm = ArtVm::new(heap, hierarchy, monitors, jni, &method_map, strings);
-                let report = vm.execute_method(id16, &[], 50_000)?;
-                if let ExecutionStopReason::UncaughtException(ex) = report.stop_reason {
-                    if let Some(c) = self.classes.get_mut(class_descriptor) {
-                        c.init_state = ClassInitState::Error;
+            let id16 = u16::try_from(mid).map_err(|_| {
+                format!("Class initializer method ID {} exceeds the interpreter's 16-bit limit for {}", mid, class_descriptor)
+            })?;
+            let method_map = self.export_method_codes();
+            let mut vm = ArtVm::new(heap, hierarchy, monitors, jni, &method_map, strings);
+            let report = vm.execute_method(id16, &[], 50_000)?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(ex) => {
+                    if let Some(class) = self.classes.get_mut(class_descriptor) {
+                        class.init_state = ClassInitState::Error;
                     }
                     return Err(format!("Class initialization failed for {}: {:?}", class_descriptor, ex));
                 }
+                ExecutionStopReason::StepLimitExceeded => {
+                    if let Some(class) = self.classes.get_mut(class_descriptor) {
+                        class.init_state = ClassInitState::Error;
+                    }
+                    return Err(format!("Class initializer exceeded 50000 instructions: {}", class_descriptor));
+                }
+                _ => {}
             }
         }
 
@@ -250,5 +349,22 @@ impl AppClassLoader {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn dex_parse_failure_is_written_to_the_attached_session_report() {
+        let mut loader = AppClassLoader::new();
+        let diagnostics = RuntimeDiagnostics::new();
+        let invalid_dex = [0u8; 8];
+        let error = loader.load_dex_with_diagnostics(&invalid_dex, &diagnostics).unwrap_err();
+        assert!(error.contains("DEX class inspection failed"));
+        let report = diagnostics.export_text();
+        assert!(report.contains("DEX_CLASS_INSPECTION_FAILED"), "{report}");
+        assert!(report.contains("Recovery:"), "{report}");
     }
 }
