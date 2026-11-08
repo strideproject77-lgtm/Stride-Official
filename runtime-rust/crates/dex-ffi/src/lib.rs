@@ -8,6 +8,7 @@ use std::slice;
 use stride_dex_runtime::{
     AndroidRuntime, LaunchReport, LaunchStatus, ActivityLifecycleState,
     MotionEvent, PointerCoords, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL,
+    GL_COLOR_BUFFER_BIT,
 };
 
 /// Summary returned after a successful DEX metadata scan.
