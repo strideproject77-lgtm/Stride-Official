@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use stride_elf_inspector::{inspect_elf, inspect_dynamic, ElfArchitecture};
+use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, ElfArchitecture};
 use stride_native_loader::{plan_native_image, NativeImagePlan};
 use crate::types::Value;
 use crate::jni::JniEnv;
@@ -148,7 +148,7 @@ impl NativeLinker {
         let mut needed_libraries = Vec::new();
         let mut has_jni_onload = false;
 
-        if let Ok(dyn_info) = inspect_dynamic(elf_bytes, &elf_info) {
+        if let Ok(dyn_info) = inspect_elf_dynamic(elf_bytes, &elf_info) {
             for sym in dyn_info.symbols {
                 if !sym.name.is_empty() && sym.section_index != 0 {
                     if sym.name == "JNI_OnLoad" {
