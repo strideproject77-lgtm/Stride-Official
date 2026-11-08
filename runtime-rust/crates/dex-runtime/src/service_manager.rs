@@ -77,7 +77,7 @@ impl ServiceManager {
                 existing.state = ServiceState::Started;
 
                 // Call onStartCommand(Intent, flags, startId)
-                Self::dispatch_on_start_command(&class_name, obj, sid, heap, class_loader, vm);
+                Self::dispatch_on_start_command(&class_name, obj, sid, class_loader, vm);
                 existing.service_id
             }
             None => {
@@ -88,10 +88,10 @@ impl ServiceManager {
                 let obj_ref = vm.heap.allocate_instance(&class_name).ok();
 
                 // Call onCreate()
-                Self::dispatch_method(&class_name, "onCreate", "()V", obj_ref, heap, class_loader, vm);
+                Self::dispatch_method(&class_name, "onCreate", "()V", obj_ref, class_loader, vm);
 
                 // Call onStartCommand()
-                Self::dispatch_on_start_command(&class_name, obj_ref, 1, heap, class_loader, vm);
+                Self::dispatch_on_start_command(&class_name, obj_ref, 1, class_loader, vm);
 
                 let record = ServiceRecord {
                     service_id: sid,
@@ -114,13 +114,12 @@ impl ServiceManager {
     pub fn stop_service(
         &mut self,
         class_name: &str,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> bool {
         if let Some(mut record) = self.services.remove(class_name) {
             record.state = ServiceState::Destroyed;
-            Self::dispatch_method(&record.class_name, "onDestroy", "()V", record.heap_object_ref, heap, class_loader, vm);
+            Self::dispatch_method(&record.class_name, "onDestroy", "()V", record.heap_object_ref, class_loader, vm);
             true
         } else {
             false
@@ -142,7 +141,6 @@ impl ServiceManager {
         class_name: &str,
         receiver: Option<u32>,
         start_id: u32,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) {
@@ -163,7 +161,6 @@ impl ServiceManager {
         method_name: &str,
         descriptor: &str,
         receiver: Option<u32>,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) {
@@ -172,7 +169,7 @@ impl ServiceManager {
             if let Some(obj_ref) = receiver {
                 args.push(Value::Object(obj_ref));
             }
-            let _ = vm.execute_method(&loaded_method, &args, heap, 10_000);
+            let _ = vm.execute_method(u16::try_from(loaded_method).unwrap_or(u16::MAX), &args, 10_000);
         }
     }
 }
