@@ -260,14 +260,27 @@ impl AndroidRuntime {
         };
 
         // Run <clinit> on the activity class
-        let _ = self.class_loader.initialize_class(
+        if let Err(error) = self.class_loader.initialize_class(
             &activity_descriptor,
             &mut self.heap,
             &mut self.hierarchy,
             &mut self.monitors,
             &mut self.jni,
             &[],
-        );
+        ) {
+            return LaunchReport {
+                package_name: self.environment.package_name.clone(),
+                launcher_activity: activity_descriptor,
+                lifecycle_state: ActivityLifecycleState::NotStarted,
+                total_classes_loaded: self.class_loader.classes.len(),
+                instructions_executed: 0,
+                status: LaunchStatus::UncaughtException {
+                    class: "ClassInitializationError".into(),
+                    message: Some(error),
+                },
+                diagnostics_summary: self.diagnostics.format_summary(),
+            };
+        }
 
         // Allocate Activity object
         let activity_obj = match self.heap.allocate_instance(&activity_descriptor) {
@@ -303,9 +316,42 @@ impl AndroidRuntime {
                 );
                 // Call onCreate with this=activity_obj, savedInstanceState=null
                 let args = [Value::Object(activity_obj), Value::Null];
-                if let Ok(report) = vm.execute_method(mid16, &args, step_budget) {
-                    total_steps += report.steps_executed;
-                    if let ExecutionStopReason::UncaughtException(ex) = report.stop_reason {
+                match vm.execute_method(mid16, &args, step_budget) {
+                    Ok(report) => {
+                        total_steps += report.steps_executed;
+                        match report.stop_reason {
+                            ExecutionStopReason::UncaughtException(ex) => {
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Created,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException {
+                                        class: ex.class_descriptor,
+                                        message: ex.message,
+                                    },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            ExecutionStopReason::StepLimitExceeded => {
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Created,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException {
+                                        class: "InstructionBudgetExceeded".into(),
+                                        message: Some(format!("onCreate exceeded the {} instruction budget", step_budget)),
+                                    },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(error) => {
                         return LaunchReport {
                             package_name: self.environment.package_name.clone(),
                             launcher_activity: activity_descriptor,
@@ -313,8 +359,8 @@ impl AndroidRuntime {
                             total_classes_loaded: self.class_loader.classes.len(),
                             instructions_executed: total_steps,
                             status: LaunchStatus::UncaughtException {
-                                class: ex.class_descriptor,
-                                message: ex.message,
+                                class: "InterpreterError".into(),
+                                message: Some(error),
                             },
                             diagnostics_summary: self.diagnostics.format_summary(),
                         };
@@ -341,8 +387,55 @@ impl AndroidRuntime {
                     &[],
                 );
                 let args = [Value::Object(activity_obj)];
-                if let Ok(report) = vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
-                    total_steps += report.steps_executed;
+                match vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
+                    Ok(report) => {
+                        total_steps += report.steps_executed;
+                        match report.stop_reason {
+                            ExecutionStopReason::UncaughtException(ex) => {
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Resumed,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException {
+                                        class: ex.class_descriptor,
+                                        message: ex.message,
+                                    },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            ExecutionStopReason::StepLimitExceeded => {
+                                return LaunchReport {
+                                    package_name: self.environment.package_name.clone(),
+                                    launcher_activity: activity_descriptor,
+                                    lifecycle_state: ActivityLifecycleState::Resumed,
+                                    total_classes_loaded: self.class_loader.classes.len(),
+                                    instructions_executed: total_steps,
+                                    status: LaunchStatus::UncaughtException {
+                                        class: "InstructionBudgetExceeded".into(),
+                                        message: Some(format!("onResume exceeded the remaining instruction budget ({})", step_budget.saturating_sub(total_steps))),
+                                    },
+                                    diagnostics_summary: self.diagnostics.format_summary(),
+                                };
+                            }
+                            _ => {}
+                        }
+                    }
+                    Err(error) => {
+                        return LaunchReport {
+                            package_name: self.environment.package_name.clone(),
+                            launcher_activity: activity_descriptor,
+                            lifecycle_state: ActivityLifecycleState::Resumed,
+                            total_classes_loaded: self.class_loader.classes.len(),
+                            instructions_executed: total_steps,
+                            status: LaunchStatus::UncaughtException {
+                                class: "InterpreterError".into(),
+                                message: Some(error),
+                            },
+                            diagnostics_summary: self.diagnostics.format_summary(),
+                        };
+                    }
                 }
             }
         }
