@@ -4,7 +4,7 @@ import StrideDexFFI
 
 /// The execution boundary connecting iOS application requests to the ART managed runtime.
 protocol AndroidExecutionBackend {
-    func launch(packageAt url: URL) async throws -> APKExecutionResult
+    func launch(packageAt url: URL, onLog: @escaping (String) -> Void) async throws -> APKExecutionResult
 }
 
 enum RuntimeAvailability: Equatable {
@@ -68,7 +68,9 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         supportedAndroidAPIs: 21...34
     )
 
-    func launch(packageAt url: URL) async throws -> APKExecutionResult {
+    func launch(packageAt url: URL, onLog: @escaping (String) -> Void = { _ in }) async throws -> APKExecutionResult {
+        onLog("[INFO] Launch requested for \\(url.lastPathComponent)")
+        onLog("[INFO] Opening APK archive")
         guard let archive = Archive(url: url, accessMode: .read) else {
             throw RuntimeExecutionError.unreadableArchive
         }
@@ -98,11 +100,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
+        onLog("[INFO] Archive scan complete: manifest=\\(!manifestData.isEmpty), DEX=\\(dexDataList.count), native libraries=\\(soDataList.count)")
         guard !manifestData.isEmpty else {
             throw RuntimeExecutionError.missingManifest
         }
 
         let packageName = url.deletingPathExtension().lastPathComponent
+        onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
@@ -117,6 +121,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         // Load every DEX and stop immediately if the runtime rejects one.
         for (index, dex) in dexDataList.enumerated() {
+            onLog("[INFO] Loading DEX file \\(index + 1)/\\(dexDataList.count) (\\(dex.count) bytes)")
             let dexStatus = dex.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                     return 1
@@ -124,12 +129,14 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 return stride_runtime_load_dex(runtime, ptr, rawBuffer.count)
             }
             guard dexStatus == 0 else {
+                onLog("[ERROR] DEX \\(index + 1) load failed with status \\(dexStatus)")
                 throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus)
             }
         }
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
         for (soName, soData) in soDataList {
+            onLog("[INFO] Loading native library \\(soName) (\\(soData.count) bytes)")
             _ = soData.withUnsafeBytes { rawBuffer in
                 if let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) {
                     _ = soName.withCString { namePtr in
@@ -139,6 +146,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
+        onLog("[INFO] Dispatching launcher Activity; instruction budget=200000")
         var report = StrideLaunchReport()
         let status = manifestData.withUnsafeBytes { rawBuffer -> Int32 in
             guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
@@ -148,6 +156,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         guard status == 0 else {
+            onLog("[ERROR] Runtime launch bridge failed with status \\(status)")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
 
@@ -162,14 +171,19 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         default: lifecycleDescription = "Destroyed"
         }
 
+        onLog("[INFO] Runtime returned status=\\(report.status_code), lifecycle=\\(report.lifecycle_state), classes=\\(report.total_classes_loaded), instructions=\\(report.instructions_executed), missing APIs=\\(report.missing_apis_count)")
         if report.status_code == 2 {
+            onLog("[CRASH] Runtime reported an uncaught Activity lifecycle exception")
             throw RuntimeExecutionError.uncaughtException("Runtime reported uncaught exception during Activity lifecycle")
         } else if report.status_code == 3 {
+            onLog("[ERROR] Launcher Activity was not found")
             throw RuntimeExecutionError.activityNotFound("Launcher Activity not found in DEX")
         } else if report.status_code == 4 {
+            onLog("[ERROR] Binary Android manifest parsing failed")
             throw RuntimeExecutionError.manifestError("Failed to parse AndroidManifest binary XML")
         }
 
+        onLog("[INFO] Execution attempt finished; this backend currently returns after its bounded launch step budget")
         return APKExecutionResult(
             statusCode: report.status_code,
             totalClassesLoaded: report.total_classes_loaded,
