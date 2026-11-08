@@ -11,16 +11,18 @@ struct ContentView: View {
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
     @State private var searchText = ""
-    @AppStorage("stride.selectedTheme.v2") private var themeRawValue = StrideTheme.darkBronze.rawValue
+    @AppStorage("stride.selectedTheme.v2") private var themeRawValue = StrideTheme.white.rawValue
+    @AppStorage("stride.whiteThemeDefault.v1") private var didApplyWhiteThemeDefault = false
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
-    private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .blackLime }
+    private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .white }
+    private var themeIsLight: Bool { theme == .white }
     private var background: Color { theme.background }
     private var panel: Color { theme.panel }
     private var raised: Color { theme.raised }
     private var accent: Color { theme.accent }
     private var muted: Color { theme.muted }
-    private var line: Color { Color.white.opacity(0.075) }
+    private var line: Color { theme == .white ? Color.black.opacity(0.09) : Color.white.opacity(0.075) }
 
     var body: some View {
         ZStack {
@@ -54,7 +56,13 @@ struct ContentView: View {
         } message: {
             Text(importError ?? "Please try another APK file.")
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(theme == .white ? .light : .dark)
+        .onAppear {
+            if !didApplyWhiteThemeDefault {
+                themeRawValue = StrideTheme.white.rawValue
+                didApplyWhiteThemeDefault = true
+            }
+        }
     }
 
     private var header: some View {
@@ -334,7 +342,7 @@ struct ContentView: View {
                                             .overlay {
                                                 Text("S")
                                                     .font(.system(size: 11, weight: .black, design: .rounded))
-                                                    .foregroundStyle(.white)
+                                                    .foregroundStyle(.primary)
                                             }
                                     }
                                 VStack(alignment: .leading, spacing: 3) {
@@ -351,7 +359,7 @@ struct ContentView: View {
                                         .font(.system(size: 19))
                                         .foregroundStyle(option.accent)
                                 } else {
-                                    Circle().stroke(Color.white.opacity(0.2), lineWidth: 1.2)
+                                    Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1.2)
                                         .frame(width: 18, height: 18)
                                 }
                             }
@@ -509,6 +517,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
     case blackLime
     case graphiteViolet
     case darkBronze
+    case white
 
     var id: String { rawValue }
     var title: String {
@@ -516,6 +525,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return "Black + Lime"
         case .graphiteViolet: return "Graphite + Violet"
         case .darkBronze: return "Dark Bronze"
+        case .white: return "White"
         }
     }
     var subtitle: String {
@@ -523,6 +533,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return "Sharp contrast with a bright lime accent"
         case .graphiteViolet: return "Cool graphite surfaces and soft violet"
         case .darkBronze: return "Warm, understated bronze finish"
+        case .white: return "Bright, clean surfaces with crisp dark text"
         }
     }
     var background: Color {
@@ -530,6 +541,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return Color(red: 0.025, green: 0.027, blue: 0.032)
         case .graphiteViolet: return Color(red: 0.055, green: 0.050, blue: 0.075)
         case .darkBronze: return Color(red: 0.045, green: 0.030, blue: 0.022)
+        case .white: return Color(red: 0.965, green: 0.970, blue: 0.980)
         }
     }
     var panel: Color {
@@ -537,6 +549,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return Color(red: 0.075, green: 0.078, blue: 0.085)
         case .graphiteViolet: return Color(red: 0.105, green: 0.095, blue: 0.135)
         case .darkBronze: return Color(red: 0.115, green: 0.082, blue: 0.058)
+        case .white: return Color.white
         }
     }
     var raised: Color {
@@ -544,6 +557,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return Color(red: 0.115, green: 0.120, blue: 0.130)
         case .graphiteViolet: return Color(red: 0.165, green: 0.145, blue: 0.205)
         case .darkBronze: return Color(red: 0.175, green: 0.125, blue: 0.085)
+        case .white: return Color(red: 0.925, green: 0.935, blue: 0.955)
         }
     }
     var accent: Color {
@@ -551,6 +565,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return Color(red: 0.77, green: 0.96, blue: 0.48)
         case .graphiteViolet: return Color(red: 0.73, green: 0.64, blue: 1.0)
         case .darkBronze: return Color(red: 0.91, green: 0.70, blue: 0.47)
+        case .white: return Color(red: 0.22, green: 0.34, blue: 0.56)
         }
     }
     var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
@@ -562,6 +577,8 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
             return LinearGradient(colors: [Color(red: 0.20, green: 0.17, blue: 0.29), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
         case .darkBronze:
             return LinearGradient(colors: [Color(red: 0.23, green: 0.16, blue: 0.10), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .white:
+            return LinearGradient(colors: [Color(red: 0.91, green: 0.94, blue: 0.99), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
     var buttonForeground: Color {
@@ -569,6 +586,7 @@ private enum StrideTheme: String, CaseIterable, Identifiable {
         case .blackLime: return Color(red: 0.06, green: 0.08, blue: 0.04)
         case .graphiteViolet: return Color(red: 0.08, green: 0.06, blue: 0.12)
         case .darkBronze: return Color(red: 0.13, green: 0.08, blue: 0.04)
+        case .white: return Color.white
         }
     }
 }
@@ -743,7 +761,7 @@ private struct APKDetailSheet: View {
                     }
                     VStack(spacing: 0) {
                         detailRow("Archive", value: item.inspection.isValidPackage ? "Valid APK" : "Invalid", symbol: "archivebox")
-                        Divider().overlay(Color.white.opacity(0.05))
+                        Divider().overlay(Color.primary.opacity(themeIsLight ? 0.08 : 0.05))
                         detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
                         Divider().overlay(Color.white.opacity(0.05))
                         detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "curlybraces")
