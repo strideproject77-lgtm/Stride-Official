@@ -62,10 +62,10 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("STRIDE")
                     .font(.system(size: 21, weight: .black, design: .rounded))
-                    .tracking(2.4)
+                    .kerning(2.4)
                 Text("ANDROID APP RUNTIME")
                     .font(.system(size: 8, weight: .semibold))
-                    .tracking(1.2)
+                    .kerning(1.2)
                     .foregroundStyle(muted)
             }
             Spacer()
@@ -94,11 +94,11 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("YOUR RUNTIME SPACE")
                         .font(.system(size: 9, weight: .heavy))
-                        .tracking(1.6)
+                        .kerning(1.6)
                         .foregroundStyle(accent)
                     Text("Good to see you.")
                         .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .tracking(-0.7)
+                        .kerning(-0.7)
                     Text("Your Android apps, organized on iPhone.")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(muted)
@@ -108,7 +108,7 @@ struct ContentView: View {
                         HStack {
                             Label("LATEST IMPORT", systemImage: "sparkle")
                                 .font(.system(size: 9, weight: .heavy))
-                                .tracking(1.1)
+                                .kerning(1.1)
                                 .foregroundStyle(accent)
                             Spacer()
                             Text("IN YOUR LIBRARY")
@@ -137,7 +137,7 @@ struct ContentView: View {
                                 Image(systemName: "arrow.up.right")
                             }
                             .font(.system(size: 10, weight: .heavy))
-                            .tracking(0.6)
+                            .kerning(0.6)
                             .foregroundStyle(theme.buttonForeground)
                             .padding(.horizontal, 14)
                             .frame(height: 42)
@@ -176,7 +176,7 @@ struct ContentView: View {
                 HStack {
                     Text("RECENTLY IMPORTED")
                         .font(.system(size: 10, weight: .heavy))
-                        .tracking(1.3)
+                        .kerning(1.3)
                         .foregroundStyle(muted)
                     Spacer()
                     Text("\(library.packages.count)")
@@ -242,7 +242,7 @@ struct ContentView: View {
                 HStack {
                     Text("ALL APPS")
                         .font(.system(size: 9, weight: .heavy))
-                        .tracking(1.2)
+                        .kerning(1.2)
                         .foregroundStyle(muted)
                     Spacer()
                     Text("\(filteredPackages.count) ITEMS")
@@ -293,7 +293,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("APPEARANCE")
                         .font(.system(size: 9, weight: .heavy))
-                        .tracking(1.3)
+                        .kerning(1.3)
                         .foregroundStyle(muted)
                     ForEach(StrideTheme.allCases) { option in
                         Button { themeRawValue = option.rawValue } label: {
@@ -341,7 +341,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 11) {
                     Text("RUNTIME STATUS")
                         .font(.system(size: 9, weight: .heavy))
-                        .tracking(1.3)
+                        .kerning(1.3)
                         .foregroundStyle(muted)
                     statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
                     statusCard("DEX parsing and method loading", detail: "Integrated foundations", symbol: "curlybraces", good: true)
@@ -351,7 +351,7 @@ struct ContentView: View {
                 platformNote
                 Text("STRIDE · EXPERIMENTAL BUILD")
                     .font(.system(size: 8, weight: .heavy))
-                    .tracking(1.2)
+                    .kerning(1.2)
                     .foregroundStyle(muted.opacity(0.75))
                     .frame(maxWidth: .infinity)
                     .padding(.top, 2)
