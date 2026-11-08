@@ -5,7 +5,6 @@
 //! (onCreate, onStart, onResume, onPause, onStop, onDestroy).
 
 use crate::framework::{ActivityLifecycleState, Intent, Bundle};
-use crate::heap::ManagedHeap;
 use crate::loader::AppClassLoader;
 use crate::interpreter::ArtVm;
 use crate::types::Value;
@@ -84,7 +83,6 @@ impl ActivityManager {
     pub fn start_activity(
         &mut self,
         intent: Intent,
-        heap: &mut ManagedHeap,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> Result<u32, String> {
@@ -205,17 +203,17 @@ mod tests {
     fn activity_backstack_push_and_pop() {
         let mut am = ActivityManager::new();
         let mut class_loader = AppClassLoader::new();
-        let mut heap = ManagedHeap::default();
+        let mut vm_heap = crate::heap::ManagedHeap::default();
         let mut hierarchy = crate::hierarchy::ClassHierarchy::new();
         let mut monitors = crate::sync::MonitorTable::new();
         let mut jni = crate::jni::JniNativeRegistry::new();
         let methods = std::collections::HashMap::new();
         let strings: Vec<String> = Vec::new();
-        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
+        let mut vm = ArtVm::new(&mut vm_heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
 
         let mut intent1 = Intent::new(Some(Intent::ACTION_MAIN));
         intent1 = intent1.with_component("com.example.test", "MainActivity");
-        let id1 = am.start_activity(intent1, &mut heap, &mut class_loader, &mut vm).unwrap();
+        let id1 = am.start_activity(intent1, &mut class_loader, &mut vm).unwrap();
         assert_eq!(id1, 1);
         assert_eq!(am.activity_count(), 1);
         assert_eq!(am.current_activity().unwrap().class_name, "MainActivity");
@@ -224,13 +222,13 @@ mod tests {
         // Push second activity (e.g. SettingsActivity)
         let mut intent2 = Intent::new(Some(Intent::ACTION_VIEW));
         intent2 = intent2.with_component("com.example.test", "SettingsActivity");
-        let id2 = am.start_activity(intent2, &mut heap, &mut class_loader, &mut vm).unwrap();
+        let id2 = am.start_activity(intent2, &mut class_loader, &mut vm).unwrap();
         assert_eq!(id2, 2);
         assert_eq!(am.activity_count(), 2);
         assert_eq!(am.current_activity().unwrap().class_name, "SettingsActivity");
 
         // Back pressed finishes SettingsActivity, restoring MainActivity to Resumed
-        let handled = am.handle_back_pressed(&mut heap, &mut class_loader, &mut vm);
+        let handled = am.handle_back_pressed(&mut class_loader, &mut vm);
         assert!(handled);
         assert_eq!(am.activity_count(), 1);
         assert_eq!(am.current_activity().unwrap().class_name, "MainActivity");
