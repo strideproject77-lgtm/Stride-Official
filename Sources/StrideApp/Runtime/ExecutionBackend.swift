@@ -18,7 +18,44 @@ struct RuntimeCapabilityReport {
     let supportedAndroidAPIs: ClosedRange<Int>?
 }
 
-struct APKExecutionResult: Equatable {
+/// Owns the Rust runtime beyond the one-shot launch call. The handle is
+/// released only when the user closes the app session or the result is discarded.
+final class APKRuntimeSession: @unchecked Sendable {
+    private let lock = NSLock()
+    private var runtime: OpaquePointer?
+
+    init(runtime: OpaquePointer) {
+        self.runtime = runtime
+    }
+
+    func dispatchTouch(action: Int32, x: Float, y: Float) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return false }
+        return stride_runtime_dispatch_touch(runtime, action, x, y) == 0
+    }
+
+    func recordFrame(durationMilliseconds: Float) -> Float {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return 0 }
+        return stride_runtime_record_frame(runtime, durationMilliseconds)
+    }
+
+    func close() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return }
+        self.runtime = nil
+        stride_runtime_destroy(runtime)
+    }
+
+    deinit {
+        close()
+    }
+}
+
+struct APKExecutionResult {
     let statusCode: Int32
     let totalClassesLoaded: UInt32
     let instructionsExecuted: UInt32
@@ -26,6 +63,7 @@ struct APKExecutionResult: Equatable {
     let missingApisCount: UInt32
     let averageFps: Float
     let heapAllocatedBytes: UInt32
+    let session: APKRuntimeSession
 }
 
 enum RuntimeExecutionError: LocalizedError {
@@ -118,8 +156,11 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             StrideDiagnostics.recordAsync(severity: "FATAL", stage: "RUNTIME", code: "CREATE_FAILED", message: "Rust runtime creation returned null")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
+        var runtimeOwnershipTransferred = false
         defer {
-            stride_runtime_destroy(runtime)
+            if !runtimeOwnershipTransferred {
+                stride_runtime_destroy(runtime)
+            }
         }
 
         // A manifest without executable DEX code cannot enter the managed runtime.
@@ -239,7 +280,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             throw RuntimeExecutionError.manifestError("Failed to parse AndroidManifest binary XML")
         }
 
-        onLog("[INFO] Lifecycle launch attempt returned. This is not yet a persistent Android app session.")
+        // Transfer ownership to the UI so the Rust heap, class loader, graphics
+        // surface and input queue are not destroyed when this launch function returns.
+        // This retains runtime state; it does not yet imply a guest instruction scheduler.
+        let session = APKRuntimeSession(runtime: runtime)
+        runtimeOwnershipTransferred = true
+        onLog("[INFO] Runtime handle retained after lifecycle dispatch")
+        onLog("[WARN] Guest frame scheduler and Android event-loop dispatch are not active yet")
         return APKExecutionResult(
             statusCode: report.status_code,
             totalClassesLoaded: report.total_classes_loaded,
@@ -247,7 +294,8 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             lifecycleState: lifecycleDescription,
             missingApisCount: report.missing_apis_count,
             averageFps: report.average_fps,
-            heapAllocatedBytes: report.heap_allocated_bytes
+            heapAllocatedBytes: report.heap_allocated_bytes,
+            session: session
         )
     }
 }

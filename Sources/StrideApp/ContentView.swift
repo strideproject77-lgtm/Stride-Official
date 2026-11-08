@@ -907,9 +907,9 @@ private struct APKDetailSheet: View {
                                     Task { @MainActor in appendSessionLog(line) }
                                 }
                                 executionResult = res
-                                lastRunLabel = "Completed · \(Date().formatted(date: .abbreviated, time: .shortened))"
-                                appendSessionLog("[SESSION] Launch attempt completed with lifecycle \(res.lifecycleState)")
-                                diagnostics.finishSession(status: "completed")
+                                lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] Runtime handle retained; guest event loop is not active yet")
+                                appendSessionLog("[SESSION] Close the app detail sheet to release runtime resources")
                             } catch {
                                 executionError = error.localizedDescription
                                 lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
@@ -1075,6 +1075,12 @@ private struct APKDetailSheet: View {
             }
         }
         .onAppear(perform: loadPreviousSession)
+        .onDisappear {
+            executionResult?.session.close()
+            if executionResult != nil {
+                diagnostics.finishSession(status: "runtime released by user")
+            }
+        }
     }
 
     private var executionScreen: some View {
@@ -1112,7 +1118,7 @@ private struct APKDetailSheet: View {
                     Circle()
                         .fill(isExecuting ? Color.orange : (executionError == nil && executionResult != nil ? Color.green : Color.red))
                         .frame(width: 8, height: 8)
-                    Text(isExecuting ? "STARTING RUNTIME" : (executionError == nil && executionResult != nil ? "LAUNCH ATTEMPT COMPLETE" : (executionError != nil ? "LAUNCH FAILED" : "READY")))
+                    Text(isExecuting ? "STARTING RUNTIME" : (executionError == nil && executionResult != nil ? "RUNTIME RETAINED · IDLE" : (executionError != nil ? "LAUNCH FAILED" : "READY")))
                         .font(.system(size: 10, weight: .heavy))
                         .kerning(1.2)
                         .foregroundStyle(.white.opacity(0.78))
