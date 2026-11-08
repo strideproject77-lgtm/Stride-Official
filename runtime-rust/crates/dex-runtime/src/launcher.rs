@@ -102,6 +102,25 @@ impl AndroidRuntime {
             |_env, _args| Ok(None),
         );
 
+        // App Activities commonly call these superclass implementations from
+        // their lifecycle overrides. Register the full core callback set so
+        // those calls resolve instead of being reported as missing framework APIs.
+        for (name, signature) in [
+            ("onRestart", "()V"),
+            ("onStart", "()V"),
+            ("onResume", "()V"),
+            ("onPause", "()V"),
+            ("onStop", "()V"),
+            ("onDestroy", "()V"),
+        ] {
+            jni.register(
+                "Landroid/app/Activity;",
+                name,
+                signature,
+                |_env, _args| Ok(None),
+            );
+        }
+
         jni.register(
             "Ljava/lang/System;",
             "currentTimeMillis",
@@ -703,15 +722,23 @@ mod framework_bridge_tests {
     use super::*;
 
     #[test]
-    fn activity_on_create_super_call_has_framework_bridge() {
+    fn activity_core_lifecycle_super_calls_have_framework_bridges() {
         let runtime = AndroidRuntime::new("com.stride.test");
-        assert!(
-            runtime.jni.find(
-                "Landroid/app/Activity;",
-                "onCreate",
-                "(Landroid/os/Bundle;)V"
-            ).is_some(),
-            "Activity.onCreate(Bundle) must resolve through the framework bridge"
-        );
+        for (name, signature) in [
+            ("onCreate", "(Landroid/os/Bundle;)V"),
+            ("onRestart", "()V"),
+            ("onStart", "()V"),
+            ("onResume", "()V"),
+            ("onPause", "()V"),
+            ("onStop", "()V"),
+            ("onDestroy", "()V"),
+        ] {
+            assert!(
+                runtime.jni.find("Landroid/app/Activity;", name, signature).is_some(),
+                "Activity.{}{} must resolve through the framework bridge",
+                name,
+                signature
+            );
+        }
     }
 }
