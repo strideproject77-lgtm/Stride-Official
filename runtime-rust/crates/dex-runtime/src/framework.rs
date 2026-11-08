@@ -214,6 +214,22 @@ impl SharedPreferences {
     pub fn get_string(&self, key: &str) -> Option<u32> {
         self.values.get(key).and_then(|v| v.as_object())
     }
+
+    /// Persist pending preference changes synchronously.
+    ///
+    /// The current runtime stores preferences directly in its in-memory
+    /// AndroidEnvironment, so writes are already visible immediately.
+    /// Returning true mirrors Android SharedPreferences.Editor.commit()
+    /// while a durable on-disk backend is not yet available.
+    pub fn commit(&mut self) -> bool {
+        true
+    }
+
+    /// Apply preference changes asynchronously.
+    ///
+    /// Writes are already applied to the in-memory environment; this method
+    /// exists for API compatibility with Android SharedPreferences.Editor.
+    pub fn apply(&mut self) {}
 }
 
 /// Full Android execution environment hosting packages, preferences, assets, and process state.
