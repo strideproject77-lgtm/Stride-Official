@@ -219,6 +219,22 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
     };
 
     rt.input_queue.enqueue_motion(event);
+    // Record discrete input transitions; high-frequency MOVE events remain
+    // in the input queue and are deliberately not emitted as individual logs.
+    if motion_action != ACTION_MOVE {
+        let action_name = match motion_action {
+            ACTION_DOWN => "DOWN",
+            ACTION_UP => "UP",
+            ACTION_CANCEL => "CANCEL",
+            _ => "OTHER",
+        };
+        rt.diagnostics.record(
+            stride_dex_runtime::DiagnosticSeverity::Info,
+            "Input",
+            &format!("Touch {}", action_name),
+            Some(&format!("x={:.1}, y={:.1}", x, y)),
+        );
+    }
     0
 }
 
