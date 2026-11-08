@@ -396,6 +396,9 @@ impl AndroidRuntime {
                     &[],
                 );
                 vm.attach_diagnostics(&self.diagnostics);
+                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                    vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                }
                 // Call onCreate with this=activity_obj, savedInstanceState=null
                 let args = [Value::Object(activity_obj), Value::Null];
                 match vm.execute_method(mid16, &args, step_budget) {

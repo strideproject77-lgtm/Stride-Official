@@ -15,6 +15,7 @@ use crate::hierarchy::ClassHierarchy;
 use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
+use stride_dex_inspector::classes::MethodReference;
 use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,6 +52,58 @@ pub struct ArtVm<'a> {
     pub static_fields: HashMap<(String, String), Value>,
     pub strings: &'a [String],
     pub diagnostics: Option<&'a RuntimeDiagnostics>,
+    pub method_references: Option<&'a [MethodReference]>,
+    pub method_lookup: Option<&'a HashMap<(String, String, String), u32>>,
+}
+
+fn decode_invoke_arguments(
+    registers: &RegisterFile,
+    register_indices: &[u16],
+    prototype: &str,
+    is_static: bool,
+) -> Result<Vec<Value>, String> {
+    let params = prototype.strip_prefix('(')
+        .and_then(|tail| tail.split_once(')').map(|(params, _)| params))
+        .ok_or_else(|| format!("Malformed method prototype: {}", prototype))?;
+    let mut args = Vec::new();
+    let mut word = 0usize;
+    if !is_static {
+        let reg = *register_indices.get(word).ok_or("Missing receiver register")?;
+        args.push(Value::Object(registers.read_object(reg).map_err(|r| format!("Invalid receiver register {}", r))?));
+        word += 1;
+    }
+    let bytes = params.as_bytes();
+    let mut cursor = 0usize;
+    while cursor < bytes.len() {
+        let start = cursor;
+        while bytes.get(cursor) == Some(&b'[') { cursor += 1; }
+        let kind = *bytes.get(cursor).ok_or("Truncated parameter descriptor")?;
+        cursor += 1;
+        if kind == b'L' {
+            let end = params.get(cursor..).and_then(|s| s.find(';'))
+                .ok_or("Unterminated object parameter descriptor")?;
+            cursor += end + 1;
+        } else if !matches!(kind, b'Z' | b'B' | b'C' | b'S' | b'I' | b'F' | b'J' | b'D') {
+            return Err(format!("Unsupported parameter descriptor at byte {}", start));
+        }
+        let is_array = bytes[start] == b'[';
+        let reg = *register_indices.get(word).ok_or("Invoke register count is smaller than prototype")?;
+        if is_array || kind == b'L' {
+            args.push(Value::Object(registers.read_object(reg).map_err(|r| format!("Invalid object register {}", r))?));
+            word += 1;
+        } else {
+            match kind {
+                b'J' => { args.push(Value::Long(registers.read_long(reg).map_err(|r| format!("Invalid wide register {}", r))?)); word += 2; }
+                b'D' => { args.push(Value::Double(registers.read_double(reg).map_err(|r| format!("Invalid wide register {}", r))?)); word += 2; }
+                b'F' => { args.push(Value::Float(registers.read_float(reg).map_err(|r| format!("Invalid float register {}", r))?)); word += 1; }
+                _ => { args.push(Value::Int(registers.read_int(reg).map_err(|r| format!("Invalid integer register {}", r))?)); word += 1; }
+            }
+        }
+    }
+    if word != register_indices.len() {
+        return Err(format!("DEX invoke register words={} but prototype consumes={}", register_indices.len(), word));
+    }
+    Ok(args)
 }
 
 impl<'a> ArtVm<'a> {
@@ -71,12 +124,24 @@ impl<'a> ArtVm<'a> {
             static_fields: HashMap::new(),
             strings,
             diagnostics: None,
+            method_references: None,
+            method_lookup: None,
         }
     }
 
     /// Attaches the session recorder without coupling standalone VM tests to a global logger.
     pub fn attach_diagnostics(&mut self, diagnostics: &'a RuntimeDiagnostics) {
         self.diagnostics = Some(diagnostics);
+    }
+
+    /// Connects DEX-local method reference indexes to loaded runtime method IDs.
+    pub fn attach_method_resolver(
+        &mut self,
+        references: &'a [MethodReference],
+        lookup: &'a HashMap<(String, String, String), u32>,
+    ) {
+        self.method_references = Some(references);
+        self.method_lookup = Some(lookup);
     }
 
     pub fn execute_method(
@@ -1078,17 +1143,16 @@ impl<'a> ArtVm<'a> {
                     pc += 1;
                 }
                 0x6e | 0x6f | 0x70 | 0x71 | 0x72 | 0x74 | 0x75 | 0x76 | 0x77 | 0x78 => { // Method invoke family
-                    let target_method_id = code_units[pc + 1];
+                    let dex_method_index = code_units[pc + 1];
                     let is_range = op >= 0x74;
                     let count = if is_range { a8 as usize } else { ((first >> 12) & 0x0f) as usize };
-                    let mut args = Vec::with_capacity(count);
+                    let mut argument_registers = Vec::with_capacity(count);
 
                     if is_range {
                         let start = code_units[pc + 2];
                         for i in 0..count {
-                            let reg = start + i as u16;
-                            let v = rf.read_int(reg).map_err(|e| format!("Invalid reg {}", e))?;
-                            args.push(Value::Int(v));
+                            argument_registers.push(start.checked_add(i as u16)
+                                .ok_or_else(|| "Invoke register range overflow".to_string())?);
                         }
                     } else {
                         let packed = code_units[pc + 2];
@@ -1099,41 +1163,72 @@ impl<'a> ArtVm<'a> {
                             (packed >> 12) & 0x0f,
                             ((first >> 8) & 0x0f) as u16,
                         ];
-                        for &reg in &candidate_regs[..count] {
-                            let v = rf.read_int(reg).map_err(|e| format!("Invalid reg {}", e))?;
-                            args.push(Value::Int(v));
-                        }
+                        argument_registers.extend_from_slice(&candidate_regs[..count]);
                     }
 
-                    // Check for native method invocation
-                    let target_method = self.methods.get(&target_method_id);
-                    let native_handler = target_method.and_then(|target| {
-                        self.jni.find(&target.class_descriptor, &target.name, &target.prototype).cloned()
-                    });
+                    // DEX invoke operands index the DEX method_ids table, not the
+                    // runtime's compact method-code map. Resolve the full signature first.
+                    let reference = self.method_references
+                        .and_then(|references| references.get(dex_method_index as usize));
+                    let signature = reference.map(|r| (
+                        r.class_descriptor.as_str(), r.name.as_str(), r.prototype.as_str()
+                    ));
+                    let runtime_method_id = if let Some((class, name, proto)) = signature {
+                        self.method_lookup
+                            .and_then(|lookup| lookup.get(&(class.to_owned(), name.to_owned(), proto.to_owned())).copied())
+                            .and_then(|id| u16::try_from(id).ok())
+                    } else if self.method_references.is_none() {
+                        Some(dex_method_index)
+                    } else {
+                        None
+                    };
+                    let target_method = runtime_method_id.and_then(|id| self.methods.get(&id));
+                    let (target_class, target_name, target_proto) = if let Some(r) = reference {
+                        (r.class_descriptor.as_str(), r.name.as_str(), r.prototype.as_str())
+                    } else if let Some(target) = target_method {
+                        (target.class_descriptor.as_str(), target.name.as_str(), target.prototype.as_str())
+                    } else {
+                        ("<unknown>", "<unknown>", "()V")
+                    };
 
-                    if let Some(handler) = native_handler {
-                        let mut env = crate::jni::JniEnv::new(self.heap);
-                        let native_res = handler(&mut env, &args).map_err(|e| format!("{:?}", e))?;
-                        pending_result = native_res;
-                        pc += 3;
-                        continue;
-                    }
+                    let is_static_invoke = matches!(op, 0x71 | 0x77);
+                    let args = decode_invoke_arguments(&rf, &argument_registers, target_proto, is_static_invoke)
+                        .map_err(|error| format!(
+                            "Invalid invoke arguments for {}->{}{} at PC {}: {}",
+                            target_class, target_name, target_proto, pc, error
+                        ))?;
 
+                    // Framework and native references are dispatched by their complete
+                    // DEX signature even when no app-defined MethodCode exists.
+                    let native_handler = self.jni.find(target_class, target_name, target_proto).cloned();
                     if target_method.is_none() {
+                        if let Some(handler) = native_handler {
+                            let mut env = crate::jni::JniEnv::new(self.heap);
+                            pending_result = handler(&mut env, &args).map_err(|e| format!("{:?}", e))?;
+                            pc += 3;
+                            continue;
+                        }
                         if let Some(diagnostics) = self.diagnostics {
                             diagnostics.record_detailed(
                                 DiagnosticSeverity::MissingApi, "MethodResolver", "INVOKE_TARGET_UNRESOLVED",
-                                "DEX invoke target is missing from the loaded runtime method map",
+                                "DEX method reference could not be resolved to app code or a registered framework/JNI bridge",
                                 Some(&format!(
-                                    "target_method_id={} caller={}->{}{} pc={}",
-                                    target_method_id, method_class, method_name, method_proto, pc
+                                    "dex_method_index={} target={}->{}{} caller={}->{}{} pc={}",
+                                    dex_method_index, target_class, target_name, target_proto,
+                                    method_class, method_name, method_proto, pc
                                 )),
-                                Some("Resolve the DEX method reference against loaded class definitions or provide the required Android/JNI API bridge"),
+                                Some("Resolve the DEX method_ids entry to a loaded class method or implement the exact framework/JNI signature"),
                             );
                         }
+                        return Err(format!(
+                            "Unresolved DEX method reference #{}: {}->{}{}",
+                            dex_method_index, target_class, target_name, target_proto
+                        ));
                     }
+
+                    let runtime_method_id = runtime_method_id.expect("target method implies runtime ID");
                     let remaining = step_limit.saturating_sub(steps);
-                    let sub_report = self.execute_internal(target_method_id, &args, remaining, call_depth + 1, trace)
+                    let sub_report = self.execute_internal(runtime_method_id, &args, remaining, call_depth + 1, trace)
                         .map_err(|error| format!(
                             "Call site {}->{}{} at PC {}: {}",
                             method_class, method_name, method_proto, pc, error
