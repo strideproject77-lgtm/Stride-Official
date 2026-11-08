@@ -1,6 +1,9 @@
 name: Stride iOS IPA Builder
 
 on:
+  push:
+    branches:
+      - feat/dex-class-method-loader
   pull_request:
     branches:
       - main
@@ -31,7 +34,7 @@ jobs:
 
   build-ipa:
     name: Build and verify unsigned iOS IPA
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     needs: rust-tests
     runs-on: macos-15
     timeout-minutes: 90
