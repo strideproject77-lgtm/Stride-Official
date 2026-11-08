@@ -1088,7 +1088,7 @@ private struct APKDetailSheet: View {
     private func appendSessionLog(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
         sessionLogLines.append("[\(stamp)] \(message)")
-        let content = sessionLogLines.joined(separator: "\\n") + "\\n"
+        let content = sessionLogLines.joined(separator: "\n") + "\n"
         let url = logFileURL()
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
