@@ -14,6 +14,10 @@ final class APKLibraryStore: ObservableObject {
     }
 
     func importPackage(from sourceURL: URL) throws {
+        let diagnostics = StrideDiagnostics.shared
+        diagnostics.beginSession(apkName: sourceURL.lastPathComponent)
+        diagnostics.record(.info, stage: "IMPORT", code: "SOURCE_SELECTED",
+                           "User selected APK: \(sourceURL.lastPathComponent)")
         let didAccess = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
@@ -21,14 +25,20 @@ final class APKLibraryStore: ObservableObject {
 
         let folder = try libraryFolder()
         let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-        try fileManager.copyItem(at: sourceURL, to: destination)
-
         do {
+            try fileManager.copyItem(at: sourceURL, to: destination)
+            diagnostics.record(.info, stage: "IMPORT", code: "COPY_OK", "APK copied into private library")
+            diagnostics.record(.info, stage: "ARCHIVE", code: "SCAN_START", "Scanning ZIP entries and required APK structure")
             let report = try inspector.inspect(destination)
+            diagnostics.record(.info, stage: "ARCHIVE", code: "SCAN_OK", "Archive scan complete: entries=\(report.archiveEntryCount), manifest=\(report.hasAndroidManifest), dex=\(report.dexFileCount), nativeABIs=\(report.nativeABIs.joined(separator: ", "))")
             packages.removeAll { $0.fileURL == destination }
             packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+            diagnostics.finishSession(status: "IMPORT_INSPECTION_COMPLETE")
         } catch {
+            diagnostics.record(.error, stage: "IMPORT", code: "IMPORT_FAILED", error.localizedDescription,
+                               recovery: "This APK could not be added; other APKs can still be inspected")
             try? fileManager.removeItem(at: destination)
+            diagnostics.finishSession(status: "IMPORT_FAILED")
             throw error
         }
     }
