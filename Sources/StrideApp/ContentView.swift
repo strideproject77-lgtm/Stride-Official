@@ -660,10 +660,9 @@ private struct APKRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                     .foregroundStyle(.white)
-                Text(item.inspection.summary)
+                Text("Tap to open")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(muted)
-                    .lineLimit(1)
                 HStack(spacing: 5) {
                     Circle().fill(accent).frame(width: 5, height: 5)
                     Text("PACKAGE INSPECTED")
