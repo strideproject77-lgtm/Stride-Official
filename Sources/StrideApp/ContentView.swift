@@ -11,7 +11,8 @@ struct ContentView: View {
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
     @State private var searchText = ""
-    @AppStorage("stride.selectedTheme") private var themeRawValue = StrideTheme.blackLime.rawValue
+    @AppStorage("stride.selectedTheme") private var themeRawValue = StrideTheme.darkBronze.rawValue
+    @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
     private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .blackLime }
     private var background: Color { theme.background }
@@ -181,6 +182,7 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundStyle(muted)
                     if !library.packages.isEmpty {
+                        layoutToggle
                         Button("SEE ALL") { selectedTab = 1 }
                             .font(.system(size: 9, weight: .heavy))
                             .foregroundStyle(accent)
@@ -189,9 +191,7 @@ struct ContentView: View {
                 if library.packages.isEmpty {
                     emptyState
                 } else {
-                    VStack(spacing: 9) {
-                        ForEach(library.packages.prefix(4)) { item in packageButton(item) }
-                    }
+                    appCollection(Array(library.packages.prefix(4)))
                 }
                 platformNote
             }
@@ -213,6 +213,7 @@ struct ContentView: View {
                             .foregroundStyle(muted)
                     }
                     Spacer()
+                    layoutToggle
                     Button { showingImporter = true } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 15, weight: .bold))
@@ -258,14 +259,41 @@ struct ContentView: View {
                             .padding(.vertical, 28)
                     }
                 } else {
-                    VStack(spacing: 9) {
-                        ForEach(filteredPackages) { item in packageButton(item) }
-                    }
+                    appCollection(filteredPackages)
                 }
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
             .padding(.bottom, 22)
+        }
+    }
+
+    private var isGridLayout: Bool { appLayoutRawValue == "grid" }
+
+    private var layoutToggle: some View {
+        Button {
+            appLayoutRawValue = isGridLayout ? "list" : "grid"
+        } label: {
+            Image(systemName: isGridLayout ? "list.bullet" : "square.grid.2x2")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 38, height: 38)
+                .background(panel, in: RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isGridLayout ? "Switch to list view" : "Switch to grid view")
+    }
+
+    @ViewBuilder
+    private func appCollection(_ items: [ImportedAPK]) -> some View {
+        if isGridLayout {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                ForEach(items) { item in packageButton(item) }
+            }
+        } else {
+            VStack(spacing: 9) {
+                ForEach(items) { item in packageButton(item) }
+            }
         }
     }
 
@@ -442,7 +470,11 @@ struct ContentView: View {
 
     private func packageButton(_ item: ImportedAPK) -> some View {
         Button { selectedPackage = item } label: {
-            APKRow(item: item, accent: accent, panel: panel, raised: raised, muted: muted, line: line)
+            if isGridLayout {
+                APKGridCard(item: item, accent: accent, panel: panel, raised: raised, muted: muted, line: line)
+            } else {
+                APKRow(item: item, accent: accent, panel: panel, raised: raised, muted: muted, line: line)
+            }
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens package inspection details")
@@ -601,6 +633,53 @@ private struct APKRow: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(panel, in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17).stroke(line, lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 17))
+    }
+}
+
+private struct APKGridCard: View {
+    let item: ImportedAPK
+    let accent: Color
+    let panel: Color
+    let raised: Color
+    let muted: Color
+    let line: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Spacer(minLength: 0)
+                APKIconView(data: item.iconData, accent: accent, size: 66)
+                    .background(raised, in: RoundedRectangle(cornerRadius: 19))
+                    .clipShape(RoundedRectangle(cornerRadius: 19))
+                Spacer(minLength: 0)
+            }
+            Text(item.displayName)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+            Text(item.inspection.summary)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(muted)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 5) {
+                Circle().fill(accent).frame(width: 5, height: 5)
+                Text("IMPORTED")
+                    .font(.system(size: 7, weight: .heavy))
+                    .kerning(0.7)
+                    .foregroundStyle(accent)
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(muted)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
         .background(panel, in: RoundedRectangle(cornerRadius: 17))
         .overlay(RoundedRectangle(cornerRadius: 17).stroke(line, lineWidth: 1))
         .contentShape(RoundedRectangle(cornerRadius: 17))
