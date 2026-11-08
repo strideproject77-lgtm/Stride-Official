@@ -65,32 +65,28 @@ final class APKLibraryStore: ObservableObject {
             if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
         }
 
+        guard sourceURL.isFileURL,
+              fileManager.isReadableFile(atPath: sourceURL.path) else {
+            throw APKLibraryImportError.unreadableSource
+        }
+
         let folder = try libraryFolder()
         let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-        let coordinator = NSFileCoordinator(filePresenter: nil)
-        var coordinationError: NSError?
-        var copyError: Error?
 
-        coordinator.coordinate(readingItemAt: sourceURL, options: [], error: &coordinationError) { readableURL in
-            do {
-                guard fileManager.fileExists(atPath: readableURL.path) else {
-                    throw APKLibraryImportError.unreadableSource
-                }
-                try fileManager.copyItem(at: readableURL, to: destination)
-            } catch {
-                copyError = error
-            }
+        // UIDocumentPicker is configured with asCopy=true, so provider-backed
+        // files arrive as a local sandbox copy. Copy directly while any optional
+        // security-scoped access is active; coordinating the already-local copy
+        // can cause a successful picker selection to produce no library item.
+        do {
+            try fileManager.copyItem(at: sourceURL, to: destination)
+        } catch {
+            try? fileManager.removeItem(at: destination)
+            throw error
         }
 
-        if let coordinationError {
+        guard fileManager.fileExists(atPath: destination.path),
+              fileManager.isReadableFile(atPath: destination.path) else {
             try? fileManager.removeItem(at: destination)
-            throw coordinationError
-        }
-        if let copyError {
-            try? fileManager.removeItem(at: destination)
-            throw copyError
-        }
-        guard fileManager.fileExists(atPath: destination.path) else {
             throw APKLibraryImportError.unreadableSource
         }
         return destination
