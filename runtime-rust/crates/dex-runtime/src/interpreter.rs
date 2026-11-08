@@ -15,6 +15,7 @@ use crate::hierarchy::ClassHierarchy;
 use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
+use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExecutionStopReason {
@@ -49,6 +50,7 @@ pub struct ArtVm<'a> {
     pub methods: &'a HashMap<u16, MethodCode>,
     pub static_fields: HashMap<(String, String), Value>,
     pub strings: &'a [String],
+    pub diagnostics: Option<&'a RuntimeDiagnostics>,
 }
 
 impl<'a> ArtVm<'a> {
@@ -68,7 +70,13 @@ impl<'a> ArtVm<'a> {
             methods,
             static_fields: HashMap::new(),
             strings,
+            diagnostics: None,
         }
+    }
+
+    /// Attaches the session recorder without coupling standalone VM tests to a global logger.
+    pub fn attach_diagnostics(&mut self, diagnostics: &'a RuntimeDiagnostics) {
+        self.diagnostics = Some(diagnostics);
     }
 
     pub fn execute_method(
@@ -77,8 +85,22 @@ impl<'a> ArtVm<'a> {
         arguments: &[Value],
         step_limit: usize,
     ) -> Result<InterpreterReport, String> {
+        let context = self.methods.get(&method_id)
+            .map(|method| format!("{}->{}{}", method.class_descriptor, method.name, method.prototype))
+            .unwrap_or_else(|| format!("method_id={}", method_id));
         let mut trace = RuntimeStackTrace::new();
-        self.execute_internal(method_id, arguments, step_limit, 0, &mut trace)
+        let result = self.execute_internal(method_id, arguments, step_limit, 0, &mut trace);
+        if let (Some(diagnostics), Err(error)) = (self.diagnostics, &result) {
+            diagnostics.record_detailed(
+                DiagnosticSeverity::RuntimeError,
+                "ART",
+                "INTERPRETER_EXECUTION_FAILED",
+                "Dalvik method execution failed",
+                Some(&format!("{}: {}", context, error)),
+                Some("Use the nested call-site/PC and opcode details to inspect DEX decoding, register use and unresolved framework calls"),
+            );
+        }
+        result
     }
 
     fn execute_internal(
@@ -90,12 +112,29 @@ impl<'a> ArtVm<'a> {
         trace: &mut RuntimeStackTrace,
     ) -> Result<InterpreterReport, String> {
         if call_depth > 128 {
+            if let Some(diagnostics) = self.diagnostics {
+                diagnostics.record_detailed(
+                    DiagnosticSeverity::RuntimeError, "ART", "CALL_DEPTH_LIMIT",
+                    "Nested DEX method calls exceeded the runtime depth limit",
+                    Some(&format!("method_id={} depth={} limit=128", method_id, call_depth)),
+                    Some("Inspect recursive call paths and ensure the application is not stuck in unbounded recursion"),
+                );
+            }
             return Err("Call depth limit exceeded (128 frames)".into());
         }
 
         let (code_units, registers_size, ins_size, try_blocks, method_class, method_name, method_proto) = {
-            let m = self.methods.get(&method_id)
-                .ok_or_else(|| format!("Method ID {} not found", method_id))?;
+            let Some(m) = self.methods.get(&method_id) else {
+                if let Some(diagnostics) = self.diagnostics {
+                    diagnostics.record_detailed(
+                        DiagnosticSeverity::MissingApi, "MethodResolver", "METHOD_ID_NOT_FOUND",
+                        "Runtime method ID is not present in the loaded code map",
+                        Some(&format!("method_id={} call_depth={}", method_id, call_depth)),
+                        Some("Verify DEX method-index to runtime-method-ID mapping and whether the referenced class/method was loaded"),
+                    );
+                }
+                return Err(format!("Method ID {} not found", method_id));
+            };
             (
                 m.code_units.clone(),
                 m.registers_size,
@@ -1067,12 +1106,10 @@ impl<'a> ArtVm<'a> {
                     }
 
                     // Check for native method invocation
-                    let native_handler = self
-                        .methods
-                        .get(&target_method_id)
-                        .and_then(|target| {
-                            self.jni.find(&target.class_descriptor, &target.name, &target.prototype).cloned()
-                        });
+                    let target_method = self.methods.get(&target_method_id);
+                    let native_handler = target_method.and_then(|target| {
+                        self.jni.find(&target.class_descriptor, &target.name, &target.prototype).cloned()
+                    });
 
                     if let Some(handler) = native_handler {
                         let mut env = crate::jni::JniEnv::new(self.heap);
@@ -1082,8 +1119,25 @@ impl<'a> ArtVm<'a> {
                         continue;
                     }
 
+                    if target_method.is_none() {
+                        if let Some(diagnostics) = self.diagnostics {
+                            diagnostics.record_detailed(
+                                DiagnosticSeverity::MissingApi, "MethodResolver", "INVOKE_TARGET_UNRESOLVED",
+                                "DEX invoke target is missing from the loaded runtime method map",
+                                Some(&format!(
+                                    "target_method_id={} caller={}->{}{} pc={}",
+                                    target_method_id, method_class, method_name, method_proto, pc
+                                )),
+                                Some("Resolve the DEX method reference against loaded class definitions or provide the required Android/JNI API bridge"),
+                            );
+                        }
+                    }
                     let remaining = step_limit.saturating_sub(steps);
-                    let sub_report = self.execute_internal(target_method_id, &args, remaining, call_depth + 1, trace)?;
+                    let sub_report = self.execute_internal(target_method_id, &args, remaining, call_depth + 1, trace)
+                        .map_err(|error| format!(
+                            "Call site {}->{}{} at PC {}: {}",
+                            method_class, method_name, method_proto, pc, error
+                        ))?;
                     steps += sub_report.steps_executed;
 
                     match sub_report.stop_reason {
@@ -1125,7 +1179,20 @@ impl<'a> ArtVm<'a> {
                     }
                     pc += 3;
                 }
-                _ => return Err(format!("Unsupported opcode 0x{:02x} at PC {}", op, pc)),
+                _ => {
+                    if let Some(diagnostics) = self.diagnostics {
+                        diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError, "ART", "UNSUPPORTED_DEX_OPCODE",
+                            "Interpreter encountered an unsupported DEX opcode",
+                            Some(&format!(
+                                "opcode=0x{:02x} pc={} method={}->{}{}",
+                                op, pc, method_class, method_name, method_proto
+                            )),
+                            Some("Check the DEX version and opcode format; add a verified implementation before retrying execution"),
+                        );
+                    }
+                    return Err(format!("Unsupported opcode 0x{:02x} at PC {}", op, pc));
+                },
             }
         }
 
@@ -1339,4 +1406,23 @@ mod tests {
             ExecutionStopReason::ReturnedValue(Value::Int(42))
         );
     }
+    #[test]
+    fn records_missing_method_ids_in_attached_session_diagnostics() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::new();
+        let diagnostics = RuntimeDiagnostics::new();
+        let mut vm = ArtVm::new(
+            &mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[],
+        );
+        vm.attach_diagnostics(&diagnostics);
+
+        assert!(vm.execute_method(77, &[], 10).is_err());
+        let report = diagnostics.export_text();
+        assert!(report.contains("METHOD_ID_NOT_FOUND"), "{report}");
+        assert!(report.contains("INTERPRETER_EXECUTION_FAILED"), "{report}");
+    }
+
 }

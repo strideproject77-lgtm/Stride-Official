@@ -391,6 +391,7 @@ impl AndroidRuntime {
                     &method_map,
                     &[],
                 );
+                vm.attach_diagnostics(&self.diagnostics);
                 // Call onCreate with this=activity_obj, savedInstanceState=null
                 let args = [Value::Object(activity_obj), Value::Null];
                 match vm.execute_method(mid16, &args, step_budget) {
@@ -489,6 +490,7 @@ impl AndroidRuntime {
                     &method_map,
                     &[],
                 );
+                vm.attach_diagnostics(&self.diagnostics);
                 let args = [Value::Object(activity_obj)];
                 match vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
                     Ok(report) => {
