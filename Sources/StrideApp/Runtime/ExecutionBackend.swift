@@ -147,7 +147,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 }
             }
             guard nativeStatus == 0 else {
-                onLog("[ERROR] Native library \\(soName) load failed with status \\(nativeStatus)")
+                onLog("[ERROR] Native library \(soName) load failed with status \(nativeStatus)")
                 throw RuntimeExecutionError.nativeLibraryLoadFailed(name: soName, status: nativeStatus)
             }
         }
