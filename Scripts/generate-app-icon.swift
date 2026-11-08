@@ -46,25 +46,19 @@ hexagon.lineWidth = 25
 hexagon.lineJoinStyle = .round
 hexagon.stroke()
 
-// Bold, angular Stride core mark based on the selected second concept.
-let mark = NSBezierPath()
-let points: [NSPoint] = [
-    NSPoint(x: 315, y: 675),
-    NSPoint(x: 710, y: 675),
-    NSPoint(x: 405, y: 350),
-    NSPoint(x: 315, y: 350),
-    NSPoint(x: 410, y: 485),
-    NSPoint(x: 275, y: 485),
-    NSPoint(x: 355, y: 585),
-    NSPoint(x: 510, y: 585),
-    NSPoint(x: 555, y: 630),
-    NSPoint(x: 315, y: 630)
-]
-mark.move(to: points[0])
-for point in points.dropFirst() { mark.line(to: point) }
-mark.close()
-NSColor.white.setFill()
-mark.fill()
+// Selected option B — Core / Hex: a clean runtime hexagon with a bold S core.
+let core = NSBezierPath()
+core.move(to: NSPoint(x: 660, y: 650))
+core.line(to: NSPoint(x: 420, y: 650))
+core.curve(to: NSPoint(x: 365, y: 575), controlPoint1: NSPoint(x: 365, y: 650), controlPoint2: NSPoint(x: 340, y: 605))
+core.line(to: NSPoint(x: 610, y: 470))
+core.curve(to: NSPoint(x: 660, y: 395), controlPoint1: NSPoint(x: 680, y: 435), controlPoint2: NSPoint(x: 660, y: 395))
+core.line(to: NSPoint(x: 390, y: 395))
+NSColor.white.setStroke()
+core.lineWidth = 76
+core.lineCapStyle = .round
+core.lineJoinStyle = .round
+core.stroke()
 
 image.unlockFocus()
 
