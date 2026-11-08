@@ -77,19 +77,21 @@ fn len8(bytes: &[u8], cursor: &mut usize, limit: usize) -> Result<usize, AxmlErr
 
 /// Android's variable-length UTF-16 code-unit count (one or two little-endian words).
 fn len16(bytes: &[u8], cursor: &mut usize, limit: usize) -> Result<usize, AxmlError> {
-    let first = u16le(bytes, *cursor)? as usize;
-    *cursor = cursor.checked_add(2).ok_or(AxmlError::Truncated)?;
-    if *cursor > limit {
+    let first_end = cursor.checked_add(2).ok_or(AxmlError::Truncated)?;
+    if first_end > limit {
         return Err(AxmlError::Truncated);
     }
+    let first = u16le(bytes, *cursor)? as usize;
+    *cursor = first_end;
     if first & 0x8000 == 0 {
         return Ok(first);
     }
-    let second = u16le(bytes, *cursor)? as usize;
-    *cursor = cursor.checked_add(2).ok_or(AxmlError::Truncated)?;
-    if *cursor > limit {
+    let second_end = cursor.checked_add(2).ok_or(AxmlError::Truncated)?;
+    if second_end > limit {
         return Err(AxmlError::Truncated);
     }
+    let second = u16le(bytes, *cursor)? as usize;
+    *cursor = second_end;
     Ok(((first & 0x7fff) << 16) | second)
 }
 
@@ -358,7 +360,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<ManifestMetadata, AxmlError> {
             let attribute_start = u16le(bytes, cursor + 24)? as usize;
             let attribute_size = u16le(bytes, cursor + 26)? as usize;
             let attribute_count = u16le(bytes, cursor + 28)? as usize;
-            if attribute_size < 20 {
+            if attribute_size < 20 || attribute_start < 20 {
                 return Err(AxmlError::InvalidChunk);
             }
             let extension_start = cursor.checked_add(16).ok_or(AxmlError::InvalidChunk)?;
@@ -564,6 +566,7 @@ mod tests {
         if kind == 0x0102 {
             push_u16(&mut out, 20); // attributeStart, relative to attrExt
             push_u16(&mut out, 20);
+            push_u16(&mut out, 0);
             push_u16(&mut out, 0);
             push_u16(&mut out, 0);
             push_u16(&mut out, 0);
