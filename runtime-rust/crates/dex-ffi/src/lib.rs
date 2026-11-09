@@ -402,11 +402,11 @@ mod tests {
     }
 
     #[test]
-    fn manifest_orientation_reader_defaults_to_unspecified_for_real_fixture() {
+    fn manifest_orientation_reader_reads_real_fixture_declaration() {
         let bytes = include_bytes!("../../axml/tests/fixtures/pocket-ridge-manifest.axml");
         let mut orientation = 99;
         assert_eq!(unsafe { stride_manifest_screen_orientation(bytes.as_ptr(), bytes.len(), &mut orientation) }, 0);
-        assert_eq!(orientation, -1);
+        assert_eq!(orientation, 0); // Fixture declares Android landscape.
     }
 
     #[test]
