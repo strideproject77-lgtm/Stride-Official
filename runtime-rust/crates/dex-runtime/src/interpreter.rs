@@ -1223,7 +1223,21 @@ impl<'a> ArtVm<'a> {
 
                     // Framework and native references are dispatched by their complete
                     // DEX signature even when no app-defined MethodCode exists.
-                    let native_handler = self.jni.find(target_class, target_name, target_proto).cloned();
+                    let mut native_handler = self.jni.find(target_class, target_name, target_proto).cloned();
+                    // DEX method_ids may name the concrete app class even when the
+                    // invoked framework method is inherited from Activity/View/etc.
+                    // Resolve registered framework bridges up the linked superclass chain.
+                    if native_handler.is_none() {
+                        let mut owner = target_class.to_owned();
+                        let mut visited = std::collections::HashSet::new();
+                        while visited.insert(owner.clone()) {
+                            let Some(class) = self.hierarchy.get_class(&owner) else { break; };
+                            let Some(superclass) = class.superclass_descriptor.as_deref() else { break; };
+                            native_handler = self.jni.find(superclass, target_name, target_proto).cloned();
+                            if native_handler.is_some() { break; }
+                            owner = superclass.to_owned();
+                        }
+                    }
                     if target_method.is_none() {
                         if let Some(handler) = native_handler {
                             let mut env = crate::jni::JniEnv::new(self.heap);

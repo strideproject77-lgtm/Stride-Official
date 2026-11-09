@@ -116,6 +116,62 @@ impl AndroidRuntime {
             |_env, _args| Ok(None),
         );
 
+        // Activity.getWindow() returns a stable per-Activity Window object.
+        jni.register(
+            "Landroid/app/Activity;",
+            "getWindow",
+            "()Landroid/view/Window;",
+            |env, args| {
+                let activity = args.first().and_then(|value| value.as_object())
+                    .ok_or_else(|| "Activity.getWindow receiver is null".to_string())?;
+                let existing = env.heap.get_instance_field(activity, "mWindow")
+                    .map_err(|error| format!("Activity window lookup failed: {:?}", error))?
+                    .as_object();
+                let window = match existing {
+                    Some(id) => id,
+                    None => {
+                        let id = env.heap.allocate_instance("Landroid/view/Window;")
+                            .map_err(|error| format!("Window allocation failed: {:?}", error))?;
+                        env.heap.set_instance_field(activity, "mWindow", Value::Object(id))
+                            .map_err(|error| format!("Activity window store failed: {:?}", error))?;
+                        id
+                    }
+                };
+                Ok(Some(Value::Object(window)))
+            },
+        );
+
+        // Window flag APIs used during app startup. Flags are retained on the
+        // Window object; visual system-bar effects remain host-renderer work.
+        for (name, prototype, operation) in [
+            ("addFlags", "(I)V", 0i32),
+            ("clearFlags", "(I)V", 1i32),
+            ("setFlags", "(II)V", 2i32),
+        ] {
+            jni.register("Landroid/view/Window;", name, prototype, move |env, args| {
+                let window = args.first().and_then(|value| value.as_object())
+                    .ok_or_else(|| "Window receiver is null".to_string())?;
+                let current = env.heap.get_instance_field(window, "flags")
+                    .map_err(|error| format!("Window flags lookup failed: {:?}", error))?
+                    .as_int();
+                let flags = args.get(1).map(|value| value.as_int()).unwrap_or(0);
+                let updated = match operation {
+                    0 => current | flags,
+                    1 => current & !flags,
+                    _ => {
+                        let mask = args.get(2).map(|value| value.as_int()).unwrap_or(0);
+                        (current & !mask) | (flags & mask)
+                    }
+                };
+                env.heap.set_instance_field(window, "flags", Value::Int(updated))
+                    .map_err(|error| format!("Window flags update failed: {:?}", error))?;
+                Ok(None)
+            });
+        }
+        for name in ["setStatusBarColor", "setNavigationBarColor"] {
+            jni.register("Landroid/view/Window;", name, "(I)V", |_env, _args| Ok(None));
+        }
+
         // App Activities commonly call these superclass implementations from
         // their lifecycle overrides. Register the full core callback set so
         // those calls resolve instead of being reported as missing framework APIs.
