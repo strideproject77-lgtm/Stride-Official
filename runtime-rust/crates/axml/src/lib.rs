@@ -719,3 +719,106 @@ mod tests {
     }
 
 }
+
+
+/// A decoded node from an Android binary XML layout document.
+/// Attribute values retain their decoded textual representation; resource
+/// references remain numeric strings until a resource table is available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XmlNode {
+    pub name: String,
+    pub attributes: std::collections::BTreeMap<String, String>,
+    pub text: Option<String>,
+    pub children: Vec<XmlNode>,
+}
+
+/// Parses a binary XML document into a bounded element tree.
+/// This is a structural parser only: it does not resolve @resource references
+/// or instantiate Android View objects.
+pub fn parse_layout_tree(bytes: &[u8]) -> Result<XmlNode, AxmlError> {
+    let document = inspect_binary_xml(bytes)?;
+    let pool = document.string_pool.ok_or(AxmlError::InvalidStringPool)?;
+    let file_end = document.file_size as usize;
+    let mut cursor = 8usize;
+    let mut stack: Vec<XmlNode> = Vec::new();
+    let mut root: Option<XmlNode> = None;
+
+    while cursor < file_end {
+        let kind = u16le(bytes, cursor)?;
+        let header_size = u16le(bytes, cursor + 2)? as usize;
+        let size = u32le(bytes, cursor + 4)? as usize;
+        let chunk_end = cursor.checked_add(size)
+            .filter(|end| *end <= file_end).ok_or(AxmlError::InvalidChunk)?;
+
+        match kind {
+            0x0102 => { // RES_XML_START_ELEMENT_TYPE
+                if header_size < 16 || size < 36 {
+                    return Err(AxmlError::InvalidChunk);
+                }
+                let name = string_at(&pool, u32le(bytes, cursor + 20)?)?
+                    .ok_or(AxmlError::InvalidStringIndex)?;
+                let attribute_start = u16le(bytes, cursor + 24)? as usize;
+                let attribute_size = u16le(bytes, cursor + 26)? as usize;
+                let attribute_count = u16le(bytes, cursor + 28)? as usize;
+                if attribute_size < 20 || attribute_start < 20 {
+                    return Err(AxmlError::InvalidChunk);
+                }
+                let extension = cursor.checked_add(16).ok_or(AxmlError::InvalidChunk)?;
+                let attributes_start = extension.checked_add(attribute_start)
+                    .filter(|value| *value <= chunk_end).ok_or(AxmlError::InvalidChunk)?;
+                let attributes_bytes = attribute_count.checked_mul(attribute_size)
+                    .ok_or(AxmlError::InvalidChunk)?;
+                let attributes_end = attributes_start.checked_add(attributes_bytes)
+                    .filter(|end| *end <= chunk_end).ok_or(AxmlError::InvalidChunk)?;
+                let mut attributes = std::collections::BTreeMap::new();
+                for index in 0..attribute_count {
+                    let offset = attributes_start + index * attribute_size;
+                    if offset.checked_add(20).filter(|end| *end <= attributes_end).is_none() {
+                        return Err(AxmlError::InvalidChunk);
+                    }
+                    let key = string_at(&pool, u32le(bytes, offset + 4)?)?
+                        .ok_or(AxmlError::InvalidStringIndex)?;
+                    if let Some(value) = typed_attr(bytes, offset, &pool)? {
+                        attributes.insert(key, value);
+                    }
+                }
+                stack.push(XmlNode { name, attributes, text: None, children: Vec::new() });
+            }
+            0x0103 => { // RES_XML_END_ELEMENT_TYPE
+                if header_size < 16 || size < 24 {
+                    return Err(AxmlError::InvalidChunk);
+                }
+                let name = string_at(&pool, u32le(bytes, cursor + 20)?)?
+                    .ok_or(AxmlError::InvalidStringIndex)?;
+                let node = stack.pop().ok_or(AxmlError::MalformedXmlNesting)?;
+                if node.name != name {
+                    return Err(AxmlError::MalformedXmlNesting);
+                }
+                if let Some(parent) = stack.last_mut() {
+                    parent.children.push(node);
+                } else if root.replace(node).is_some() {
+                    return Err(AxmlError::MalformedXmlNesting);
+                }
+            }
+            0x0104 => { // RES_XML_CDATA_TYPE
+                if header_size < 16 || size < 28 || stack.is_empty() {
+                    return Err(AxmlError::InvalidChunk);
+                }
+                if let Some(value) = string_at(&pool, u32le(bytes, cursor + 16)?)? {
+                    let node = stack.last_mut().expect("stack checked above");
+                    match node.text.as_mut() {
+                        Some(existing) => existing.push_str(&value),
+                        None => node.text = Some(value),
+                    }
+                }
+            }
+            _ => {}
+        }
+        cursor = chunk_end;
+    }
+
+    if !stack.is_empty() {
+        return Err(AxmlError::MalformedXmlNesting);
+    }
+    root.ok_or(AxmlError::MissingXmlRoot)
+}
