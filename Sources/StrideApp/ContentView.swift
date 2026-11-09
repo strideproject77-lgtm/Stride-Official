@@ -1187,14 +1187,16 @@ private struct APKDetailSheet: View {
             }
         }
         .contentShape(Rectangle())
-        .overlay {
-            TripleTapOverlay {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExecutionChromeHidden.toggle()
+        // Keep this simultaneous with the guest drag recognizer so triple-taps
+        // toggle the chrome without stealing ordinary APK touch input.
+        .simultaneousGesture(
+            TapGesture(count: 3)
+                .onEnded {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isExecutionChromeHidden.toggle()
+                    }
                 }
-            }
-            .allowsHitTesting(true)
-        }
+        )
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingLogShare) {
             if let logExportURL {
@@ -1461,77 +1463,4 @@ private struct ActivityViewController: UIViewControllerRepresentable {
 }
 
 
-/// Window-level recognizer observes the three-finger tap without intercepting
-/// Close/Hide buttons or ordinary touches on the execution screen.
-private struct TripleTapOverlay: UIViewRepresentable {
-    let onTripleFingerTap: () -> Void
 
-    func makeCoordinator() -> Coordinator { Coordinator(onTripleFingerTap: onTripleFingerTap) }
-
-    func makeUIView(context: Context) -> WindowObservingView {
-        let view = WindowObservingView(frame: .zero)
-        view.backgroundColor = .clear
-        view.isUserInteractionEnabled = false
-        view.onWindowChange = { [weak coordinator = context.coordinator] window in
-            coordinator?.attach(to: window)
-        }
-        return view
-    }
-
-    func updateUIView(_ uiView: WindowObservingView, context: Context) {
-        context.coordinator.onTripleFingerTap = onTripleFingerTap
-        context.coordinator.attach(to: uiView.window)
-    }
-
-    static func dismantleUIView(_ uiView: WindowObservingView, coordinator: Coordinator) {
-        uiView.onWindowChange = nil
-        coordinator.detach()
-    }
-
-    final class WindowObservingView: UIView {
-        var onWindowChange: ((UIWindow?) -> Void)?
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            onWindowChange?(window)
-        }
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        var onTripleFingerTap: () -> Void
-        private weak var attachedWindow: UIWindow?
-        private var recognizer: UITapGestureRecognizer?
-
-        init(onTripleFingerTap: @escaping () -> Void) {
-            self.onTripleFingerTap = onTripleFingerTap
-        }
-
-        func attach(to window: UIWindow?) {
-            guard let window else { detach(); return }
-            if attachedWindow === window, recognizer != nil { return }
-            detach()
-            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-            tap.numberOfTouchesRequired = 1
-            tap.numberOfTapsRequired = 3
-            tap.cancelsTouchesInView = false
-            tap.delaysTouchesBegan = false
-            tap.delaysTouchesEnded = false
-            tap.delegate = self
-            window.addGestureRecognizer(tap)
-            attachedWindow = window
-            recognizer = tap
-        }
-
-        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
-                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            true
-        }
-
-        func detach() {
-            if let recognizer { attachedWindow?.removeGestureRecognizer(recognizer) }
-            recognizer = nil
-            attachedWindow = nil
-        }
-
-        @objc func handleTap() { onTripleFingerTap() }
-    }
-}
