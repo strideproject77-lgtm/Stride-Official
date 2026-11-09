@@ -125,7 +125,8 @@ pub fn inflate_layout_tree(root: &XmlNode) -> Result<InflatedView, InflateError>
     if root.name.is_empty() {
         return Err(InflateError::InvalidRoot);
     }
-    inflate_node(root, 0, &mut 0)
+    let mut node_count = 0usize;
+    inflate_node(root, 0, &mut node_count)
 }
 
 #[cfg(test)]
