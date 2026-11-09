@@ -372,3 +372,58 @@ fn glyph5x7(ch: char) -> [u8; 7] {
         _=>[31,17,5,9,4,0,4]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canvas_draws_rect_and_pixel() {
+        let mut surface = Surface::new(100, 100);
+        let mut canvas = Canvas::new(&mut surface);
+        canvas.draw_color(0xffffffff);
+        let mut paint = Paint::new();
+        paint.set_color(0xffff0000);
+        canvas.draw_rect(RectF::new(10.0, 10.0, 20.0, 20.0), &paint);
+        assert_eq!(canvas.surface.get_pixel(15, 15), Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(5, 5), Some(0xffffffff));
+    }
+
+    #[test]
+    fn canvas_draws_text_and_image_pixels() {
+        let mut surface = Surface::new(90, 20);
+        let mut canvas = Canvas::new(&mut surface);
+        let mut paint = Paint::new();
+        paint.color = 0xffffffff;
+        paint.text_size = 7.0;
+        canvas.draw_text("STRIDE 123", 1.0, 9.0, &paint);
+        assert_ne!(canvas.surface.get_pixel(2, 2), Some(0xff000000));
+        canvas.draw_image_argb(&[0xffff0000, 0x8000ff00], 2, 1, 0, 10);
+        assert_eq!(canvas.surface.get_pixel(0, 10), Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(1, 10), Some(0xff008000));
+    }
+
+    #[test]
+    fn calculator_key_glyphs_are_present() {
+        for symbol in ['A', 'C', '0', '9', '+', '-', '−', '×', '÷', '%', '=', '⌫'] {
+            assert!(
+                glyph5x7(symbol).iter().any(|row| *row != 0),
+                "missing visible glyph for {:?}",
+                symbol
+            );
+        }
+    }
+
+    #[test]
+    fn canvas_transforms_and_circles() {
+        let mut surface = Surface::new(100, 100);
+        let mut canvas = Canvas::new(&mut surface);
+        canvas.save();
+        canvas.translate(50.0, 50.0);
+        let mut paint = Paint::new();
+        paint.set_color(0xff00ff00);
+        canvas.draw_circle(0.0, 0.0, 10.0, &paint);
+        assert_eq!(canvas.surface.get_pixel(50, 50), Some(0xff00ff00));
+        canvas.restore();
+    }
+}
