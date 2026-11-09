@@ -794,7 +794,6 @@ impl AndroidRuntime {
                 if let Some(text)=resources.string(text_resource){let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;p.color=if color==0{0xff000000}else{color};let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;canvas.draw_text(text,bounds.left+2.0,baseline,&p);}
             }
             let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
-            if image_id!=0{if let Some((iw,ih,pixels))=resources_image_placeholder(image_id){let _=(iw,ih,pixels);}}
             let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
             if let Some((iw,ih,pixels))=images.get(&image_id){canvas.draw_image_argb(pixels,*iw,*ih,bounds.left as i32,bounds.top as i32);}
             let bg_resource=field("mBackgroundResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
