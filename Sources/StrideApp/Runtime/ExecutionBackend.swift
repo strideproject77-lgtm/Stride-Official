@@ -263,9 +263,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 }
                 guard pathLength > 1, pathLength <= pathBuffer.count,
                       let path = String(bytes: pathBuffer.prefix(pathLength - 1), encoding: .utf8),
-                      let entry = archive.first(where: { $0.path == path }) else { continue }
+                      let located = packageArchives.lazy.compactMap({ candidate -> (Archive, Entry)? in
+                          guard let match = candidate.first(where: { $0.path == path }) else { return nil }
+                          return (candidate, match)
+                      }).first,
+                      let (resourceArchive, entry) = located else { continue }
                 var encoded = Data()
-                _ = try archive.extract(entry) { encoded.append($0) }
+                _ = try resourceArchive.extract(entry) { encoded.append($0) }
                 guard let image = UIImage(data: encoded), let cgImage = image.cgImage else { continue }
                 let width = cgImage.width, height = cgImage.height
                 guard width > 0, height > 0, width * height <= 4_194_304 else { continue }
