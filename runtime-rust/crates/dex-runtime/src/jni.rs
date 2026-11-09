@@ -160,6 +160,26 @@ impl JniNativeRegistry {
         self.mangled_symbols.get(&mangled)
     }
 
+    /// Resolve a framework bridge by exact method name/prototype when the
+    /// framework superclass is absent from the loaded app hierarchy.
+    /// Only a unique Android/Java framework match is accepted.
+    pub fn find_unique_framework_signature(&self, name: &str, prototype: &str) -> Option<&NativeHandler> {
+        let mut matched: Option<&NativeHandler> = None;
+        for (key, handler) in &self.methods {
+            let framework_owner = key.class_descriptor.starts_with("Landroid/")
+                || key.class_descriptor.starts_with("Ljava/")
+                || key.class_descriptor.starts_with("Ljavax/")
+                || key.class_descriptor.starts_with("Ldalvik/");
+            if framework_owner && key.name == name && key.prototype == prototype {
+                if matched.is_some() {
+                    return None;
+                }
+                matched = Some(handler);
+            }
+        }
+        matched
+    }
+
     fn register_builtins(&mut self) {
         // java.lang.System.currentTimeMillis()J
         self.register(
@@ -275,6 +295,19 @@ mod tests {
         let math_handler = reg.find("Ljava/lang/Math;", "abs", "(I)I").unwrap();
         let math_res = math_handler(&mut env, &[Value::Int(-42)]).unwrap();
         assert_eq!(math_res, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn framework_signature_fallback_requires_unique_exact_match() {
+        let mut reg = JniNativeRegistry::new();
+        reg.register("Landroid/app/Activity;", "getWindow", "()Landroid/view/Window;",
+            |_env, _args| Ok(None));
+        assert!(reg.find_unique_framework_signature("getWindow", "()Landroid/view/Window;").is_some());
+        assert!(reg.find_unique_framework_signature("getWindow", "()V").is_none());
+
+        reg.register("Landroid/view/View;", "getWindow", "()Landroid/view/Window;",
+            |_env, _args| Ok(None));
+        assert!(reg.find_unique_framework_signature("getWindow", "()Landroid/view/Window;").is_none());
     }
 
     #[test]

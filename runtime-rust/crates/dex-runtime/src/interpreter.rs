@@ -1224,9 +1224,8 @@ impl<'a> ArtVm<'a> {
                     // Framework and native references are dispatched by their complete
                     // DEX signature even when no app-defined MethodCode exists.
                     let mut native_handler = self.jni.find(target_class, target_name, target_proto).cloned();
-                    // DEX method_ids may name the concrete app class even when the
-                    // invoked framework method is inherited from Activity/View/etc.
-                    // Resolve registered framework bridges up the linked superclass chain.
+                    // DEX method_ids can name an app subclass even when the method is
+                    // implemented by a framework ancestor. First use linked inheritance.
                     if native_handler.is_none() {
                         let mut owner = target_class.to_owned();
                         let mut visited = std::collections::HashSet::new();
@@ -1237,6 +1236,12 @@ impl<'a> ArtVm<'a> {
                             if native_handler.is_some() { break; }
                             owner = superclass.to_owned();
                         }
+                    }
+                    // Some framework ancestors are not materialized in the app class
+                    // hierarchy. A unique framework bridge with the exact DEX name and
+                    // prototype is still safe to resolve (ambiguous signatures are rejected).
+                    if native_handler.is_none() {
+                        native_handler = self.jni.find_unique_framework_signature(target_name, target_proto).cloned();
                     }
                     if target_method.is_none() {
                         if let Some(handler) = native_handler {
