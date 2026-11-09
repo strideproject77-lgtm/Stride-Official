@@ -376,3 +376,14 @@ This section is the consolidated day-to-day record, not just the Phase 2 subset.
 
 ## Truthful compatibility boundary
 The commits from Nov 8–9 add substantial UI rendering, Android framework, event/input, DEX loading, JNI, graphics, native-linker, diagnostics, and telemetry groundwork. Passing unit/integration tests validate only the exercised paths. They do not establish general Android compatibility, arbitrary native library execution, complete ART behavior, or a successful real APK launch on the iPhone. Do not report a compatibility percentage based only on code volume or commit count.
+
+## External APK scan artifacts
+
+- 2026-11-09: Added a static package scan for the user-provided **2048 v1.7.0 APKPure XAPK**. Full manifest, split inventory, DEX/dependency inventory, assets, required Android APIs, implementation priorities, and real-device acceptance checklist:
+  - [2048 v1.7.0 XAPK compatibility scan](https://github.com/strideproject77-lgtm/Hill-Climb/blob/hill-climb-game/docs/test-apks/2048-1.7.0-apk-analysis.md)
+  - Package: `com.tpcstld.twozerogame`, versionCode 1013; minSdk 23, targetSdk 37.
+  - XAPK SHA-256: `e3a9c160ea34bfa916e0022dcacb3da07732042c1f2912f52b7bbdc4485ec3a7`.
+  - Key runtime profile: one DEX 035 file (6,502 class definitions; 51,183 method IDs), 24 app-owned classes, AppCompatActivity + custom View/Canvas 2D renderer, touch/swipe input, Kotlin/coroutines and AndroidX/Google Play Services dependencies, 17 language splits plus required xxhdpi density split.
+  - No native `.so` libraries were found in this XAPK; prioritize DEX class resolution, XAPK/resource assembly, Activity/AppCompat startup, Canvas 2D, touch, lifecycle, and persistence before native ELF work for this target.
+  - **Static scan only**: this is not evidence that Stride has launched or supports the APK. Real-device gameplay and save/restore tests remain required.
+
