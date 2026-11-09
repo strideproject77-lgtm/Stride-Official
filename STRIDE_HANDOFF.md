@@ -191,3 +191,69 @@ This percentage describes only the pinned Hill Climb build, never general Androi
 ## Latest CI failure diagnosis (2026-11-07)
 
 Workflow run #86 (`42368614689`) failed in the Rust tests: 18 passed and 2 failed. Both failures came from an incorrectly encoded `const/4` test fixture, not from the register validator: DEX format 11n stores register A in bits 8–11, while the original fixture `0x1012` put `1` in the literal nibble (bits 12–15), leaving the register as `v0`. Corrected both fixtures to `0x0112` in `lib.rs` and `classes.rs`. This correction has not yet been rerun in CI; do not mark tests green until a new run passes.
+
+
+---
+
+## Phase 2 implementation handoff (2026-11-09)
+
+### Branch and workflow rules
+- Active development branch: `feat/dex-class-method-loader`.
+- Stable branch: `main`. It has not been changed or merged as part of this batch.
+- Keep all follow-up implementation and fixes on the development branch. Merge only after the relevant checks pass and the user has validated the IPA on the iPhone.
+- Do not cancel an Actions run merely because its macOS IPA job is queued. Keep the active run enabled and let GitHub's hosted macOS runner pick it up.
+
+### Phase 2 code changes now on the development branch
+Latest branch HEAD at this handoff update: `7abf5e92ceaba89962d26d76737508240697d30c`.
+
+- DEX class loading and hierarchy:
+  - Corrected superclass resolution to interpret `superclass_idx` as a DEX `type_idx`, resolving the descriptor from the DEX type table rather than treating it as a class-definition index.
+  - Parsed and retained each class's interface descriptors from `interfaces_off`, with bounds/alignment/count/type-index validation.
+  - Carried interface descriptors through the loader into runtime class metadata.
+  - Virtual dispatch excludes private/direct and static methods from override candidates.
+- Guest touch input:
+  - Registered `View.setOnTouchListener` and stored the listener on the managed View.
+  - Added touch-listener callback dispatch for down/move/up/cancel, including a managed MotionEvent with action and coordinates.
+  - Touch listeners can consume the event and prevent the click callback from also firing.
+  - Hit testing recognises Views with either click or touch listeners.
+- Multi-DEX metadata:
+  - Added a method-ID-to-owning-DEX index in the app class loader.
+  - Attached all DEX inventories to ArtVm and switch the active string/type/method/field reference tables according to the currently executing method's owning DEX.
+  - Added regression coverage proving methods read their own DEX string tables.
+  - Follow-up audit should still examine nested invocation/class-initializer context and any remaining first-DEX-only resolver paths before treating multi-DEX as fully complete.
+- Native keyboard bridge for EditText:
+  - Added EditText focus hit-testing and focused guest text state.
+  - Added C FFI `stride_runtime_set_focused_text`, header declaration, and Swift execution-backend wrapper.
+  - Added an iOS keyboard/TextField overlay in the execution UI, with focus and dismissal handling.
+  - Native keyboard text is currently copied into the guest EditText's managed `mText` field and triggers redraw. This is an initial bridge, not full Android InputConnection/IME, selection/composition, key-event, or input-filter emulation.
+- TextWatcher:
+  - Registered `addTextChangedListener`, `removeTextChangedListener`, and `getText` bridges.
+  - Added initial callback dispatch for `beforeTextChanged` and `onTextChanged`.
+  - **Known incomplete behavior:** `afterTextChanged` is not yet dispatched, and callback ordering/old-new text semantics require correction. Do not claim full TextWatcher compatibility until fixed and covered by regression tests.
+- Regression tests:
+  - Added a multi-DEX string-table ownership test.
+  - Added a focused EditText keyboard-update test.
+  - The first test attempt failed because the EditText test fixture had no enabled-state field set. Commit `7abf5e9` initializes `mEnabled = 1` in that fixture; this was a test-fixture correction, not evidence that a real APK's input path is fully working.
+
+### CI / IPA status at handoff
+- Earlier workflow run `42618368837` failed in Rust runtime tests: 100 passed, 1 failed. Failure: `focused_edit_text_receives_native_keyboard_updates` expected the fixture to hit-test as an enabled EditText but got `None`.
+- Corrective commit: `7abf5e92ceaba89962d26d76737508240697d30c` — initializes the fixture's `mEnabled` field.
+- Latest workflow run: `42618604737` (run #417), commit `7abf5e92ceaba89962d26d76737508240697d30c`.
+  - Rust runtime test job: **SUCCESS**.
+  - iOS unsigned IPA job: **QUEUED** at last check; it has not completed, so no IPA artifact is confirmed yet.
+  - Keep this run active; do not cancel or dispatch a duplicate IPA workflow while this one is queued.
+  - Workflow URL: https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/42618604737
+- Previous workflow `42618009233` was cancelled during the intermediate implementation batch; it is historical and is not the active build.
+- Draft PR #1 remains open and unmerged. Do not merge to `main`.
+
+### Remaining work / next session
+1. Leave workflow `42618604737` running until the IPA job starts and completes. Then verify the artifact exists and record its exact download URL/expiry.
+2. Audit multi-DEX metadata ownership through nested method calls and class initialization; ensure method resolver and every type/field/string reference uses the correct DEX inventory.
+3. Correct TextWatcher callback semantics: call `beforeTextChanged` before mutation, update managed text, call `onTextChanged`, then `afterTextChanged`; preserve correct old/new text and lengths. Add focused regression tests.
+4. Verify keyboard FFI status handling and ensure no repeated log spam when no guest EditText is focused. Do not describe the current overlay as a complete Android IME.
+5. Add touch-listener dispatch regression tests, including consumed versus unconsumed touch and click suppression.
+6. After the remaining implementation/audit batch, run one consolidated final test checkpoint and one IPA workflow. Avoid repeated test runs during small edits, per the user's requested workflow.
+7. Physical iPhone test is still required: import a real calculator APK and confirm displayed text is legible, the input field is initially correct, typed values update the guest app, button taps execute guest callbacks, and no built-in fake calculator/demo screen is shown. CI passing alone does not establish real APK compatibility.
+
+### Accuracy boundary
+The latest green Rust workflow confirms the current Rust test suite passes on the tested commit. It does **not** prove that the keyboard bridge, TextWatcher, touch dispatch, multi-DEX behavior, or a real calculator APK works end-to-end on an iPhone. The IPA build is still queued, and device verification remains pending.
