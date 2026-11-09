@@ -157,6 +157,31 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         Ok(Some(if wanted == own { Value::Object(id) } else { Value::Null }))
     });
 
+    // Ordered managed-object children for common ViewGroup subclasses.
+    // This stores hierarchy only; it does not claim layout inflation or drawing.
+    jni.register("Landroid/view/ViewGroup;", "addView", "(Landroid/view/View;)V", |env, args| {
+        let parent = receiver(args)?;
+        let child = args.get(1).and_then(Value::as_object).ok_or_else(|| "ViewGroup.addView received a null child".to_owned())?;
+        if parent == child || !env.heap.contains(child) { return Err("ViewGroup.addView received an invalid child".to_owned()); }
+        let count = env.get_object_field(parent, "mChildCount")?.as_int().max(0) as usize;
+        env.set_object_field(parent, &format!("mChild{}", count), Value::Object(child))?;
+        env.set_object_field(parent, "mChildCount", Value::Int((count + 1) as i32))?;
+        env.set_object_field(parent, "mNeedsLayout", Value::Int(1))?;
+        env.set_object_field(parent, "mNeedsDraw", Value::Int(1))?;
+        Ok(None)
+    });
+    jni.register("Landroid/view/ViewGroup;", "getChildCount", "()I", |env, args| {
+        let parent = receiver(args)?;
+        Ok(Some(env.get_object_field(parent, "mChildCount")?))
+    });
+    jni.register("Landroid/view/ViewGroup;", "getChildAt", "(I)Landroid/view/View;", |env, args| {
+        let parent = receiver(args)?;
+        let index = args.get(1).map(Value::as_int).unwrap_or(-1);
+        let count = env.get_object_field(parent, "mChildCount")?.as_int();
+        if index < 0 || index >= count { return Ok(Some(Value::Null)); }
+        Ok(Some(env.get_object_field(parent, &format!("mChild{}", index))?))
+    });
+
     // Activity content ownership is real managed-object state. Layout-resource
     // inflation and recursive ViewGroup traversal are intentionally not faked.
     jni.register("Landroid/app/Activity;", "setContentView", "(Landroid/view/View;)V", |env, args| {
@@ -195,8 +220,19 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         let wanted = args.get(1).map(Value::as_int).unwrap_or(-1);
         let root = env.get_object_field(activity, "mContentView")?;
         let Some(root_id) = root.as_object() else { return Ok(Some(Value::Null)); };
-        let own = env.get_object_field(root_id, "mId")?.as_int();
-        Ok(Some(if own == wanted { root } else { Value::Null }))
+        fn search(env: &JniEnv<'_>, node: u32, wanted: i32, seen: &mut std::collections::HashSet<u32>) -> Result<Value, String> {
+            if !seen.insert(node) { return Ok(Value::Null); }
+            if env.get_object_field(node, "mId")?.as_int() == wanted { return Ok(Value::Object(node)); }
+            let count = env.get_object_field(node, "mChildCount")?.as_int().clamp(0, 4096) as usize;
+            for index in 0..count {
+                if let Some(child) = env.get_object_field(node, &format!("mChild{}", index))?.as_object() {
+                    let found = search(env, child, wanted, seen)?;
+                    if !found.is_null() { return Ok(found); }
+                }
+            }
+            Ok(Value::Null)
+        }
+        Ok(Some(search(env, root_id, wanted, &mut std::collections::HashSet::new())?))
     });
 }
 
