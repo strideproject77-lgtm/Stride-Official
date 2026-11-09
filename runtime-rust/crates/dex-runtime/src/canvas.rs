@@ -287,7 +287,7 @@ impl<'a> Canvas<'a> {
 
     pub fn draw_text(&mut self,text:&str,x:f32,baseline:f32,paint:&Paint)->f32 {
         let scale=(paint.text_size/7.0).max(1.0);let mut cursor=x;
-        for ch in text.chars(){if ch=='\\n'{continue;}let rows=glyph5x7(ch.to_ascii_uppercase());
+        for ch in text.chars(){if ch=='\n'{continue;}let rows=glyph5x7(ch.to_ascii_uppercase());
             for(row,bits)in rows.iter().enumerate(){for col in 0..5{if bits&(1<<(4-col))!=0{
                 let left=cursor+col as f32*scale;let top=baseline-7.0*scale+row as f32*scale;
                 self.draw_rect(RectF::new(left,top,left+scale,top+scale),paint);
