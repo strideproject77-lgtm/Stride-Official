@@ -132,6 +132,24 @@ impl ClassHierarchy {
                 break;
             }
         }
+        let mut pending = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut cursor = Some(receiver_class.to_owned());
+        while let Some(descriptor) = cursor {
+            if let Some(class) = self.classes.get(&descriptor) {
+                pending.extend(class.interface_descriptors.iter().cloned());
+                cursor = class.superclass_descriptor.clone();
+            } else { cursor = None; }
+        }
+        while let Some(interface) = pending.pop() {
+            if !visited.insert(interface.clone()) { continue; }
+            if let Some(class) = self.classes.get(&interface) {
+                if let Some(method) = class.methods.get(&(name.to_owned(), prototype.to_owned())) {
+                    if !method.is_direct && !class.is_abstract() { return Some((class, method)); }
+                }
+                pending.extend(class.interface_descriptors.iter().cloned());
+            }
+        }
         None
     }
 
