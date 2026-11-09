@@ -63,7 +63,8 @@ struct ContentView: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text("Stride")
-                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .font(.system(size: 28, weight: .black, design: .rounded))
+                .tracking(-1.15)
                 .foregroundStyle(.primary)
             Spacer()
             if isImporting {
@@ -432,6 +433,7 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                aboutStrideCard
                 VStack(alignment: .leading, spacing: 11) {
                     Text("RUNTIME STATUS")
                         .font(.system(size: 9, weight: .heavy))
@@ -453,6 +455,44 @@ struct ContentView: View {
             .padding(.top, 10)
             .padding(.bottom, 24)
         }
+    }
+
+    private var aboutStrideCard: some View {
+        let slides = [
+            URL(string: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1200&q=85&fit=crop")!,
+            URL(string: "https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=1200&q=85&fit=crop")!,
+            URL(string: "https://images.unsplash.com/photo-1598550476439-6847785fcea6?w=1200&q=85&fit=crop")!
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("ABOUT STRIDE")
+                .font(.system(size: 9, weight: .heavy))
+                .kerning(1.3)
+                .foregroundStyle(muted)
+            TimelineView(.periodic(from: .now, by: 5)) { timeline in
+                let index = Int(timeline.date.timeIntervalSinceReferenceDate / 5) % slides.count
+                AsyncImage(url: slides[index]) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        ZStack {
+                            LinearGradient(colors: [Color(red: 0.16, green: 0.12, blue: 0.30), Color(red: 0.07, green: 0.08, blue: 0.14)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                            Image(systemName: "gamecontroller.fill")
+                                .font(.system(size: 42, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                        }
+                    }
+                }
+                .frame(height: 142)
+                .frame(maxWidth: .infinity)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 15))
+                .id(index)
+                .transition(.opacity)
+            }
+        }
+        .padding(12)
+        .background(panel, in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17).stroke(line, lineWidth: 1))
     }
 
     private var emptyState: some View {
@@ -751,41 +791,18 @@ private struct APKGridCard: View {
     let line: Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Spacer(minLength: 0)
-                APKIconView(data: item.iconData, accent: accent, size: 66)
-                    .background(raised, in: RoundedRectangle(cornerRadius: 19))
-                    .clipShape(RoundedRectangle(cornerRadius: 19))
-                Spacer(minLength: 0)
-            }
+        VStack(spacing: 8) {
+            APKIconView(data: item.iconData, accent: accent, size: 88)
             Text(item.displayName)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
                 .lineLimit(2)
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            Text(item.inspection.summary)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(muted)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 5) {
-                Circle().fill(accent).frame(width: 5, height: 5)
-                Text("IMPORTED")
-                    .font(.system(size: 7, weight: .heavy))
-                    .kerning(0.7)
-                    .foregroundStyle(accent)
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(muted)
-            }
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 170, alignment: .topLeading)
-        .background(panel, in: RoundedRectangle(cornerRadius: 17))
-        .overlay(RoundedRectangle(cornerRadius: 17).stroke(line, lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 17))
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
     }
 }
 
@@ -1382,7 +1399,6 @@ private struct APKIconView: View {
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
-                    .padding(size * 0.07)
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.25)
@@ -1452,24 +1468,35 @@ private struct TripleTapOverlay: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(onTripleFingerTap: onTripleFingerTap) }
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
+    func makeUIView(context: Context) -> WindowObservingView {
+        let view = WindowObservingView(frame: .zero)
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
-        DispatchQueue.main.async { context.coordinator.attach(to: view.window) }
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.attach(to: window)
+        }
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
+    func updateUIView(_ uiView: WindowObservingView, context: Context) {
         context.coordinator.onTripleFingerTap = onTripleFingerTap
-        DispatchQueue.main.async { context.coordinator.attach(to: uiView.window) }
+        context.coordinator.attach(to: uiView.window)
     }
 
-    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+    static func dismantleUIView(_ uiView: WindowObservingView, coordinator: Coordinator) {
+        uiView.onWindowChange = nil
         coordinator.detach()
     }
 
-    final class Coordinator: NSObject {
+    final class WindowObservingView: UIView {
+        var onWindowChange: ((UIWindow?) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(window)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onTripleFingerTap: () -> Void
         private weak var attachedWindow: UIWindow?
         private var recognizer: UITapGestureRecognizer?
@@ -1479,7 +1506,7 @@ private struct TripleTapOverlay: UIViewRepresentable {
         }
 
         func attach(to window: UIWindow?) {
-            guard let window else { return }
+            guard let window else { detach(); return }
             if attachedWindow === window, recognizer != nil { return }
             detach()
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
@@ -1488,9 +1515,15 @@ private struct TripleTapOverlay: UIViewRepresentable {
             tap.cancelsTouchesInView = false
             tap.delaysTouchesBegan = false
             tap.delaysTouchesEnded = false
+            tap.delegate = self
             window.addGestureRecognizer(tap)
             attachedWindow = window
             recognizer = tap
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            true
         }
 
         func detach() {
