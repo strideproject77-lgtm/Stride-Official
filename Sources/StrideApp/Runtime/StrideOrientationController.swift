@@ -27,8 +27,10 @@ final class StrideOrientationController {
     }
 
     func reset() {
-        supportedMask = previousMask ?? .allButUpsideDown
-        previousMask = nil
+        // Keep repeated cleanup calls idempotent (Close followed by onDisappear).
+        guard let previousMask else { return }
+        supportedMask = previousMask
+        self.previousMask = nil
         requestSceneGeometry()
     }
 
