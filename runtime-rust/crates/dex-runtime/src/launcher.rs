@@ -725,6 +725,11 @@ impl AndroidRuntime {
             }
         }
 
+        match self.render_active_activity_surface() {
+            Ok(true)=>self.diagnostics.record(DiagnosticSeverity::Info,"Graphics","ACTIVITY_VIEW_TREE_RENDERED",Some("Managed Activity View hierarchy rasterized into the guest Surface")),
+            Ok(false)=>self.diagnostics.record(DiagnosticSeverity::Info,"Graphics","ACTIVITY_VIEW_TREE_EMPTY",Some("Activity resumed without a managed setContentView(View) root")),
+            Err(error)=>self.diagnostics.record(DiagnosticSeverity::RuntimeError,"Graphics","ACTIVITY_VIEW_RENDER_FAILED",Some(&error)),
+        }
         self.diagnostics.record_detailed(
             DiagnosticSeverity::Info, "Launcher", "LAUNCH_PIPELINE_RETURNED",
             "APK launch pipeline reached the resumed lifecycle state",
