@@ -1098,9 +1098,7 @@ private struct APKDetailSheet: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 10) {
                         Button {
-                            showingExecutionScreen = false
-                            isExecutionChromeHidden = false
-                            StrideOrientationController.shared.reset()
+                            closeExecutionSession()
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "xmark")
@@ -1150,25 +1148,19 @@ private struct APKDetailSheet: View {
             } else {
                 VStack {
                     Spacer()
-                    HStack {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                isExecutionChromeHidden = false
-                            }
-                        } label: {
+                    HStack(alignment: .bottom) {
+                        VStack(alignment: .leading, spacing: 5) {
                             HStack(spacing: 7) {
                                 Text("FPS  \(liveFPSLabel)")
                                 Text("·")
-                                Text("MS  \(touchLatencyLabel)")
+                                Text("TOUCH  \(touchLatencyLabel)")
                             }
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.92))
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 8)
-                            .background(Color(white: 0.12), in: Capsule())
+                            .foregroundStyle(.white.opacity(0.95))
+                            Text("Triple tap with 3 fingers to show status bar")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.58))
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Show execution status bar")
                         Spacer()
                     }
                     .padding(.horizontal, 14)
@@ -1178,12 +1170,31 @@ private struct APKDetailSheet: View {
             }
         }
         .contentShape(Rectangle())
+        .overlay {
+            ThreeFingerTapOverlay {
+                guard isExecutionChromeHidden else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExecutionChromeHidden = false
+                }
+            }
+            .allowsHitTesting(true)
+        }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingLogShare) {
             if let logExportURL {
                 ActivityViewController(activityItems: [logExportURL])
             }
         }
+    }
+
+    private func closeExecutionSession() {
+        showingExecutionScreen = false
+        isExecutionChromeHidden = false
+        StrideOrientationController.shared.reset()
+        executionResult?.session.close()
+        executionResult = nil
+        diagnostics.finishSession(status: "runtime released by user")
+        appendSessionLog("[SESSION] Runtime closed safely by user")
     }
 
     private var executionStatusText: String {
@@ -1396,4 +1407,47 @@ private struct ActivityViewController: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+
+/// Detects a deliberate three-finger tap without consuming ordinary game input.
+private struct ThreeFingerTapOverlay: UIViewRepresentable {
+    let onTripleFingerTap: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTripleFingerTap: onTripleFingerTap)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isUserInteractionEnabled = true
+        let recognizer = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap)
+        )
+        recognizer.numberOfTouchesRequired = 3
+        recognizer.numberOfTapsRequired = 1
+        recognizer.cancelsTouchesInView = false
+        recognizer.delaysTouchesBegan = false
+        recognizer.delaysTouchesEnded = false
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onTripleFingerTap = onTripleFingerTap
+    }
+
+    final class Coordinator: NSObject {
+        var onTripleFingerTap: () -> Void
+
+        init(onTripleFingerTap: @escaping () -> Void) {
+            self.onTripleFingerTap = onTripleFingerTap
+        }
+
+        @objc func handleTap() {
+            onTripleFingerTap()
+        }
+    }
 }
