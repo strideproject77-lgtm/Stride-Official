@@ -1171,7 +1171,7 @@ private struct APKDetailSheet: View {
         }
         .contentShape(Rectangle())
         .overlay {
-            ThreeFingerTapOverlay {
+            TripleTapOverlay {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     isExecutionChromeHidden.toggle()
                 }
@@ -1447,7 +1447,7 @@ private struct ActivityViewController: UIViewControllerRepresentable {
 
 /// Window-level recognizer observes the three-finger tap without intercepting
 /// Close/Hide buttons or ordinary touches on the execution screen.
-private struct ThreeFingerTapOverlay: UIViewRepresentable {
+private struct TripleTapOverlay: UIViewRepresentable {
     let onTripleFingerTap: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onTripleFingerTap: onTripleFingerTap) }
@@ -1483,8 +1483,8 @@ private struct ThreeFingerTapOverlay: UIViewRepresentable {
             if attachedWindow === window, recognizer != nil { return }
             detach()
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
-            tap.numberOfTouchesRequired = 3
-            tap.numberOfTapsRequired = 1
+            tap.numberOfTouchesRequired = 1
+            tap.numberOfTapsRequired = 3
             tap.cancelsTouchesInView = false
             tap.delaysTouchesBegan = false
             tap.delaysTouchesEnded = false
