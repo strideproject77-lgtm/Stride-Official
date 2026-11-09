@@ -1293,20 +1293,33 @@ private struct APKDetailSheet: View {
                 .simultaneousGesture(
                     DragGesture(minimumDistance: 0, coordinateSpace: .local)
                         .onChanged { value in
+                            guard let point = guestSurfacePoint(
+                                value.location,
+                                container: geometry.size,
+                                surfaceWidth: guestFramebufferWidth,
+                                surfaceHeight: guestFramebufferHeight
+                            ) else { return }
                             let action: Int32 = guestTouchActive ? 2 : 0
                             guestTouchActive = true
                             _ = executionResult?.session.dispatchTouch(
                                 action: action,
-                                x: Float(value.location.x),
-                                y: Float(value.location.y)
+                                x: Float(point.x),
+                                y: Float(point.y)
                             )
                         }
                         .onEnded { value in
-                            _ = executionResult?.session.dispatchTouch(
-                                action: 1,
-                                x: Float(value.location.x),
-                                y: Float(value.location.y)
-                            )
+                            if let point = guestSurfacePoint(
+                                value.location,
+                                container: geometry.size,
+                                surfaceWidth: guestFramebufferWidth,
+                                surfaceHeight: guestFramebufferHeight
+                            ) {
+                                _ = executionResult?.session.dispatchTouch(
+                                    action: 1,
+                                    x: Float(point.x),
+                                    y: Float(point.y)
+                                )
+                            }
                             guestTouchActive = false
                         }
                 )
@@ -1314,6 +1327,29 @@ private struct APKDetailSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel("Android app touch surface")
+    }
+
+    /// Maps iOS points through the same aspect-fit rectangle used by the
+    /// framebuffer Image, returning Android guest-surface pixel coordinates.
+    private func guestSurfacePoint(
+        _ point: CGPoint,
+        container: CGSize,
+        surfaceWidth: Int,
+        surfaceHeight: Int
+    ) -> CGPoint? {
+        guard container.width > 0, container.height > 0,
+              surfaceWidth > 0, surfaceHeight > 0 else { return nil }
+        let width = CGFloat(surfaceWidth)
+        let height = CGFloat(surfaceHeight)
+        let scale = min(container.width / width, container.height / height)
+        let renderedWidth = width * scale
+        let renderedHeight = height * scale
+        let originX = (container.width - renderedWidth) * 0.5
+        let originY = (container.height - renderedHeight) * 0.5
+        let x = point.x - originX
+        let y = point.y - originY
+        guard x >= 0, y >= 0, x <= renderedWidth, y <= renderedHeight else { return nil }
+        return CGPoint(x: x / renderedWidth * width, y: y / renderedHeight * height)
     }
 
     private var executionStatusColor: Color {
