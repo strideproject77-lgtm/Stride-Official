@@ -145,7 +145,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
-        onLog("[INFO] APK inventory: dex_bytes=\(dexDataList.reduce(0) { $0 + $1.count }), native_names=\(soDataList.map(\.0).joined(separator: ","))")
+        onLog("[INFO] APK inventory: dex_bytes=\(dexDataList.reduce(0) { $0 + $1.count }), native_names=\(soDataList.map { $0.0 }.joined(separator: ","))")
         guard !manifestData.isEmpty else {
             onLog("[ERROR] AndroidManifest.xml is absent or empty")
             throw RuntimeExecutionError.missingManifest
