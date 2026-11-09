@@ -5,6 +5,60 @@
 
 use crate::graphics::Surface;
 
+#[cfg(target_os = "ios")]
+use std::ffi::{c_char, c_void};
+
+#[cfg(target_os = "ios")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGAffineTransform { a: f64, b: f64, c: f64, d: f64, tx: f64, ty: f64 }
+
+#[cfg(target_os = "ios")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGColorSpaceCreateDeviceRGB() -> *mut c_void;
+    fn CGColorSpaceRelease(space: *mut c_void);
+    fn CGBitmapContextCreate(data: *mut c_void, width: usize, height: usize, bits_per_component: usize, bytes_per_row: usize, space: *mut c_void, bitmap_info: u32) -> *mut c_void;
+    fn CGContextRelease(context: *mut c_void);
+    fn CGContextFlush(context: *mut c_void);
+    fn CGContextTranslateCTM(context: *mut c_void, tx: f64, ty: f64);
+    fn CGContextScaleCTM(context: *mut c_void, sx: f64, sy: f64);
+    fn CGContextSetTextMatrix(context: *mut c_void, transform: CGAffineTransform);
+    fn CGContextSetRGBFillColor(context: *mut c_void, red: f64, green: f64, blue: f64, alpha: f64);
+    fn CGContextSetTextDrawingMode(context: *mut c_void, mode: i32);
+    fn CGContextSelectFont(context: *mut c_void, name: *const c_char, size: f64, encoding: i32);
+    fn CGContextShowTextAtPoint(context: *mut c_void, x: f64, y: f64, text: *const c_char, length: usize);
+    fn CGContextSetShouldAntialias(context: *mut c_void, should_antialias: bool);
+    fn CGContextSetAllowsAntialiasing(context: *mut c_void, allows_antialiasing: bool);
+}
+
+#[cfg(target_os = "ios")]
+fn create_native_text_context(surface: &mut Surface) -> Option<*mut c_void> {
+    let color_space = unsafe { CGColorSpaceCreateDeviceRGB() };
+    if color_space.is_null() { return None; }
+    let context = unsafe {
+        CGBitmapContextCreate(
+            surface.pixels.as_mut_ptr().cast(),
+            surface.width as usize,
+            surface.height as usize,
+            8,
+            surface.width as usize * std::mem::size_of::<u32>(),
+            color_space,
+            0x2002,
+        )
+    };
+    unsafe { CGColorSpaceRelease(color_space) };
+    if context.is_null() { return None; }
+    unsafe {
+        CGContextTranslateCTM(context, 0.0, surface.height as f64);
+        CGContextScaleCTM(context, 1.0, -1.0);
+        CGContextSetTextMatrix(context, CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: -1.0, tx: 0.0, ty: 0.0 });
+        CGContextSetShouldAntialias(context, true);
+        CGContextSetAllowsAntialiasing(context, true);
+    }
+    Some(context)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaintStyle {
     Fill,
@@ -136,14 +190,20 @@ pub struct Canvas<'a> {
     pub surface: &'a mut Surface,
     transform: CanvasTransform,
     transform_stack: Vec<CanvasTransform>,
+    #[cfg(target_os = "ios")]
+    native_text_context: Option<*mut c_void>,
 }
 
 impl<'a> Canvas<'a> {
     pub fn new(surface: &'a mut Surface) -> Self {
+        #[cfg(target_os = "ios")]
+        let native_text_context = create_native_text_context(surface);
         Self {
             surface,
             transform: CanvasTransform::default(),
             transform_stack: Vec::new(),
+            #[cfg(target_os = "ios")]
+            native_text_context,
         }
     }
 
@@ -286,6 +346,42 @@ impl<'a> Canvas<'a> {
 
 
     pub fn draw_text(&mut self,text:&str,x:f32,baseline:f32,paint:&Paint)->f32 {
+        #[cfg(target_os = "ios")]
+        if let Some(context) = self.native_text_context {
+            let mut bytes = Vec::with_capacity(text.len());
+            for ch in text.chars() {
+                match ch {
+                    '\n' | '\r' => {},
+                    '×' => bytes.push(b'x'),
+                    '÷' => bytes.push(b'/'),
+                    '−' => bytes.push(b'-'),
+                    '±' => bytes.extend_from_slice(b"+/-"),
+                    '⌫' => bytes.push(b'<'),
+                    ch if ch.is_ascii() => bytes.push(ch as u8),
+                    _ => bytes.push(b'?'),
+                }
+            }
+            if !bytes.is_empty() {
+                let color = paint.color;
+                unsafe {
+                    CGContextSetRGBFillColor(
+                        context,
+                        ((color >> 16) & 0xff) as f64 / 255.0,
+                        ((color >> 8) & 0xff) as f64 / 255.0,
+                        (color & 0xff) as f64 / 255.0,
+                        ((color >> 24) & 0xff) as f64 / 255.0,
+                    );
+                    CGContextSetTextDrawingMode(context, 0);
+                    CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 0);
+                    CGContextShowTextAtPoint(context, x as f64, baseline as f64, bytes.as_ptr().cast(), bytes.len());
+                    CGContextFlush(context);
+                }
+            }
+            return x + bytes.len() as f32 * paint.text_size.max(1.0) * 0.56;
+        }
+
+        // Non-iOS test hosts retain the deterministic fallback rasterizer. Physical
+        // iPhone builds use native Helvetica glyphs instead of enlarged 5x7 pixels.
         let scale=(paint.text_size/7.0).max(1.0);let mut cursor=x;
         for ch in text.chars(){if ch=='\n'{continue;}let rows=glyph5x7(ch.to_ascii_uppercase());
             for(row,bits)in rows.iter().enumerate(){for col in 0..5{if bits&(1<<(4-col))!=0{
@@ -370,6 +466,15 @@ fn glyph5x7(ch: char) -> [u8; 7] {
         '!'=>[4,4,4,4,4,0,4], '?'=>[14,17,1,2,4,0,4],
         '⌫'=>[16,8,4,2,4,8,16],
         _=>[31,17,5,9,4,0,4]
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl Drop for Canvas<'_> {
+    fn drop(&mut self) {
+        if let Some(context) = self.native_text_context.take() {
+            unsafe { CGContextFlush(context); CGContextRelease(context); }
+        }
     }
 }
 
