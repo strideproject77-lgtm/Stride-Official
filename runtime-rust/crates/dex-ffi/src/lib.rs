@@ -268,7 +268,10 @@ pub unsafe extern "C" fn stride_runtime_pump_guest_events(
     }
     let rt = unsafe { &mut *runtime };
     let result = catch_unwind(AssertUnwindSafe(|| {
-        rt.pump_guest_events(max_events as usize, step_budget)
+        let delivered=rt.pump_guest_events(max_events as usize,step_budget)?;
+        // Re-render after every guest event batch so View mutations reach the host framebuffer.
+        rt.render_active_activity_surface()?;
+        Ok::<usize,String>(delivered)
     }));
     match result {
         Ok(Ok(delivered)) => {
