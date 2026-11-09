@@ -152,3 +152,5 @@ void stride_runtime_destroy(AndroidRuntime *runtime);
 #endif
 
 #endif
+
+int32_t stride_runtime_copy_framebuffer(const AndroidRuntime *runtime, uint32_t *out_width, uint32_t *out_height, uint32_t *out_pixels, size_t capacity_pixels);

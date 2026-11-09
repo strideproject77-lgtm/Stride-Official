@@ -192,8 +192,8 @@ impl LayoutRect {
 pub struct LaidOutView {
     pub kind: InflatedViewKind,
     pub bounds: LayoutRect,
-    pub background_argb: Option<u32>,
-    pub children: Vec<LaidOutView>,
+    pub background_argb: Option<u32>, pub text:Option<String>, pub text_argb:u32, pub text_size:f32,
+    pub image_resource_id:Option<u32>, pub children:Vec<LaidOutView>,
 }
 
 fn attr_dimension(view: &InflatedView, key: &str, available: f32, fallback: f32) -> f32 {
@@ -204,6 +204,9 @@ fn attr_dimension(view: &InflatedView, key: &str, available: f32, fallback: f32)
     }
 }
 
+fn parse_argb(raw:Option<&String>)->u32{let Some(raw)=raw else{return 0xff000000};let Some(hex)=raw.trim().strip_prefix("#")else{return 0xff000000};match hex.len(){6=>u32::from_str_radix(hex,16).map(|v|0xff000000|v).unwrap_or(0xff000000),8=>u32::from_str_radix(hex,16).unwrap_or(0xff000000),_=>0xff000000}}
+fn parse_text_size(raw:Option<&String>)->f32{raw.and_then(|v|v.trim_end_matches("sp").trim_end_matches("dp").parse::<f32>().ok()).filter(|v|v.is_finite()&&*v>0.0).unwrap_or(14.0)}
+fn parse_resource_id(raw:Option<&String>)->Option<u32>{raw.and_then(|v|v.strip_prefix("@0x").or_else(||v.strip_prefix("0x"))).and_then(|v|u32::from_str_radix(v,16).ok())}
 fn parse_background(view: &InflatedView) -> Option<u32> {
     let raw = view.attributes.get("background")?.trim();
     let hex = raw.strip_prefix("#")?;
@@ -216,14 +219,15 @@ fn parse_background(view: &InflatedView) -> Option<u32> {
 
 fn layout_node(view: &InflatedView, bounds: LayoutRect, depth: usize) -> LaidOutView {
     if depth >= MAX_LAYOUT_DEPTH || view.children.is_empty() {
-        return LaidOutView { kind: view.kind.clone(), bounds, background_argb: parse_background(view), children: Vec::new() };
+        return LaidOutView{kind:view.kind.clone(),bounds,background_argb:parse_background(view),text:view.attributes.get("text").cloned(),text_argb:parse_argb(view.attributes.get("textColor")),text_size:parse_text_size(view.attributes.get("textSize")),image_resource_id:parse_resource_id(view.attributes.get("src")),children:Vec::new()};
     }
 
     let vertical = view.attributes.get("orientation").map(|v| v != "horizontal").unwrap_or(true);
     let is_linear = matches!(view.kind, InflatedViewKind::LinearLayout);
     let mut children = Vec::with_capacity(view.children.len());
-    let count = view.children.len() as f32;
-    let segment = if vertical { bounds.height() / count } else { bounds.width() / count };
+    let count=view.children.len()as f32;let mut remaining=if vertical{bounds.height()}else{bounds.width()};
+    let mut remaining_weight:f32=view.children.iter().map(|c|c.attributes.get("layout_weight").and_then(|v|v.parse::<f32>().ok()).filter(|v|v.is_finite()&&*v>0.0).unwrap_or(0.0)).sum();
+    let segment=remaining/count;
     let mut cursor = if vertical { bounds.top } else { bounds.left };
 
     for child in &view.children {
@@ -231,20 +235,19 @@ fn layout_node(view: &InflatedView, bounds: LayoutRect, depth: usize) -> LaidOut
         let available_height = bounds.height();
         let child_width = attr_dimension(child, "layout_width", available_width, available_width);
         let child_height = attr_dimension(child, "layout_height", available_height, segment);
+        let weight=child.attributes.get("layout_weight").and_then(|v|v.parse::<f32>().ok()).filter(|v|v.is_finite()&&*v>0.0).unwrap_or(0.0);
+        let extent=if weight>0.0&&remaining_weight>0.0{remaining*weight/remaining_weight}else{segment};
+        let margin=child.attributes.get("layout_margin").and_then(|v|v.trim_end_matches("dp").parse::<f32>().ok()).filter(|v|v.is_finite()&&*v>=0.0).unwrap_or(0.0);
         let child_bounds = if is_linear {
             if vertical {
-                let height = if matches!(child.layout_height, Some(LayoutDimension::Pixels(_))) {
-                    child_height.min(segment)
-                } else { segment };
-                let rect = LayoutRect { left: bounds.left, top: cursor, right: bounds.left + child_width, bottom: cursor + height };
-                cursor += segment;
+                let height=if weight>0.0{extent}else if matches!(child.layout_height,Some(LayoutDimension::Pixels(_))){child_height.min(extent)}else{extent};
+                let rect=LayoutRect{left:bounds.left+margin,top:cursor+margin,right:bounds.left+child_width-margin,bottom:cursor+height-margin};
+                cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
                 rect
             } else {
-                let width = if matches!(child.layout_width, Some(LayoutDimension::Pixels(_))) {
-                    child_width.min(segment)
-                } else { segment };
-                let rect = LayoutRect { left: cursor, top: bounds.top, right: cursor + width, bottom: bounds.top + child_height };
-                cursor += segment;
+                let width=if weight>0.0{extent}else if matches!(child.layout_width,Some(LayoutDimension::Pixels(_))){child_width.min(extent)}else{extent};
+                let rect=LayoutRect{left:cursor+margin,top:bounds.top+margin,right:cursor+width-margin,bottom:bounds.top+child_height-margin};
+                cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
                 rect
             }
         } else {
@@ -253,13 +256,10 @@ fn layout_node(view: &InflatedView, bounds: LayoutRect, depth: usize) -> LaidOut
         children.push(layout_node(child, child_bounds, depth + 1));
     }
 
-    LaidOutView { kind: view.kind.clone(), bounds, background_argb: parse_background(view), children }
+    LaidOutView{kind:view.kind.clone(),bounds,background_argb:parse_background(view),text:view.attributes.get("text").cloned(),text_argb:parse_argb(view.attributes.get("textColor")),text_size:parse_text_size(view.attributes.get("textSize")),image_resource_id:parse_resource_id(view.attributes.get("src")),children}
 }
 
-/// Computes a bounded first-pass layout for common Android ViewGroup types.
-/// LinearLayout divides available space among children; Frame/other containers
-/// currently overlay children. Weight, margins, gravity, text measurement and
-/// resource/theme resolution are intentionally not approximated.
+/// Computes bounded common ViewGroup layout with LinearLayout weight and uniform margins. Per-edge margins, gravity, baseline alignment and resource dimensions remain pending.
 pub fn measure_and_layout(root: &InflatedView, width: u32, height: u32) -> LaidOutView {
     let bounds = LayoutRect { left: 0.0, top: 0.0, right: width as f32, bottom: height as f32 };
     layout_node(root, bounds, 0)
@@ -271,6 +271,11 @@ fn draw_layout_node(canvas: &mut Canvas<'_>, node: &LaidOutView) {
         paint.color = color;
         paint.style = PaintStyle::Fill;
         canvas.draw_rect(RectF::new(node.bounds.left, node.bounds.top, node.bounds.right, node.bounds.bottom), &paint);
+    }
+    if let Some(text)=node.text.as_deref(){let mut paint=Paint::new();paint.color=node.text_argb;paint.text_size=node.text_size;
+        let baseline=(node.bounds.top+node.bounds.bottom)*0.5+node.text_size*0.35;
+        let width=text.chars().count()as f32*node.text_size*6.0/7.0;
+        canvas.draw_text(text,node.bounds.left+(node.bounds.width()-width).max(0.0)*0.5,baseline,&paint);
     }
     for child in &node.children {
         draw_layout_node(canvas, child);

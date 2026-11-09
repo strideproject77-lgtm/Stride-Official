@@ -812,6 +812,9 @@ private struct APKDetailSheet: View {
     @State private var isExecutionChromeHidden = false
     @State private var launchTask: Task<Void, Never>?
     @State private var frameScheduler: GuestFrameScheduler?
+    @State private var guestFramebufferData: Data?
+    @State private var guestFramebufferWidth = 0
+    @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
@@ -935,8 +938,11 @@ private struct APKDetailSheet: View {
                                 let scheduler = GuestFrameScheduler { _ in
                                     let pump = res.session.pumpGuestEvents()
                                     if pump.status == 0 {
-                                        if pump.delivered > 0 {
-                                            appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
+                                        if pump.delivered > 0 { appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity") }
+                                        if let frame = res.session.copyFramebuffer() {
+                                            guestFramebufferData = frame.data
+                                            guestFramebufferWidth = frame.width
+                                            guestFramebufferHeight = frame.height
                                         }
                                     } else {
                                         appendSessionLog("[ERROR] Guest input pump failed with status \(pump.status)")
@@ -945,7 +951,7 @@ private struct APKDetailSheet: View {
                                 }
                                 frameScheduler = scheduler
                                 scheduler.start()
-                                appendSessionLog("[SESSION] Host display-link input pump started; Android guest loop and rendering remain inactive")
+                                appendSessionLog("[SESSION] Host display-link copies guest Surface pixels into SwiftUI; guest frame production is still pending")
                                 appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
                             } catch {
                                 guard !Task.isCancelled else { return }
@@ -1177,12 +1183,13 @@ private struct APKDetailSheet: View {
                     .padding(.vertical, 11)
                     .background(Color(white: 0.075))
 
-                    guestTouchSurface
+                    guestFramebufferSurface.overlay { guestTouchSurface }
                 }
                 .padding(.top, UIDevice.current.orientation.isLandscape ? 8 : 44)
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else {
-                guestTouchSurface
+                guestFramebufferSurface
+                    .overlay { guestTouchSurface }
                     .ignoresSafeArea()
                     .transition(.opacity)
             }
@@ -1213,6 +1220,9 @@ private struct APKDetailSheet: View {
         frameScheduler?.stop()
         frameScheduler = nil
         guestTouchActive = false
+        guestFramebufferData = nil
+        guestFramebufferWidth = 0
+        guestFramebufferHeight = 0
         showingExecutionScreen = false
         isExecutionChromeHidden = false
         executionResult?.session.close()
@@ -1228,6 +1238,19 @@ private struct APKDetailSheet: View {
         if executionError != nil { return "Could not start — see the log" }
         if executionResult != nil { return "Activity resumed · guest loop inactive" }
         return "Ready"
+    }
+
+    private var guestFramebufferSurface: some View {
+        Group {
+            if let data=guestFramebufferData,guestFramebufferWidth>0,guestFramebufferHeight>0,
+               let provider=CGDataProvider(data:data as CFData),
+               let cg=CGImage(width:guestFramebufferWidth,height:guestFramebufferHeight,bitsPerComponent:8,bitsPerPixel:32,
+                bytesPerRow:guestFramebufferWidth*4,space:CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo:CGBitmapInfo(rawValue:CGBitmapInfo.byteOrder32Little.rawValue|CGImageAlphaInfo.premultipliedFirst.rawValue),
+                provider:provider,decode:nil,shouldInterpolate:false,intent:.defaultIntent) {
+                Image(uiImage:UIImage(cgImage:cg)).resizable().interpolation(.none).scaledToFit().frame(maxWidth:.infinity,maxHeight:.infinity).background(Color.black)
+            } else { Color.black }
+        }.accessibilityLabel("Android guest framebuffer")
     }
 
     private var guestTouchSurface: some View {

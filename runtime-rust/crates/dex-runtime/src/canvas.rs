@@ -284,6 +284,31 @@ impl<'a> Canvas<'a> {
         }
     }
 
+
+    pub fn draw_text(&mut self,text:&str,x:f32,baseline:f32,paint:&Paint)->f32 {
+        let scale=(paint.text_size/7.0).max(1.0);let mut cursor=x;
+        for ch in text.chars(){if ch=='\\n'{continue;}let rows=glyph5x7(ch.to_ascii_uppercase());
+            for(row,bits)in rows.iter().enumerate(){for col in 0..5{if bits&(1<<(4-col))!=0{
+                let left=cursor+col as f32*scale;let top=baseline-7.0*scale+row as f32*scale;
+                self.draw_rect(RectF::new(left,top,left+scale,top+scale),paint);
+            }}}
+            cursor+=6.0*scale;
+        }cursor
+    }
+    pub fn draw_image_argb(&mut self,pixels:&[u32],width:u32,height:u32,left:i32,top:i32){
+        if(width as usize).checked_mul(height as usize)!=Some(pixels.len()){return;}
+        for sy in 0..height{let dy=top+sy as i32;if dy<0||dy>=self.surface.height as i32{continue;}
+            for sx in 0..width{let dx=left+sx as i32;if dx<0||dx>=self.surface.width as i32{continue;}
+                let src=pixels[(sy*width+sx)as usize];let a=(src>>24)&255;
+                if a==255{self.surface.set_pixel(dx as u32,dy as u32,src);}else if a>0{
+                    let dst=self.surface.get_pixel(dx as u32,dy as u32).unwrap_or(0xff000000);let inv=255-a;
+                    let blend=|shift:u32|((((src>>shift)&255)*a+((dst>>shift)&255)*inv)/255)&255;
+                    self.surface.set_pixel(dx as u32,dy as u32,0xff000000|(blend(16)<<16)|(blend(8)<<8)|blend(0));
+                }
+            }
+        }
+    }
+
     pub fn draw_path(&mut self, path: &Path, paint: &Paint) {
         let mut cur_x = 0.0;
         let mut cur_y = 0.0;
@@ -313,10 +338,34 @@ impl<'a> Canvas<'a> {
     }
 }
 
+fn glyph5x7(ch: char) -> [u8;7] { match ch {
+'A'=>[14,17,17,31,17,17,17],'B'=>[30,17,17,30,17,17,30],'C'=>[14,17,16,16,16,17,14],'D'=>[30,17,17,17,17,17,30],
+'E'=>[31,16,16,30,16,16,31],'F'=>[31,16,16,30,16,16,16],'G'=>[14,17,16,23,17,17,15],'H'=>[17,17,17,31,17,17,17],
+'I'=>[14,4,4,4,4,4,14],'J'=>[7,2,2,2,18,18,12],'K'=>[17,18,20,24,20,18,17],'L'=>[16,16,16,16,16,16,31],
+'M'=>[17,27,21,21,17,17,17],'N'=>[17,25,21,19,17,17,17],'O'=>[14,17,17,17,17,17,14],'P'=>[30,17,17,30,16,16,16],
+'Q'=>[14,17,17,17,21,18,13],'R'=>[30,17,17,30,20,18,17],'S'=>[15,16,16,14,1,1,30],'T'=>[31,4,4,4,4,4,4],
+'U'=>[17,17,17,17,17,17,14],'V'=>[17,17,17,17,17,10,4],'W'=>[17,17,17,21,21,21,10],'X'=>[17,17,10,4,10,17,17],
+'Y'=>[17,17,10,4,4,4,4],'Z'=>[31,1,2,4,8,16,31],
+'0'=>[14,17,19,21,25,17,14],'1'=>[4,12,4,4,4,4,14],'2'=>[14,17,1,2,4,8,31],'3'=>[30,1,1,14,1,1,30],
+'4'=>[2,6,10,18,31,2,2],'5'=>[31,16,16,30,1,1,30],'6'=>[14,16,16,30,17,17,14],'7'=>[31,1,2,4,8,8,8],
+'8'=>[14,17,17,14,17,17,14],'9'=>[14,17,17,15,1,1,14],
+'.'=>[0,0,0,0,0,12,12],':'=>[0,12,12,0,12,12,0],'-'=>[0,0,0,31,0,0,0],' '=>[0;7],
+'!'=>[4,4,4,4,4,0,4],'?'=>[14,17,1,2,4,0,4],_=>[31,17,5,9,4,0,4] } }
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn text_and_image_blitter_write_real_pixels(){
+        let mut surface=Surface::new(90,20);let mut canvas=Canvas::new(&mut surface);
+        let mut paint=Paint::new();paint.color=0xffffffff;paint.text_size=7.0;
+        canvas.draw_text("STRIDE 123",1.0,9.0,&paint);
+        assert_ne!(canvas.surface.get_pixel(2,4),Some(0xff000000));
+        canvas.draw_image_argb(&[0xffff0000,0x8000ff00],2,1,0,10);
+        assert_eq!(canvas.surface.get_pixel(0,10),Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(1,10),Some(0xff007f00));
+    }
     #[test]
     fn canvas_draws_rect_and_pixel() {
         let mut surface = Surface::new(100, 100);

@@ -358,6 +358,17 @@ pub unsafe extern "C" fn stride_runtime_gl_clear(
     0
 }
 
+/// Copies the guest Surface into caller-owned ARGB8888 pixels. Query with null pixels first.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_copy_framebuffer(runtime:*const AndroidRuntime,out_width:*mut u32,out_height:*mut u32,out_pixels:*mut u32,capacity_pixels:usize)->i32{
+ if runtime.is_null()||out_width.is_null()||out_height.is_null(){return 1;}
+ let surface=&unsafe{&*runtime}.surface;
+ let Some(required)=(surface.width as usize).checked_mul(surface.height as usize)else{return 2;};
+ unsafe{out_width.write(surface.width);out_height.write(surface.height);}
+ if out_pixels.is_null()||capacity_pixels<required{return 3;}
+ unsafe{std::ptr::copy_nonoverlapping(surface.pixels.as_ptr(),out_pixels,required);}0
+}
+
 /// Copies the current diagnostic report into a caller-owned UTF-8 buffer.
 /// Returns the required byte count including the trailing NUL. If out is null
 /// or capacity is too small, no bytes are written; call once for size, then again.

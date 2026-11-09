@@ -45,6 +45,16 @@ final class APKRuntimeSession: @unchecked Sendable {
         return (status, delivered)
     }
 
+    func copyFramebuffer() -> (data: Data, width: Int, height: Int)? {
+        lock.lock();defer{lock.unlock()}
+        guard let runtime else{return nil}
+        var width:UInt32=0;var height:UInt32=0
+        guard stride_runtime_copy_framebuffer(runtime,&width,&height,nil,0)==3,width>0,height>0 else{return nil}
+        let count=Int(width)*Int(height);guard count>0,count<=16_777_216 else{return nil}
+        let pixels=UnsafeMutablePointer<UInt32>.allocate(capacity:count);defer{pixels.deallocate()}
+        guard stride_runtime_copy_framebuffer(runtime,&width,&height,pixels,count)==0 else{return nil}
+        return(Data(bytes:pixels,count:count*MemoryLayout<UInt32>.size),Int(width),Int(height))
+    }
     func recordFrame(durationMilliseconds: Float) -> Float {
         lock.lock()
         defer { lock.unlock() }
