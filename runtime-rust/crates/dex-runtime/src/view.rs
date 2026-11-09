@@ -65,6 +65,9 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         "Landroid/view/ViewGroup;",
         "Landroid/widget/LinearLayout;",
         "Landroid/widget/TextView;",
+        "Landroid/widget/Button;",
+        "Landroid/widget/EditText;",
+        "Landroid/widget/ImageButton;",
     ] {
         register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;)V");
         register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;)V");
@@ -467,6 +470,23 @@ mod tests {
             &[Value::Object(parent)]).unwrap();
         assert_eq!(invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "getChildCount", "()I",
             &[Value::Object(parent)]).unwrap(), Some(Value::Int(0)));
+    }
+
+    #[test]
+    fn common_button_and_edit_text_constructors_are_registered() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        for class in [
+            "Landroid/widget/Button;",
+            "Landroid/widget/EditText;",
+            "Landroid/widget/ImageButton;",
+        ] {
+            assert!(
+                jni.find(class, "<init>", "(Landroid/content/Context;)V").is_some(),
+                "missing managed constructor bridge for {}",
+                class
+            );
+        }
     }
 
     #[test]
