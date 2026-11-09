@@ -3,15 +3,16 @@ import Combine
 import SwiftUI
 
 enum APKLibraryImportError: LocalizedError {
-    case unsupportedFile
-    case unreadableSource
-
+    case unsupportedFile, unreadableSource, invalidPackageArchive, missingBaseAPK
+    case packageArchiveTooLarge, duplicatePackageEntry(String)
     var errorDescription: String? {
         switch self {
-        case .unsupportedFile:
-            return "Please choose an .apk file. Other file types cannot be imported."
-        case .unreadableSource:
-            return "iOS could not access this file. Save it in Files and try importing it again."
+        case .unsupportedFile: return "Supported Android packages are APK, XAPK, APKS and APKM."
+        case .unreadableSource: return "iOS could not access this file. Save it in Files and try importing it again."
+        case .invalidPackageArchive: return "The Android package archive is damaged or contains an invalid APK entry."
+        case .missingBaseAPK: return "No base APK was found. A configuration split cannot be imported by itself."
+        case .packageArchiveTooLarge: return "The package exceeds Stride's safe extraction limits."
+        case .duplicatePackageEntry(let name): return "The package contains duplicate APK filenames: \(name)."
         }
     }
 }
@@ -19,118 +20,87 @@ enum APKLibraryImportError: LocalizedError {
 @MainActor
 final class APKLibraryStore: ObservableObject {
     @Published private(set) var packages: [ImportedAPK] = []
-
     private let inspector = APKArchiveInspector()
+    private let packageImporter = AndroidPackageImporter()
     private let fileManager = FileManager.default
 
-    init() {
-        reload()
-    }
+    init() { reload() }
 
     func importPackage(from sourceURL: URL) throws {
-        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START",
-            "Starting APK import: \(sourceURL.lastPathComponent)")
-        let destination = try copyPackageToLibrary(from: sourceURL)
+        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START", "Starting Android package import: \(sourceURL.lastPathComponent)")
+        let prepared = try preparePackage(from: sourceURL)
         do {
-            let report = try inspector.inspect(destination)
-            packages.removeAll { $0.fileURL == destination }
-            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+            let report = try inspector.inspect(prepared.baseAPKURL)
+            let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
+                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
+            packages.removeAll { $0.packageDirectoryURL == prepared.packageDirectoryURL }
+            packages.insert(item, at: 0)
             StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
-                "Imported \(sourceURL.lastPathComponent): \(report.dexFileCount) DEX, \(report.dexClassCount) classes, \(report.dexMethodCount) methods")
+                "Imported \(sourceURL.lastPathComponent) as \(prepared.format.rawValue.uppercased()); DEX=\(report.dexFileCount), splits=\(prepared.splitAPKURLs.count), classes=\(report.dexClassCount)")
         } catch {
-            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED",
-                error.localizedDescription, recovery: "This APK was isolated and removed from the library; other packages remain available")
-            try? fileManager.removeItem(at: destination)
+            try? fileManager.removeItem(at: prepared.packageDirectoryURL)
+            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED", error.localizedDescription,
+                recovery: "The incomplete package was removed; existing library entries remain available")
             throw error
         }
     }
 
-    /// Copies the provider document, then scans the archive away from the UI thread.
     func importPackageAsync(from sourceURL: URL) async throws {
-        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START",
-            "Starting APK import: \(sourceURL.lastPathComponent)")
-        let destination = try copyPackageToLibrary(from: sourceURL)
+        StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START", "Starting Android package import: \(sourceURL.lastPathComponent)")
+        let prepared = try preparePackage(from: sourceURL)
         do {
             let archiveInspector = inspector
             let report = try await Task.detached(priority: .userInitiated) {
-                try archiveInspector.inspect(destination)
+                try archiveInspector.inspect(prepared.baseAPKURL)
             }.value
-            packages.removeAll { $0.fileURL == destination }
-            packages.insert(ImportedAPK(fileURL: destination, inspection: report), at: 0)
+            let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
+                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
+            packages.removeAll { $0.packageDirectoryURL == prepared.packageDirectoryURL }
+            packages.insert(item, at: 0)
             StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
-                "Imported \(sourceURL.lastPathComponent): \(report.dexFileCount) DEX, \(report.dexClassCount) classes, \(report.dexMethodCount) methods")
+                "Imported \(sourceURL.lastPathComponent) as \(prepared.format.rawValue.uppercased()); DEX=\(report.dexFileCount), splits=\(prepared.splitAPKURLs.count), classes=\(report.dexClassCount)")
         } catch {
-            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED",
-                error.localizedDescription, recovery: "This APK was isolated and removed from the library; other packages remain available")
-            try? fileManager.removeItem(at: destination)
+            try? fileManager.removeItem(at: prepared.packageDirectoryURL)
+            StrideDiagnostics.shared.record(.error, stage: "IMPORT", code: "IMPORT_FAILED", error.localizedDescription,
+                recovery: "The incomplete package was removed; existing library entries remain available")
             throw error
         }
     }
 
     func deletePackage(_ package: ImportedAPK) throws {
-        guard package.fileURL.pathExtension.lowercased() == "apk" else {
-            throw APKLibraryImportError.unreadableSource
-        }
-        try fileManager.removeItem(at: package.fileURL)
-        packages.removeAll { $0.id == package.id || $0.fileURL == package.fileURL }
-        StrideDiagnostics.shared.record(.info, stage: "LIBRARY", code: "APK_DELETED",
-            "Removed \(package.displayName) from the local APK library")
+        try fileManager.removeItem(at: package.packageDirectoryURL)
+        packages.removeAll { $0.id == package.id || $0.packageDirectoryURL == package.packageDirectoryURL }
+        StrideDiagnostics.shared.record(.info, stage: "LIBRARY", code: "PACKAGE_DELETED",
+            "Removed \(package.displayName) and its package components")
     }
 
-    private func copyPackageToLibrary(from sourceURL: URL) throws -> URL {
-        guard sourceURL.pathExtension.lowercased() == "apk" else {
-            StrideDiagnostics.shared.record(.warning, stage: "IMPORT", code: "UNSUPPORTED_FILE",
-                "Rejected non-APK file: \(sourceURL.lastPathComponent)",
-                recovery: "Select an .apk file; XAPK/APKS bundle support is not enabled in this import path yet")
-            throw APKLibraryImportError.unsupportedFile
-        }
-
-        let didAccess = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if didAccess { sourceURL.stopAccessingSecurityScopedResource() }
-        }
-
-        guard sourceURL.isFileURL,
-              fileManager.isReadableFile(atPath: sourceURL.path) else {
-            throw APKLibraryImportError.unreadableSource
-        }
-
-        let folder = try libraryFolder()
-        let destination = uniqueDestination(for: sourceURL.lastPathComponent, in: folder)
-
-        // UIDocumentPicker is configured with asCopy=true, so provider-backed
-        // files arrive as a local sandbox copy. Copy directly while any optional
-        // security-scoped access is active; coordinating the already-local copy
-        // can cause a successful picker selection to produce no library item.
-        do {
-            try fileManager.copyItem(at: sourceURL, to: destination)
-        } catch {
-            try? fileManager.removeItem(at: destination)
-            throw error
-        }
-
-        guard fileManager.fileExists(atPath: destination.path),
-              fileManager.isReadableFile(atPath: destination.path) else {
-            try? fileManager.removeItem(at: destination)
-            throw APKLibraryImportError.unreadableSource
-        }
-        return destination
+    private func preparePackage(from sourceURL: URL) throws -> PreparedAndroidPackage {
+        try packageImporter.prepare(sourceURL, in: libraryFolder())
     }
 
     private func reload() {
         guard let folder = try? libraryFolder(),
-              let files = try? fileManager.contentsOfDirectory(
-                at: folder,
-                includingPropertiesForKeys: nil
-              ) else { return }
-
-        packages = files
-            .filter { $0.pathExtension.lowercased() == "apk" }
-            .compactMap { url in
-                guard let report = try? inspector.inspect(url) else { return nil }
-                return ImportedAPK(fileURL: url, inspection: report)
-            }
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+              let children = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey]) else { return }
+        var restored: [ImportedAPK] = []
+        for child in children {
+            let isDirectory = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            let base = isDirectory ? child.appendingPathComponent("base.apk") : child
+            guard base.pathExtension.lowercased() == "apk", fileManager.fileExists(atPath: base.path),
+                  let report = try? inspector.inspect(base) else { continue }
+            let components = child.appendingPathComponent("components", isDirectory: true)
+            let splits = (try? fileManager.contentsOfDirectory(at: components, includingPropertiesForKeys: nil))?
+                .filter { $0.pathExtension.lowercased() == "apk" } ?? []
+            let format: AndroidPackageFormat = {
+                guard isDirectory,
+                      let source = (try? fileManager.contentsOfDirectory(at: child, includingPropertiesForKeys: nil))?
+                        .first(where: { $0.lastPathComponent.hasPrefix("source.") }),
+                      let value = AndroidPackageFormat(rawValue: source.pathExtension.lowercased()) else { return .apk }
+                return value
+            }()
+            restored.append(ImportedAPK(fileURL: base, packageDirectoryURL: isDirectory ? child : base,
+                packageFormat: format, splitAPKURLs: splits, inspection: report))
+        }
+        packages = restored.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     private func libraryFolder() throws -> URL {
@@ -138,18 +108,5 @@ final class APKLibraryStore: ObservableObject {
         let folder = documents.appendingPathComponent("APKs", isDirectory: true)
         try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder
-    }
-
-    private func uniqueDestination(for filename: String, in folder: URL) -> URL {
-        let original = folder.appendingPathComponent(filename)
-        guard fileManager.fileExists(atPath: original.path) else { return original }
-        let base = original.deletingPathExtension().lastPathComponent
-        let ext = original.pathExtension
-        var suffix = 2
-        while true {
-            let candidate = folder.appendingPathComponent("\(base)-\(suffix).\(ext)")
-            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
-            suffix += 1
-        }
     }
 }
