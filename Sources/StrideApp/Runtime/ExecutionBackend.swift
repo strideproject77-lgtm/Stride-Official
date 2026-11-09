@@ -180,9 +180,12 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         var manifestData = Data()
         var dexDataList: [Data] = []
         var soDataList: [(String, Data)] = []
+        var resourceTableData = Data()
 
         for entry in archive {
-            if entry.path == "AndroidManifest.xml" {
+            if entry.path == "resources.arsc" {
+                _ = try archive.extract(entry) { chunk in resourceTableData.append(chunk) }
+            } else if entry.path == "AndroidManifest.xml" {
                 _ = try archive.extract(entry) { chunk in
                     manifestData.append(chunk)
                 }
@@ -210,10 +213,18 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         let packageName = url.deletingPathExtension().lastPathComponent
+        onLog("[INFO] Resource table: \(resourceTableData.count) bytes")
         onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
             onLog("[FATAL] Rust runtime creation returned null")
             throw RuntimeExecutionError.runtimeInitializationFailed
+        }
+        if !resourceTableData.isEmpty {
+            let resourceStatus = resourceTableData.withUnsafeBytes { raw in
+                stride_runtime_load_resource_table(runtime, raw.bindMemory(to: UInt8.self).baseAddress, resourceTableData.count)
+            }
+            if resourceStatus == 0 { onLog("[INFO] Android resource table decoded") }
+            else { onLog("[WARN] Resource table decode unavailable (status \(resourceStatus)); literal UI text remains available") }
         }
         var runtimeOwnershipTransferred = false
         defer {

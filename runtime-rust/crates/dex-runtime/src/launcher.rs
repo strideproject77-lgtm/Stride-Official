@@ -22,6 +22,7 @@ use crate::activity_manager::ActivityManager;
 use crate::service_manager::ServiceManager;
 use crate::telemetry::PerformanceTelemetry;
 use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
+use crate::resources::ResourceCatalog;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -66,9 +67,12 @@ pub struct AndroidRuntime {
     pub activity_manager: ActivityManager,
     pub service_manager: ServiceManager,
     pub telemetry: PerformanceTelemetry,
+    pub resources: ResourceCatalog,
 }
 
 impl AndroidRuntime {
+    pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{self.resources=ResourceCatalog::parse(data)?;Ok(())}
+
     /// Creates a new Android runtime environment.
     pub fn new(package_name: &str) -> Self {
         let mut jni = JniNativeRegistry::new();
@@ -93,6 +97,7 @@ impl AndroidRuntime {
             activity_manager: ActivityManager::new(),
             service_manager: ServiceManager::new(),
             telemetry: PerformanceTelemetry::default(),
+            resources: ResourceCatalog::default(),
         }
     }
 
@@ -765,13 +770,14 @@ impl AndroidRuntime {
         self.surface.clear(0xff000000);
         let width=self.surface.width as f32;let height=self.surface.height as f32;
         let mut canvas=Canvas::new(&mut self.surface);
-        fn draw(heap:&ManagedHeap,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
+        fn draw(heap:&ManagedHeap,resources:&ResourceCatalog,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
             if depth>128||!seen.insert(id){return Ok(());}
             let field=|name:&str|heap.get_instance_field(id,name).map_err(|e|format!("View field {} read failed: {:?}",name,e));
             let visibility=field("mVisibility")?.as_int();if visibility!=0{return Ok(());}
             let bg=field("mBackgroundColor")?.as_int() as u32;
             if bg!=0{let mut p=Paint::new();p.color=bg;p.style=PaintStyle::Fill;canvas.draw_rect(bounds,&p);}
             let text_value=field("mText")?;
+            let text_resource=field("mTextResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
             if let Some(text_id)=text_value.as_object(){
                 if let Ok(text)=heap.get_string(text_id){
                     let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;
@@ -781,7 +787,11 @@ impl AndroidRuntime {
                     let text_width=text.chars().count()as f32*p.text_size*6.0/7.0;
                     canvas.draw_text(text,bounds.left+(bounds.width()-text_width).max(0.0)*0.5,baseline,&p);
                 }
+            } else if text_resource!=0 {
+                if let Some(text)=resources.string(text_resource){let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;p.color=if color==0{0xff000000}else{color};let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;canvas.draw_text(text,bounds.left+2.0,baseline,&p);}
             }
+            let bg_resource=field("mBackgroundResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
+            if bg_resource!=0{if let Some(color)=resources.color(bg_resource){let mut p=Paint::new();p.color=color;canvas.draw_rect(bounds,&p);}}
             let count=field("mChildCount")?.as_int().clamp(0,4096)as usize;
             if count==0{return Ok(());}
             let orientation=field("mOrientation")?.as_int();let vertical=orientation!=0;
@@ -808,12 +818,12 @@ impl AndroidRuntime {
                 } else {
                     RectF::new(cursor+ml,bounds.top+mt,cursor+extent-mr,(bounds.bottom-mb).max(bounds.top+mt))
                 };
-                draw(heap,canvas,child_id,child_bounds,depth+1,seen)?;
+                draw(heap,resources,canvas,child_id,child_bounds,depth+1,seen)?;
                 cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
             }
             Ok(())
         }
-        draw(&self.heap,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
+        draw(&self.heap,&self.resources,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
         Ok(true)
     }
 

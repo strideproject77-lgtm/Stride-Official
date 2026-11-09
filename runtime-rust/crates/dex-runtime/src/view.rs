@@ -38,6 +38,8 @@ fn register_view_constructor(
         _env.set_object_field(view, "mNeedsDraw", Value::Int(1))?;
         _env.set_object_field(view, "mBackgroundColor", Value::Int(0))?;
         _env.set_object_field(view, "mText", Value::Null)?;
+        _env.set_object_field(view, "mTextResourceId", Value::Int(0))?;
+        _env.set_object_field(view, "mBackgroundResourceId", Value::Int(0))?;
         _env.set_object_field(view, "mTextColor", Value::Int(0xff000000u32 as i32))?;
         _env.set_object_field(view, "mTextSize", Value::Float(14.0))?;
         _env.set_object_field(view, "mOrientation", Value::Int(1))?;
@@ -122,12 +124,21 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         Ok(None)
     });
 
+    jni.register("Landroid/view/View;","setBackgroundResource","(I)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mBackgroundResourceId",Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;)V",|env,args|{
         let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
     });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V",|env,args|{
         let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","setText","(I)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mText",Value::Null)?;
+        env.set_object_field(id,"mTextResourceId",Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
     });
     jni.register("Landroid/widget/TextView;","setTextColor","(I)V",|env,args|{

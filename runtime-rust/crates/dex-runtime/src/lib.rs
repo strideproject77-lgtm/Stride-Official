@@ -26,6 +26,8 @@ pub mod paint;
 pub mod telemetry;
 pub mod view;
 pub mod layout;
+pub mod resources;
+pub use resources::ResourceCatalog;
 #[cfg(test)]
 pub mod compatibility_tests;
 

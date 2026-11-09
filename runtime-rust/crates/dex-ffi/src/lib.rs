@@ -88,6 +88,15 @@ pub unsafe extern "C" fn stride_runtime_create(package_name: *const c_char) -> *
     Box::into_raw(runtime)
 }
 
+
+/// Loads Android resources.arsc into the runtime resource catalog.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_load_resource_table(runtime:*mut AndroidRuntime,data:*const u8,len:usize)->i32{
+ if runtime.is_null()||data.is_null()||len==0||len>isize::MAX as usize{return 1;}
+ let rt=unsafe{&mut *runtime};let bytes=unsafe{slice::from_raw_parts(data,len)};
+ match catch_unwind(AssertUnwindSafe(||rt.load_resource_table(bytes))){Ok(Ok(()))=>0,Ok(Err(_))=>2,Err(_)=>3}
+}
+
 /// Loads a DEX binary into an active Android runtime instance.
 /// Returns 0 on success, 1 on null pointer, 2 on invalid DEX.
 #[no_mangle]
