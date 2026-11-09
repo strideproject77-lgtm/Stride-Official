@@ -61,7 +61,7 @@ struct ContentView: View {
                             .shadow(color: .black.opacity(0.30), radius: 12, y: 5)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Import APK")
+                    .accessibilityLabel("Import Android Package")
                     .padding(.trailing, 19)
                     .padding(.bottom, 82)
                 }
@@ -91,7 +91,7 @@ struct ContentView: View {
         )) {
             Button("OK", role: .cancel) { importError = nil }
         } message: {
-            Text(importError ?? "Please try another APK file.")
+            Text(importError ?? "Please try another Android package file.")
         }
         .preferredColorScheme(theme == .white ? .light : .dark)
     }
@@ -271,7 +271,7 @@ struct ContentView: View {
                             .foregroundStyle(muted)
                         if searchText.isEmpty {
                             Button { showingImporter = true } label: {
-                                Label("Import APK", systemImage: "plus")
+                                Label("Import Android Package", systemImage: "plus")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(theme.buttonForeground)
                                     .padding(.horizontal, 16)

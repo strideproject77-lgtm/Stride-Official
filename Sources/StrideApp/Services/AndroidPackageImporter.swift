@@ -1,7 +1,7 @@
 import Foundation
 import ZIPFoundation
 
-enum AndroidPackageFormat: String, CaseIterable, Sendable { case apk, xapk, apks, apkm }
+enum AndroidPackageFormat: String, CaseIterable, Sendable, Hashable { case apk, xapk, apks, apkm }
 struct PreparedAndroidPackage: Sendable {
     let baseAPKURL: URL
     let packageDirectoryURL: URL
