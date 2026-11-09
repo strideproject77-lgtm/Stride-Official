@@ -147,11 +147,6 @@ size_t stride_runtime_diagnostics_export(
  */
 void stride_runtime_destroy(AndroidRuntime *runtime);
 
-#ifdef __cplusplus
-}
-#endif
-
-#endif
 
 int32_t stride_runtime_copy_framebuffer(const AndroidRuntime *runtime, uint32_t *out_width, uint32_t *out_height, uint32_t *out_pixels, size_t capacity_pixels);
 int32_t stride_runtime_load_resource_table(AndroidRuntime *runtime, const uint8_t *data, size_t len);
