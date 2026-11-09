@@ -111,3 +111,58 @@ DEX references `android.graphics.Canvas`. The class/method inventory strongly in
 ## Limitations of this scan
 
 The binary AndroidManifest.xml was not fully decoded with aapt/apktool and no complete JADX/Androguard decompilation was performed. Exact launcher component, full manifest permission list, exact external API call paths, and exact Canvas signatures remain to be confirmed in a deeper disassembly. DEX string/type references do not prove every referenced SDK feature is mandatory.
+
+
+## Deeper APK/DEX API audit (2026-11-09)
+
+A second pass decoded the base APK's binary AndroidManifest.xml and inspected the app-owned DEX method definitions and framework method references.
+
+### Confirmed manifest facts
+
+- Exact launcher: `com.tpcstld.twozerogame.MainActivity`.
+- Launcher is exported and requests landscape orientation (`screenOrientation=1`).
+- min SDK 23; target SDK 37; compile SDK 37.
+- Application component factory: `androidx.core.app.CoreComponentFactory`.
+- Manifest marks split delivery as required and declares required split type `base__density`.
+- Main Activity also declares HTTP/HTTPS deep links for `tpcstld.me/2048`; these are not required for offline core gameplay.
+- Google Play Games app ID metadata and Play Games snapshot/auth components are present.
+
+### App-owned execution path
+
+- `MainActivity.onCreate(Bundle)` creates and attaches the custom game View.
+- `MainView` is a custom View with `onDraw(Canvas)`, `onSizeChanged(IIII)`, `tick()`, background/cell/score/button drawing methods, and offscreen bitmap creation.
+- `InputListener.onTouch(View, MotionEvent)` handles the game input.
+- `MainGame.move(I)` is the main move entry point; game logic includes traversal, tile merging, random spawning, undo, win/lose state, and score/high-score handling.
+- `MainActivity.load()` / `save()` plus SnapshotData serialization are used for persistence. MainActivity also references SharedPreferences get/put Boolean, Int and Long plus Editor.apply().
+- Core game logic is app-owned DEX; the rendering and framework bridge are the main compatibility risks.
+
+### Exact graphics and framework API references
+
+MainView references these Android APIs:
+
+- Bitmap: `Bitmap.createBitmap(II, Bitmap.Config)`.
+- Canvas: `Canvas(Bitmap)`, `drawBitmap(Bitmap,FF,Paint)`, `drawText(String,FF,Paint)`.
+- Paint: constructor, `ascent()`, `descent()`, `measureText(String)`, `setAlpha(I)`, `setAntiAlias(Z)`, `setColor(I)`, `setTextAlign(Paint.Align)`, `setTextSize(F)`, `setTypeface(Typeface)`.
+- Typeface: `createFromAsset(AssetManager,String)`.
+- BitmapDrawable/Drawable: constructor from Resources + Bitmap, `draw(Canvas)`, `setAlpha(I)`, `setBounds(IIII)`.
+- Resources: `getAssets()`, `getColor(I)`, `getString(I)`.
+- MainActivity: `Window.getDecorView()`, `Window.setStatusBarColor(I)`, `View.setOnApplyWindowInsetsListener(...)`, SharedPreferences editor/read methods.
+- InputListener: `MotionEvent.getAction()`, `getX()`, and `getY()`; the touch listener must receive the original swipe sequence.
+
+The DEX also contains many AndroidX, Google Play Services and Kotlin references. Treat them as reached-path requirements only after tracing execution; Play Games sign-in/snapshots should not block the offline core game.
+
+### Newly confirmed primary blocker in Stride
+
+The current Rust `render_active_activity_surface()` implementation walks generic managed View/TextView fields and paints a generic hierarchy. It does **not** invoke the guest custom View's `MainView.onDraw(Canvas)`. The existing Rust Canvas rasterizer is a host-side drawing primitive, not yet a complete guest Android Canvas JNI bridge.
+
+Therefore the next implementation milestone is not merely adding more Canvas raster operations. It must:
+1. Invoke the real custom View's `onDraw(Canvas)` with a guest Canvas object.
+2. Bridge the exact Canvas/Bitmap/Paint/Typeface/Drawable calls listed above.
+3. Support offscreen Bitmap + Canvas(Bitmap), then draw those bitmaps into the guest surface.
+4. Dispatch touch events to the actual View's registered `OnTouchListener`.
+5. Implement the app's reached SharedPreferences, resource, window-insets and lifecycle paths.
+6. Keep Google Play Games services optional for offline play and provide local persistence.
+
+### Current compatibility status
+
+**Not playable / not verified.** The package import pipeline now normalizes APK, XAPK, APKS and APKM containers and preserves split APKs. The execution backend scans preserved split APKs for DEX/native entries and searches split archives for referenced resource images. Split resource tables are not merged, APKS `toc.pb` device-specific selection is not implemented, and guest custom Canvas execution is still a blocking runtime gap. Do not label 2048 as supported until its own board is rendered by guest `MainView.onDraw`, swipe moves work, and state survives relaunch on a physical iPhone.
