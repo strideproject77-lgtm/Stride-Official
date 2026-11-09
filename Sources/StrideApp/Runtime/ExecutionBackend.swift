@@ -218,8 +218,11 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 }
             }
             guard nativeStatus == 0 else {
-                onLog("[ERROR] Native library \(soName) load failed with status \(nativeStatus)")
-                throw RuntimeExecutionError.nativeLibraryLoadFailed(name: soName, status: nativeStatus)
+                // Best-effort launch: a failed optional/unsupported .so must not
+                // prevent trying the remaining libraries and managed Activity.
+                // Apps that require this library may still fail later at the call site.
+                onLog("[WARN] Native library \(soName) could not be loaded (status \(nativeStatus)); continuing best-effort execution")
+                continue
             }
             onLog("[INFO] Native library \(soName) loaded successfully")
         }
