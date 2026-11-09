@@ -1,6 +1,7 @@
 import Foundation
 import ZIPFoundation
 import StrideDexFFI
+import UIKit
 
 /// The execution boundary connecting iOS application requests to the ART managed runtime.
 protocol AndroidExecutionBackend {
@@ -35,6 +36,15 @@ final class APKRuntimeSession: @unchecked Sendable {
         return stride_runtime_dispatch_touch(runtime, action, x, y) == 0
     }
 
+    func pumpGuestEvents(maxEvents: UInt32 = 8, instructionBudget: Int = 20_000) -> (status: Int32, delivered: UInt32) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return (1, 0) }
+        var delivered: UInt32 = 0
+        let status = stride_runtime_pump_guest_events(runtime, maxEvents, instructionBudget, &delivered)
+        return (status, delivered)
+    }
+
     func recordFrame(durationMilliseconds: Float) -> Float {
         lock.lock()
         defer { lock.unlock() }
@@ -52,6 +62,44 @@ final class APKRuntimeSession: @unchecked Sendable {
 
     deinit {
         close()
+    }
+}
+
+/// Drives the guest input queue from the iOS display cadence. It is deliberately
+/// separate from the runtime session so Close can stop callbacks before freeing
+/// the Rust handle.
+@MainActor
+final class GuestFrameScheduler {
+    private var displayLink: CADisplayLink?
+    private var previousTimestamp: CFTimeInterval?
+    private let onFrame: (Float) -> Void
+
+    init(onFrame: @escaping (Float) -> Void) {
+        self.onFrame = onFrame
+    }
+
+    func start() {
+        guard displayLink == nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+        previousTimestamp = nil
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let duration: CFTimeInterval
+        if let previousTimestamp {
+            duration = max(0.001, link.timestamp - previousTimestamp)
+        } else {
+            duration = max(0.001, link.duration)
+        }
+        previousTimestamp = link.timestamp
+        onFrame(Float(duration * 1_000))
     }
 }
 
