@@ -10,6 +10,7 @@ struct ContentView: View {
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
+    @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
     @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.indigoNavy.rawValue
     @AppStorage("stride.customAccentHex") private var customAccentHex = "#4F46E5"
@@ -48,6 +49,41 @@ struct ContentView: View {
                 Spacer(minLength: 12)
                 tabBar
             }
+            .overlay(alignment: .bottomTrailing) {
+                if !isImporting {
+                    Button { showingImporter = true } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 21, weight: .bold))
+                            .foregroundStyle(theme.buttonForeground)
+                            .frame(width: 58, height: 58)
+                            .background(accent, in: Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                            .shadow(color: .black.opacity(0.30), radius: 12, y: 5)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Import APK")
+                    .padding(.trailing, 19)
+                    .padding(.bottom, 82)
+                }
+            }
+        }
+        .confirmationDialog("Delete this app from Stride?", isPresented: Binding(
+            get: { pendingDelete != nil },
+            set: { if !$0 { pendingDelete = nil } }
+        ), titleVisibility: .visible) {
+            Button("Delete App", role: .destructive) {
+                if let item = pendingDelete {
+                    do { try library.deletePackage(item) }
+                    catch {
+                        importAlertTitle = "Delete failed"
+                        importError = error.localizedDescription
+                    }
+                }
+                pendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text(pendingDelete?.displayName ?? "")
         }
         .alert(importAlertTitle, isPresented: Binding(
             get: { importError != nil },
@@ -269,16 +305,6 @@ struct ContentView: View {
                     }
                     Spacer()
                     layoutToggle
-                    Button { showingImporter = true } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(theme.buttonForeground)
-                            .frame(width: 43, height: 43)
-                            .background(accent, in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isImporting)
-                    .accessibilityLabel("Import APK")
                 }
                 HStack(spacing: 9) {
                     Image(systemName: "magnifyingglass")
@@ -342,7 +368,7 @@ struct ContentView: View {
     @ViewBuilder
     private func appCollection(_ items: [ImportedAPK]) -> some View {
         if isGridLayout {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 11) {
                 ForEach(items) { item in packageButton(item) }
             }
         } else {
@@ -585,6 +611,13 @@ struct ContentView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens package inspection details")
+        .contextMenu {
+            Button(role: .destructive) {
+                pendingDelete = item
+            } label: {
+                Label("Delete App", systemImage: "trash")
+            }
+        }
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {
