@@ -40,6 +40,7 @@ pub struct LoadedMethod {
 pub struct LoadedClass {
     pub descriptor: String,
     pub super_descriptor: Option<String>,
+    pub interface_descriptors: Vec<String>,
     pub access_flags: u32,
     pub init_state: ClassInitState,
     pub static_fields: HashMap<String, Value>,
@@ -231,6 +232,7 @@ impl AppClassLoader {
             let loaded_class = LoadedClass {
                 descriptor: descriptor.clone(),
                 super_descriptor,
+                interface_descriptors: class_def.interface_descriptors.clone(),
                 access_flags: class_def.access_flags,
                 init_state: ClassInitState::NotInitialized,
                 static_fields,
@@ -252,6 +254,8 @@ impl AppClassLoader {
         for (desc, class) in &self.classes {
             let super_name = class.super_descriptor.as_deref().or(Some("Ljava/lang/Object;"));
             let mut rt_class = RuntimeClass::new(desc, super_name);
+            rt_class.interface_descriptors = class.interface_descriptors.clone();
+            rt_class.access_flags = class.access_flags;
             for &mid in &class.virtual_methods {
                 if let Some(m) = self.methods_by_id.get(&mid) {
                     rt_class.register_method(&m.name, &m.prototype, mid, false);

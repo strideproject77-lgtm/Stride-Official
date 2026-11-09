@@ -50,6 +50,7 @@ pub struct ClassDefinition {
     pub descriptor: String,
     pub access_flags: u32,
     pub superclass_index: Option<u32>,
+    pub interface_descriptors: Vec<String>,
     pub static_field_count: u32,
     pub instance_field_count: u32,
     pub direct_method_count: u32,
@@ -352,6 +353,7 @@ fn class_data(
     }
     Ok(ClassDefinition {
         class_index, descriptor: String::new(), access_flags: 0, superclass_index: None,
+        interface_descriptors: Vec::new(),
         static_field_count: static_fields, instance_field_count: instance_fields,
         direct_method_count: direct_methods, virtual_method_count: virtual_methods,
         fields: found_fields,
@@ -452,6 +454,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         let id = u32le(b, at)?;
         let flags = u32le(b, at + 4)?;
         let super_id = u32le(b, at + 8)?;
+        let interfaces_off = u32le(b, at + 12)?;
         let data_off = u32le(b, at + 24)?;
         if id >= type_count || (super_id != NO_INDEX && super_id >= type_count) {
             return Err(ClassReadError::InvalidIndex);
@@ -459,6 +462,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         let mut class = if data_off == 0 {
             ClassDefinition {
                 class_index: id, descriptor: String::new(), access_flags: 0, superclass_index: None,
+                interface_descriptors: Vec::new(),
                 static_field_count: 0, instance_field_count: 0,
                 direct_method_count: 0, virtual_method_count: 0, fields: Vec::new(), methods: Vec::new(),
             }
@@ -471,6 +475,23 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         class.descriptor = type_descriptor(b, &string_ids, &types, string_count, type_count, id)?;
         class.access_flags = flags;
         class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
+        if interfaces_off != 0 {
+            let list = usize::try_from(interfaces_off).map_err(|_| ClassReadError::InvalidClassData)?;
+            if list < HEADER || list % 4 != 0 { return Err(ClassReadError::InvalidClassData); }
+            let count = usize::try_from(u32le(b, list)?).map_err(|_| ClassReadError::InvalidClassData)?;
+            list.checked_add(4).and_then(|start| start.checked_add(count.checked_mul(2)?))
+                .filter(|end| *end <= b.len()).ok_or(ClassReadError::InvalidClassData)?;
+            let mut seen_interfaces = std::collections::HashSet::new();
+            for index in 0..count {
+                let type_index = u32::from(u16le(b, list + 4 + index * 2)?);
+                if type_index >= type_count || !seen_interfaces.insert(type_index) {
+                    return Err(ClassReadError::InvalidIndex);
+                }
+                class.interface_descriptors.push(type_descriptor(
+                    b, &string_ids, &types, string_count, type_count, type_index
+                )?);
+            }
+        }
         classes.push(class);
     }
     let mut type_descriptors = Vec::with_capacity(type_count as usize);
