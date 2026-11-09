@@ -8,6 +8,7 @@ final class StrideOrientationTests: XCTestCase {
         XCTAssertEqual(StrideOrientationController.mask(for: 1), .portrait)
         XCTAssertEqual(StrideOrientationController.mask(for: 7), .portrait)
         XCTAssertEqual(StrideOrientationController.mask(for: 9), .portrait)
+        XCTAssertEqual(StrideOrientationController.mask(for: 12), .portrait)
         XCTAssertEqual(StrideOrientationController.mask(for: 0), .landscape)
         XCTAssertEqual(StrideOrientationController.mask(for: 6), .landscape)
         XCTAssertEqual(StrideOrientationController.mask(for: 8), .landscape)
@@ -15,15 +16,18 @@ final class StrideOrientationTests: XCTestCase {
     }
 
     func testSensorAndUnspecifiedValuesAllowBothMainOrientations() {
-        XCTAssertEqual(StrideOrientationController.mask(for: -1), .allButUpsideDown)
-        XCTAssertEqual(StrideOrientationController.mask(for: 2), .allButUpsideDown)
-        XCTAssertEqual(StrideOrientationController.mask(for: 4), .allButUpsideDown)
-        XCTAssertEqual(StrideOrientationController.mask(for: 10), .allButUpsideDown)
-        XCTAssertEqual(StrideOrientationController.mask(for: 13), .allButUpsideDown)
+        for value: Int32 in [-1, 2, 3, 4, 10, 13] {
+            XCTAssertEqual(StrideOrientationController.mask(for: value), .allButUpsideDown)
+        }
     }
 
-    func testNoSensorUsesPortraitFallbackAndUnknownValuesAreSafe() {
-        XCTAssertEqual(StrideOrientationController.mask(for: 5), .portrait)
+    func testNoSensorAndLockedPreserveCurrentStrideOrientation() {
+        let original = StrideOrientationController.currentSceneMask()
+        XCTAssertEqual(StrideOrientationController.mask(for: 5), original)
+        XCTAssertEqual(StrideOrientationController.mask(for: 14), original)
+    }
+
+    func testUnknownOrientationValueIsSafe() {
         XCTAssertEqual(StrideOrientationController.mask(for: 99), .allButUpsideDown)
     }
 }
