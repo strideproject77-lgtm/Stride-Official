@@ -1497,6 +1497,7 @@ mod framework_bridge_tests {
     fn focused_edit_text_receives_native_keyboard_updates() {
         let mut runtime = AndroidRuntime::new("com.stride.test");
         let edit = runtime.heap.allocate_instance("Landroid/widget/EditText;").unwrap();
+        runtime.heap.set_instance_field(edit, "mEnabled", Value::Int(1)).unwrap();
         runtime.rendered_view_bounds = vec![(edit, RectF::new(100.0, 200.0, 500.0, 280.0))];
 
         assert_eq!(runtime.hit_test_edit_text(250.0, 240.0), Some(edit));
