@@ -253,6 +253,51 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
     0
 }
 
+/// Delivers queued Android touch events to the active Activity callback.
+/// Returns 0 on success, 1 for invalid arguments, 2 for a guest callback error,
+/// and 3 if the runtime panics while processing the event batch.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_pump_guest_events(
+    runtime: *mut AndroidRuntime,
+    max_events: u32,
+    step_budget: usize,
+    out_delivered: *mut u32,
+) -> i32 {
+    if runtime.is_null() || out_delivered.is_null() {
+        return 1;
+    }
+    let rt = unsafe { &mut *runtime };
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        rt.pump_guest_events(max_events as usize, step_budget)
+    }));
+    match result {
+        Ok(Ok(delivered)) => {
+            unsafe { out_delivered.write(delivered.min(u32::MAX as usize) as u32) };
+            0
+        }
+        Ok(Err(error)) => {
+            rt.diagnostics.record(
+                stride_dex_runtime::DiagnosticSeverity::RuntimeError,
+                "Input",
+                "GUEST_TOUCH_DISPATCH_FAILED",
+                Some(&error),
+            );
+            unsafe { out_delivered.write(0) };
+            2
+        }
+        Err(_) => {
+            rt.diagnostics.record(
+                stride_dex_runtime::DiagnosticSeverity::FatalCrash,
+                "Input",
+                "GUEST_EVENT_PUMP_PANIC",
+                Some("Rust runtime panicked while pumping guest input events"),
+            );
+            unsafe { out_delivered.write(0) };
+            3
+        }
+    }
+}
+
 /// Records a completed frame time and returns the updated rolling FPS.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_record_frame(
