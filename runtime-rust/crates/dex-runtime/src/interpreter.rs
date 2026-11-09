@@ -1421,6 +1421,51 @@ impl<'a> ArtVm<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn each_method_uses_its_own_dex_string_table() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([
+            (1u16, MethodCode {
+                class_descriptor: "Ltest/Primary;".into(),
+                name: "read".into(),
+                prototype: "()Ljava/lang/String;".into(),
+                code_units: vec![0x001a, 0x0000, 0x0011],
+                registers_size: 1, ins_size: 0, try_blocks: vec![],
+            }),
+            (2u16, MethodCode {
+                class_descriptor: "Ltest/Secondary;".into(),
+                name: "read".into(),
+                prototype: "()Ljava/lang/String;".into(),
+                code_units: vec![0x001a, 0x0000, 0x0011],
+                registers_size: 1, ins_size: 0, try_blocks: vec![],
+            }),
+        ]);
+        let inventories = vec![
+            ClassInventory {
+                classes: vec![], method_references: vec![], field_references: vec![],
+                strings: vec!["primary-dex".into()], type_descriptors: vec![],
+            },
+            ClassInventory {
+                classes: vec![], method_references: vec![], field_references: vec![],
+                strings: vec!["secondary-dex".into()], type_descriptors: vec![],
+            },
+        ];
+        let method_owners = HashMap::from([(1u32, 0usize), (2u32, 1usize)]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_multi_dex_metadata(&inventories, &method_owners);
+
+        for (method_id, expected) in [(1u16, "primary-dex"), (2u16, "secondary-dex")] {
+            let report = vm.execute_method(method_id, &[], 16).unwrap();
+            let ExecutionStopReason::ReturnedValue(Value::Object(string_id)) = report.stop_reason else {
+                panic!("const-string method must return a String object");
+            };
+            assert_eq!(vm.heap.get_string(string_id).unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn application_static_fields_survive_interpreter_recreation() {
         let mut heap = ManagedHeap::default();
         let mut hierarchy = ClassHierarchy::new();

@@ -1494,6 +1494,25 @@ mod framework_bridge_tests {
     use super::*;
 
     #[test]
+    fn focused_edit_text_receives_native_keyboard_updates() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let edit = runtime.heap.allocate_instance("Landroid/widget/EditText;").unwrap();
+        runtime.rendered_view_bounds = vec![(edit, RectF::new(100.0, 200.0, 500.0, 280.0))];
+
+        assert_eq!(runtime.hit_test_edit_text(250.0, 240.0), Some(edit));
+        assert_eq!(runtime.hit_test_edit_text(20.0, 20.0), None);
+        runtime.focused_edit_text = runtime.hit_test_edit_text(250.0, 240.0);
+        assert!(runtime.set_focused_edit_text("42 + 7").unwrap());
+
+        let text_id = runtime.heap.get_instance_field(edit, "mText").unwrap().as_object().unwrap();
+        assert_eq!(runtime.heap.get_string(text_id).unwrap(), "42 + 7");
+        assert_eq!(runtime.heap.get_instance_field(edit, "mSelectionEnd").unwrap().as_int(), 6);
+
+        runtime.focused_edit_text = None;
+        assert!(!runtime.set_focused_edit_text("ignored").unwrap());
+    }
+
+    #[test]
     fn managed_text_view_renders_initial_display_pixels_on_black_surface() {
         let mut runtime = AndroidRuntime::new("com.stride.test");
         let activity = runtime.heap.allocate_instance("Ltest/MainActivity;").unwrap();
