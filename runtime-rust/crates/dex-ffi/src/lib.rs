@@ -281,6 +281,34 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
     0
 }
 
+/// Replaces text in the currently focused guest EditText and refreshes its framebuffer.
+/// Returns 0 on success, 1 for invalid arguments, 2 for guest errors,
+/// 3 for a runtime panic, and 4 when no EditText has focus.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_set_focused_text(
+    runtime: *mut AndroidRuntime,
+    text: *const u8,
+    length: usize,
+) -> i32 {
+    if runtime.is_null() || (text.is_null() && length != 0) || length > 1_048_576 {
+        return 1;
+    }
+    let rt = unsafe { &mut *runtime };
+    let bytes = if length == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(text, length) } };
+    let Ok(value) = std::str::from_utf8(bytes) else { return 1 };
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let updated = rt.set_focused_edit_text(value)?;
+        if updated { rt.render_active_activity_surface()?; }
+        Ok::<bool, String>(updated)
+    }));
+    match result {
+        Ok(Ok(true)) => 0,
+        Ok(Ok(false)) => 4,
+        Ok(Err(_)) => 2,
+        Err(_) => 3,
+    }
+}
+
 /// Delivers queued Android touch events to the active Activity callback.
 /// Returns 0 on success, 1 for invalid arguments, 2 for a guest callback error,
 /// and 3 if the runtime panics while processing the event batch.

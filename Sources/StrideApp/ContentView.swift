@@ -849,6 +849,8 @@ private struct APKDetailSheet: View {
     @State private var guestFramebufferWidth = 0
     @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
+    @State private var showingGuestKeyboard = false
+    @State private var guestInputText = ""
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
@@ -1200,6 +1202,18 @@ private struct APKDetailSheet: View {
                         executionMetric("MS", value: touchLatencyLabel)
 
                         Button {
+                            guestInputText = ""
+                            showingGuestKeyboard = true
+                        } label: {
+                            Image(systemName: "keyboard")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Open guest text keyboard")
+
+                        Button {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 isExecutionChromeHidden = true
                             }
@@ -1225,6 +1239,28 @@ private struct APKDetailSheet: View {
                     .overlay { guestTouchSurface }
                     .ignoresSafeArea()
                     .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showingGuestKeyboard {
+                HStack(spacing: 8) {
+                    TextField("Type into Android app", text: $guestInputText)
+                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.done)
+                        .onSubmit { showingGuestKeyboard = false }
+                    Button("Done") { showingGuestKeyboard = false }
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                .padding(12)
+                .background(Color(white: 0.08))
+                .onChange(of: guestInputText) { newValue in
+                    let status = executionResult?.session.setFocusedGuestText(newValue) ?? 1
+                    if status == 4 {
+                        appendSessionLog("[INPUT] Keyboard text ignored: tap an Android EditText first")
+                    } else if status != 0 {
+                        appendSessionLog("[INPUT] Guest text injection failed (status=\(status))")
+                    }
+                }
             }
         }
         .contentShape(Rectangle())

@@ -36,6 +36,16 @@ final class APKRuntimeSession: @unchecked Sendable {
         return stride_runtime_dispatch_touch(runtime, action, x, y) == 0
     }
 
+    func setFocusedGuestText(_ text: String) -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return 1 }
+        let bytes = Array(text.utf8)
+        return bytes.withUnsafeBufferPointer { buffer in
+            stride_runtime_set_focused_text(runtime, buffer.baseAddress, buffer.count)
+        }
+    }
+
     func pumpGuestEvents(maxEvents: UInt32 = 8, instructionBudget: Int = 20_000) -> (status: Int32, delivered: UInt32) {
         lock.lock()
         defer { lock.unlock() }

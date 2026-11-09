@@ -67,6 +67,8 @@ pub struct AndroidRuntime {
     pub rendered_view_bounds: Vec<(u32, RectF)>,
     /// View pressed on ACTION_DOWN; clicks are dispatched only when ACTION_UP lands on it.
     pub pressed_view: Option<u32>,
+    /// EditText currently selected by the guest touch surface for native keyboard input.
+    pub focused_edit_text: Option<u32>,
     pub diagnostics: Arc<RuntimeDiagnostics>,
     pub native_linker: NativeLinker,
     pub gl_engine: OpenGlEsEngine,
@@ -102,6 +104,7 @@ impl AndroidRuntime {
             initial_render_summary_recorded: false,
             rendered_view_bounds: Vec::new(),
             pressed_view: None,
+            focused_edit_text: None,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
             native_linker: NativeLinker::new(),
             gl_engine: OpenGlEsEngine::new(),
@@ -1160,6 +1163,42 @@ impl AndroidRuntime {
         Ok(true)
     }
 
+    fn hit_test_edit_text(&self, x: f32, y: f32) -> Option<u32> {
+        self.rendered_view_bounds.iter().rev().find_map(|(view_id, bounds)| {
+            let inside = x >= bounds.left && x <= bounds.right
+                && y >= bounds.top && y <= bounds.bottom;
+            if !inside { return None; }
+            let enabled = self.heap.get_instance_field(*view_id, "mEnabled")
+                .map(|value| value.as_int() != 0).unwrap_or(true);
+            if !enabled { return None; }
+            let descriptor = self.heap.get(*view_id).ok()?.class_descriptor();
+            (descriptor == "Landroid/widget/EditText;" || descriptor.ends_with("/EditText;"))
+                .then_some(*view_id)
+        })
+    }
+
+    /// Replaces the text in the EditText selected by the most recent guest tap.
+    /// Text is stored in the guest heap and the next FFI render publishes the new frame.
+    pub fn set_focused_edit_text(&mut self, text: &str) -> Result<bool, String> {
+        if text.len() > 1_048_576 {
+            return Err("Guest text input exceeds the 1 MiB safety limit".to_string());
+        }
+        let Some(view_id) = self.focused_edit_text else { return Ok(false) };
+        let string_id = self.heap.allocate_string(text)
+            .map_err(|error| format!("Guest input string allocation failed: {:?}", error))?;
+        self.heap.set_instance_field(view_id, "mText", Value::Object(string_id))
+            .map_err(|error| format!("EditText text update failed: {:?}", error))?;
+        self.heap.set_instance_field(view_id, "mTextResourceId", Value::Int(0))
+            .map_err(|error| format!("EditText resource reset failed: {:?}", error))?;
+        self.heap.set_instance_field(view_id, "mSelectionStart", Value::Int(text.chars().count() as i32))
+            .map_err(|error| format!("EditText selection update failed: {:?}", error))?;
+        self.heap.set_instance_field(view_id, "mSelectionEnd", Value::Int(text.chars().count() as i32))
+            .map_err(|error| format!("EditText selection update failed: {:?}", error))?;
+        self.heap.set_instance_field(view_id, "mNeedsDraw", Value::Int(1))
+            .map_err(|error| format!("EditText redraw flag update failed: {:?}", error))?;
+        Ok(true)
+    }
+
     fn hit_test_clickable_view(&self, x: f32, y: f32) -> Option<u32> {
         self.rendered_view_bounds.iter().rev().find_map(|(view_id, bounds)| {
             let inside = x >= bounds.left && x <= bounds.right
@@ -1294,6 +1333,9 @@ impl AndroidRuntime {
             let pointer = event.pointers.first();
             let x = pointer.map(|p| p.x).unwrap_or(0.0);
             let y = pointer.map(|p| p.y).unwrap_or(0.0);
+            if event.action == ACTION_DOWN {
+                self.focused_edit_text = self.hit_test_edit_text(x, y);
+            }
             let mut activity_consumed = false;
 
             if let Some(method_id) = callback_method_id {

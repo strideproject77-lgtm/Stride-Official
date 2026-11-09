@@ -89,6 +89,17 @@ int32_t stride_runtime_dispatch_touch(
 );
 
 /*
+ * Replace text in the currently focused guest EditText and refresh its frame.
+ * Returns 0 on success, 1 for invalid arguments, 2 for guest error,
+ * 3 for runtime panic, and 4 when no EditText is focused.
+ */
+int32_t stride_runtime_set_focused_text(
+    AndroidRuntime *runtime,
+    const uint8_t *text,
+    size_t length
+);
+
+/*
  * Pump queued Android touch events into the active Activity callback.
  * Returns 0 on success, 1 for invalid arguments, 2 for guest callback error,
  * and 3 for a runtime panic. out_delivered receives the delivered event count.
