@@ -798,6 +798,7 @@ private struct APKGridCard: View {
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingExecutionScreen = false
+    @State private var isExecutionChromeHidden = false
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
@@ -1092,141 +1093,133 @@ private struct APKDetailSheet: View {
     private var executionScreen: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 12) {
-                    APKIconView(data: item.iconData, accent: accent, size: 46)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.displayName)
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        Text("STRIDE · ANDROID EXECUTION")
-                            .font(.system(size: 9, weight: .heavy))
-                            .kerning(1.1)
-                            .foregroundStyle(.white.opacity(0.48))
-                    }
-                    Spacer()
-                    Button {
-                        showingExecutionScreen = false
-                        StrideOrientationController.shared.reset()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(Color.white.opacity(0.1), in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.bottom, 24)
 
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(isExecuting ? Color.orange : (executionError == nil && executionResult != nil ? Color.green : Color.red))
-                        .frame(width: 8, height: 8)
-                    Text(isExecuting ? "STARTING RUNTIME" : (executionError == nil && executionResult != nil ? "RUNTIME RETAINED · IDLE" : (executionError != nil ? "LAUNCH FAILED" : "READY")))
-                        .font(.system(size: 10, weight: .heavy))
-                        .kerning(1.2)
-                        .foregroundStyle(.white.opacity(0.78))
-                    Spacer()
-                    Text("\(sessionLogLines.count) EVENTS")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.42))
-                }
-                .padding(.bottom, 12)
-
-                if let result = executionResult {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("ACTIVITY LIFECYCLE")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text(result.lifecycleState)
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        Text("\(result.instructionsExecuted) instructions · \(result.totalClassesLoaded) classes · \(result.missingApisCount) missing APIs")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
-                    .padding(.bottom, 18)
-                } else if let error = executionError {
-                    Text(error)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.red.opacity(0.95))
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.red.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-                        .padding(.bottom, 18)
-                } else if isExecuting {
+            if !isExecutionChromeHidden {
+                VStack(spacing: 0) {
                     HStack(spacing: 10) {
-                        ProgressView().tint(.white)
-                        Text("Preparing APK and starting runtime…")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    .padding(.bottom, 18)
-                }
-
-                Text("LIVE SESSION LOG")
-                    .font(.system(size: 9, weight: .heavy))
-                    .kerning(1.2)
-                    .foregroundStyle(.white.opacity(0.48))
-                    .padding(.bottom, 9)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 7) {
-                        ForEach(Array(sessionLogLines.enumerated()), id: \.offset) { _, line in
-                            Text(line)
-                                .font(.system(size: 10, weight: .regular, design: .monospaced))
-                                .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red : Color.white.opacity(0.76))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(13)
-                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
-
-                HStack(spacing: 12) {
-                    Button {
-                        showingExecutionScreen = false
-                        StrideOrientationController.shared.reset()
-                    } label: {
-                        Text("BACK TO DETAILS")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
-                    }
-                    .buttonStyle(.plain)
-                    if logExportURL != nil {
                         Button {
-                            showingLogShare = true
+                            showingExecutionScreen = false
+                            isExecutionChromeHidden = false
+                            StrideOrientationController.shared.reset()
                         } label: {
-                            Label("EXPORT TXT", systemImage: "square.and.arrow.up")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.black)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(.white, in: RoundedRectangle(cornerRadius: 11))
+                            HStack(spacing: 5) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .bold))
+                                Text("Close")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
                         }
                         .buttonStyle(.plain)
+
+                        Circle()
+                            .fill(executionStatusColor)
+                            .frame(width: 7, height: 7)
+
+                        Text(executionStatusText)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.88))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+
+                        Spacer(minLength: 6)
+
+                        executionMetric("FPS", value: liveFPSLabel)
+                        executionMetric("MS", value: touchLatencyLabel)
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                isExecutionChromeHidden = true
+                            }
+                        } label: {
+                            Image(systemName: "eye.slash")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Hide execution status bar")
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(Color(white: 0.075))
+
+                    Spacer(minLength: 0)
                 }
-                .padding(.top, 14)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            } else {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                isExecutionChromeHidden = false
+                            }
+                        } label: {
+                            HStack(spacing: 7) {
+                                Text("FPS  \(liveFPSLabel)")
+                                Text("·")
+                                Text("MS  \(touchLatencyLabel)")
+                            }
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.92))
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 8)
+                            .background(Color(white: 0.12), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show execution status bar")
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+                }
+                .transition(.opacity)
             }
-            .padding(20)
         }
+        .contentShape(Rectangle())
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingLogShare) {
             if let logExportURL {
                 ActivityViewController(activityItems: [logExportURL])
             }
         }
+    }
+
+    private var executionStatusText: String {
+        if isExecuting { return "Starting…" }
+        if executionError != nil { return "Could not start — see the log" }
+        if executionResult != nil { return "Starting — guest loop not active" }
+        return "Ready"
+    }
+
+    private var executionStatusColor: Color {
+        if executionError != nil { return .red }
+        if isExecuting || executionResult != nil { return .orange }
+        return .green
+    }
+
+    // Metrics stay unavailable until the runtime reports real rendered frames
+    // and consumed touch events. Never substitute fabricated zero values.
+    private var liveFPSLabel: String {
+        guard let result = executionResult, result.averageFps > 0 else { return "Starting" }
+        return String(format: "%.0f", result.averageFps)
+    }
+
+    private var touchLatencyLabel: String { "--" }
+
+    private func executionMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(value)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+            Text(title)
+                .font(.system(size: 7, weight: .heavy))
+                .foregroundStyle(.white.opacity(0.48))
+        }
+        .frame(minWidth: 35, alignment: .trailing)
+        .accessibilityElement(children: .combine)
     }
 
     private func logFileURL() -> URL {
