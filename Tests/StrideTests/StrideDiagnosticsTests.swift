@@ -37,7 +37,9 @@ final class StrideDiagnosticsTests: XCTestCase {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(entry)
-        let decoded = try JSONDecoder().decode(StrideDiagnostics.Entry.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(StrideDiagnostics.Entry.self, from: data)
         XCTAssertEqual(decoded.sequence, 7)
         XCTAssertEqual(decoded.sessionID, "session-json")
         XCTAssertEqual(decoded.stage, "ELF")

@@ -211,7 +211,8 @@ final class StrideDiagnostics: ObservableObject {
             let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
             flush()
-            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
+            let reportSessionURL = sessionFileURL ?? latestSessionLogURL(apkName: apkName)
+            let persistedSessionLog = reportSessionURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
             let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
             let stamp = ISO8601DateFormatter().string(from: sessionStartedAt)
@@ -306,7 +307,24 @@ final class StrideDiagnostics: ObservableObject {
         try? fileManager.removeItem(at: markerURL)
     }
 
+    private func rotateLogIfNeeded(_ url: URL) {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber,
+              size.int64Value > 8 * 1024 * 1024 else { return }
+        let archiveFolder = documentsURL.appendingPathComponent("StrideLogs/Archive", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: archiveFolder, withIntermediateDirectories: true)
+            let suffix = Int(Date().timeIntervalSince1970)
+            let archived = archiveFolder.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-\(suffix).\(url.pathExtension)")
+            try fileManager.moveItem(at: url, to: archived)
+        } catch {
+            logger.error("Could not rotate diagnostics file: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func openLog() {
+        rotateLogIfNeeded(logFileURL)
+        rotateLogIfNeeded(structuredLogFileURL)
         let url = logFileURL
         if !fileManager.fileExists(atPath: url.path) {
             fileManager.createFile(atPath: url.path, contents: nil)

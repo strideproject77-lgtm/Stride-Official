@@ -144,7 +144,8 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
-        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
+        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
+        onLog("[INFO] APK inventory: dex_bytes=\(dexDataList.reduce(0) { $0 + $1.count }), native_names=\(soDataList.map(\.0).joined(separator: ","))")
         guard !manifestData.isEmpty else {
             onLog("[ERROR] AndroidManifest.xml is absent or empty")
             throw RuntimeExecutionError.missingManifest
@@ -202,6 +203,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     ?? "No detailed DEX diagnostic was recorded."
                 throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus, detail: detail)
             }
+            onLog("[INFO] DEX file \(index + 1) loaded successfully (\(dex.count) bytes)")
         }
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
@@ -219,6 +221,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 onLog("[ERROR] Native library \(soName) load failed with status \(nativeStatus)")
                 throw RuntimeExecutionError.nativeLibraryLoadFailed(name: soName, status: nativeStatus)
             }
+            onLog("[INFO] Native library \(soName) loaded successfully")
         }
 
         var screenOrientation: Int32 = -1
@@ -227,9 +230,9 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             return stride_manifest_screen_orientation(ptr, rawBuffer.count, &screenOrientation)
         }
         if orientationStatus == 0 {
-            onLog("[INFO] APK launcher screenOrientation enum=\\(screenOrientation)")
+            onLog("[INFO] APK launcher screenOrientation enum=\(screenOrientation)")
         } else {
-            onLog("[WARN] Could not read APK screenOrientation (status=\\(orientationStatus)); using automatic iPhone orientation")
+            onLog("[WARN] Could not read APK screenOrientation (status=\(orientationStatus)); using automatic iPhone orientation")
             screenOrientation = -1
         }
 
