@@ -364,7 +364,7 @@ mod tests {
         assert_ne!(canvas.surface.get_pixel(2,2),Some(0xff000000));
         canvas.draw_image_argb(&[0xffff0000,0x8000ff00],2,1,0,10);
         assert_eq!(canvas.surface.get_pixel(0,10),Some(0xffff0000));
-        assert_eq!(canvas.surface.get_pixel(1,10),Some(0xff007f00));
+        assert_eq!(canvas.surface.get_pixel(1,10),Some(0xff008000));
     }
     #[test]
     fn canvas_draws_rect_and_pixel() {
