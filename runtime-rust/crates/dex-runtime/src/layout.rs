@@ -4,6 +4,8 @@
 
 use std::collections::BTreeMap;
 use crate::XmlNode;
+use crate::graphics::Surface;
+use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayoutDimension {
@@ -168,5 +170,151 @@ mod tests {
         let root = node("com.example.CustomWidget", vec![]);
         let inflated = inflate_layout_tree(&root).unwrap();
         assert_eq!(inflated.kind, InflatedViewKind::Custom("com.example.CustomWidget".into()));
+    }
+}
+
+
+/// Pixel-space bounds produced by the first-pass Android ViewGroup layout engine.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LayoutRect {
+    pub left: f32,
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+}
+
+impl LayoutRect {
+    pub fn width(self) -> f32 { (self.right - self.left).max(0.0) }
+    pub fn height(self) -> f32 { (self.bottom - self.top).max(0.0) }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaidOutView {
+    pub kind: InflatedViewKind,
+    pub bounds: LayoutRect,
+    pub background_argb: Option<u32>,
+    pub children: Vec<LaidOutView>,
+}
+
+fn attr_dimension(view: &InflatedView, key: &str, available: f32, fallback: f32) -> f32 {
+    match view.attributes.get(key).and_then(|v| LayoutDimension::parse(v)) {
+        Some(LayoutDimension::Pixels(value)) => value.min(available),
+        Some(LayoutDimension::MatchParent) => available,
+        Some(LayoutDimension::WrapContent) | None => fallback.min(available),
+    }
+}
+
+fn parse_background(view: &InflatedView) -> Option<u32> {
+    let raw = view.attributes.get("background")?.trim();
+    let hex = raw.strip_prefix("#")?;
+    match hex.len() {
+        6 => u32::from_str_radix(hex, 16).ok().map(|rgb| 0xff00_0000 | rgb),
+        8 => u32::from_str_radix(hex, 16).ok(),
+        _ => None,
+    }
+}
+
+fn layout_node(view: &InflatedView, bounds: LayoutRect, depth: usize) -> LaidOutView {
+    if depth >= MAX_LAYOUT_DEPTH || view.children.is_empty() {
+        return LaidOutView { kind: view.kind.clone(), bounds, background_argb: parse_background(view), children: Vec::new() };
+    }
+
+    let vertical = view.attributes.get("orientation").map(|v| v != "horizontal").unwrap_or(true);
+    let is_linear = matches!(view.kind, InflatedViewKind::LinearLayout);
+    let mut children = Vec::with_capacity(view.children.len());
+    let count = view.children.len() as f32;
+    let segment = if vertical { bounds.height() / count } else { bounds.width() / count };
+    let mut cursor = if vertical { bounds.top } else { bounds.left };
+
+    for child in &view.children {
+        let available_width = bounds.width();
+        let available_height = bounds.height();
+        let child_width = attr_dimension(child, "layout_width", available_width, available_width);
+        let child_height = attr_dimension(child, "layout_height", available_height, segment);
+        let child_bounds = if is_linear {
+            if vertical {
+                let height = if matches!(child.layout_height, Some(LayoutDimension::Pixels(_))) {
+                    child_height.min(segment)
+                } else { segment };
+                let rect = LayoutRect { left: bounds.left, top: cursor, right: bounds.left + child_width, bottom: cursor + height };
+                cursor += segment;
+                rect
+            } else {
+                let width = if matches!(child.layout_width, Some(LayoutDimension::Pixels(_))) {
+                    child_width.min(segment)
+                } else { segment };
+                let rect = LayoutRect { left: cursor, top: bounds.top, right: cursor + width, bottom: bounds.top + child_height };
+                cursor += segment;
+                rect
+            }
+        } else {
+            LayoutRect { left: bounds.left, top: bounds.top, right: bounds.left + child_width, bottom: bounds.top + child_height }
+        };
+        children.push(layout_node(child, child_bounds, depth + 1));
+    }
+
+    LaidOutView { kind: view.kind.clone(), bounds, background_argb: parse_background(view), children }
+}
+
+/// Computes a bounded first-pass layout for common Android ViewGroup types.
+/// LinearLayout divides available space among children; Frame/other containers
+/// currently overlay children. Weight, margins, gravity, text measurement and
+/// resource/theme resolution are intentionally not approximated.
+pub fn measure_and_layout(root: &InflatedView, width: u32, height: u32) -> LaidOutView {
+    let bounds = LayoutRect { left: 0.0, top: 0.0, right: width as f32, bottom: height as f32 };
+    layout_node(root, bounds, 0)
+}
+
+fn draw_layout_node(canvas: &mut Canvas<'_>, node: &LaidOutView) {
+    if let Some(color) = node.background_argb {
+        let mut paint = Paint::new();
+        paint.color = color;
+        paint.style = PaintStyle::Fill;
+        canvas.draw_rect(RectF::new(node.bounds.left, node.bounds.top, node.bounds.right, node.bounds.bottom), &paint);
+    }
+    for child in &node.children {
+        draw_layout_node(canvas, child);
+    }
+}
+
+/// Rasterizes resolved solid View backgrounds into the guest Surface.
+/// This first pass does not draw glyphs, images, gradients, or custom View.onDraw.
+pub fn render_layout_backgrounds(surface: &mut Surface, tree: &LaidOutView) {
+    let mut canvas = Canvas::new(surface);
+    draw_layout_node(&mut canvas, tree);
+}
+
+#[cfg(test)]
+mod layout_engine_tests {
+    use super::*;
+
+    fn view(kind: InflatedViewKind, attrs: &[(&str, &str)], children: Vec<InflatedView>) -> InflatedView {
+        InflatedView {
+            kind, source_tag: "test".into(),
+            attributes: attrs.iter().map(|(k,v)| ((*k).into(), (*v).into())).collect(),
+            layout_width: None, layout_height: None, children,
+        }
+    }
+
+    #[test]
+    fn linear_layout_assigns_vertical_child_bounds_and_renders_background() {
+        let child = view(InflatedViewKind::View, &[("background", "#ff0000")], vec![]);
+        let root = view(InflatedViewKind::LinearLayout, &[("orientation", "vertical")], vec![child.clone(), child]);
+        let tree = measure_and_layout(&root, 20, 40);
+        assert_eq!(tree.children[0].bounds, LayoutRect { left: 0.0, top: 0.0, right: 20.0, bottom: 20.0 });
+        assert_eq!(tree.children[1].bounds, LayoutRect { left: 0.0, top: 20.0, right: 20.0, bottom: 40.0 });
+        let mut surface = Surface::new(20, 40);
+        render_layout_backgrounds(&mut surface, &tree);
+        assert_eq!(surface.get_pixel(5, 5), Some(0xffff0000));
+        assert_eq!(surface.get_pixel(5, 25), Some(0xffff0000));
+    }
+
+    #[test]
+    fn horizontal_linear_layout_splits_width() {
+        let child = view(InflatedViewKind::View, &[], vec![]);
+        let root = view(InflatedViewKind::LinearLayout, &[("orientation", "horizontal")], vec![child.clone(), child]);
+        let tree = measure_and_layout(&root, 40, 20);
+        assert_eq!(tree.children[1].bounds.left, 20.0);
+        assert_eq!(tree.children[1].bounds.right, 40.0);
     }
 }
