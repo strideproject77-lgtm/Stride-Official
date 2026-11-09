@@ -81,6 +81,10 @@ pub struct ClassInventory {
     pub method_references: Vec<MethodReference>,
     /// Resolved field_id table, including references to classes outside this DEX.
     pub field_references: Vec<FieldReference>,
+    /// DEX string_ids table in its original index order.
+    pub strings: Vec<String>,
+    /// DEX type_ids table resolved to descriptors in its original index order.
+    pub type_descriptors: Vec<String>,
 }
 
 fn u16le(b: &[u8], o: usize) -> Result<u16, ClassReadError> {
@@ -376,7 +380,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
     let field_count = u32le(b, 0x50)?;
     let method_count = u32le(b, 0x58)?;
     let class_count = u32le(b, 0x60)?;
-    let strings = table(b, string_count, u32le(b, 0x3c)?, 4)?;
+    let string_ids = table(b, string_count, u32le(b, 0x3c)?, 4)?;
     let types = table(b, type_count, u32le(b, 0x44)?, 4)?;
     let protos = table(b, proto_count, u32le(b, 0x4c)?, 12)?;
     let fields = table(b, field_count, u32le(b, 0x54)?, 8)?;
@@ -405,6 +409,13 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
             || u32le(b, at + 4)? >= string_count { return Err(ClassReadError::InvalidIndex); }
     }
 
+    // Preserve the DEX identifier tables in their exact index order. DEX opcodes
+    // refer to string_ids, type_ids, field_ids and method_ids independently.
+    let mut strings = Vec::with_capacity(string_count as usize);
+    for index in 0..string_count {
+        strings.push(dex_string(b, &string_ids, string_count, index)?);
+    }
+
     // Resolve the DEX identifier tables before class loading. These tables include
     // references to framework and library classes that are not defined in this DEX.
     let mut method_references = Vec::with_capacity(method_count as usize);
@@ -415,9 +426,9 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         let name_index = u32le(b, at + 4)?;
         method_references.push(MethodReference {
             method_index: index,
-            class_descriptor: type_descriptor(b, &strings, &types, string_count, type_count, owner)?,
-            name: dex_string(b, &strings, string_count, name_index)?,
-            prototype: proto_signature(b, &strings, &types, &protos, string_count, type_count, proto)?,
+            class_descriptor: type_descriptor(b, &string_ids, &types, string_count, type_count, owner)?,
+            name: dex_string(b, &string_ids, string_count, name_index)?,
+            prototype: proto_signature(b, &string_ids, &types, &protos, string_count, type_count, proto)?,
         });
     }
 
@@ -429,8 +440,8 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         let name_index = u32le(b, at + 4)?;
         field_references.push(FieldReference {
             field_index: index,
-            class_descriptor: type_descriptor(b, &strings, &types, string_count, type_count, owner)?,
-            name: dex_string(b, &strings, string_count, name_index)?,
+            class_descriptor: type_descriptor(b, &string_ids, &types, string_count, type_count, owner)?,
+            name: dex_string(b, &string_ids, string_count, name_index)?,
             field_type: type_descriptor(b, &strings, &types, string_count, type_count, field_type)?,
         });
     }
@@ -462,7 +473,11 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
         classes.push(class);
     }
-    Ok(ClassInventory { classes, method_references, field_references })
+    let mut type_descriptors = Vec::with_capacity(type_count as usize);
+    for index in 0..type_count {
+        type_descriptors.push(type_descriptor(b, &string_ids, &types, string_count, type_count, index)?);
+    }
+    Ok(ClassInventory { classes, method_references, field_references, strings, type_descriptors })
 }
 
 #[cfg(test)]
