@@ -758,6 +758,8 @@ mod tests {    use super::*;
                     name: "lives".into(), field_type: "I".into(),
                 },
             ],
+            strings: vec![],
+            type_descriptors: vec![],
         }
     }
 
@@ -1271,6 +1273,8 @@ mod dex_loader_tests {
             }],
             method_references: vec![],
             field_references: vec![],
+            strings: vec![],
+            type_descriptors: vec![],
         }
     }
 
