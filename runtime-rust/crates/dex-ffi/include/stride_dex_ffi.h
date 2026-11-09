@@ -89,6 +89,18 @@ int32_t stride_runtime_dispatch_touch(
 );
 
 /*
+ * Pump queued Android touch events into the active Activity callback.
+ * Returns 0 on success, 1 for invalid arguments, 2 for guest callback error,
+ * and 3 for a runtime panic. out_delivered receives the delivered event count.
+ */
+int32_t stride_runtime_pump_guest_events(
+    AndroidRuntime *runtime,
+    uint32_t max_events,
+    size_t step_budget,
+    uint32_t *out_delivered
+);
+
+/*
  * Record a completed frame duration (ms) and return current rolling FPS.
  */
 float stride_runtime_record_frame(AndroidRuntime *runtime, float duration_ms);
