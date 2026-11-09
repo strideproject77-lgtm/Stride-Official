@@ -1664,8 +1664,8 @@ mod tests {
                 class_descriptor: "Ltest/Base;".into(),
                 name: "value".into(),
                 prototype: "()I".into(),
-                code_units: vec![0x1012, 0x010f], // return 1
-                registers_size: 2,
+                code_units: vec![0x1012, 0x000f], // return 1
+                registers_size: 1,
                 ins_size: 0,
                 try_blocks: vec![],
             }),
@@ -1673,8 +1673,8 @@ mod tests {
                 class_descriptor: "Ltest/Child;".into(),
                 name: "value".into(),
                 prototype: "()I".into(),
-                code_units: vec![0x2012, 0x010f], // return 2
-                registers_size: 2,
+                code_units: vec![0x2012, 0x000f], // return 2
+                registers_size: 1,
                 ins_size: 0,
                 try_blocks: vec![],
             }),
