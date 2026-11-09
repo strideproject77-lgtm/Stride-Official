@@ -394,7 +394,7 @@ mod tests {
             "Ljava/lang/String;", "concat", "(Ljava/lang/String;)Ljava/lang/String;",
         ).unwrap();
         let combined = concat(&mut env, &[Value::Object(left), Value::Object(right)]).unwrap()
-            .and_then(Value::as_object).unwrap();
+            .and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(combined).unwrap(), "123");
 
         let parse = registry.find(
@@ -406,7 +406,7 @@ mod tests {
             "Ljava/lang/String;", "valueOf", "(D)Ljava/lang/String;",
         ).unwrap();
         let rendered = stringify(&mut env, &[Value::Double(2.5)]).unwrap()
-            .and_then(Value::as_object).unwrap();
+            .and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(rendered).unwrap(), "2.5");
     }
 
