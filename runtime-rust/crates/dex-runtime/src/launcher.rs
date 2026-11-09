@@ -1161,14 +1161,52 @@ impl AndroidRuntime {
             let inside = x >= bounds.left && x <= bounds.right
                 && y >= bounds.top && y <= bounds.bottom;
             if !inside { return None; }
-            let listener = self.heap.get_instance_field(*view_id, "mOnClickListener")
-                .ok().and_then(|value| value.as_object()).filter(|id| *id != 0)?;
+            let click_listener = self.heap.get_instance_field(*view_id, "mOnClickListener")
+                .ok().and_then(|value| value.as_object()).filter(|id| *id != 0);
+            let touch_listener = self.heap.get_instance_field(*view_id, "mOnTouchListener")
+                .ok().and_then(|value| value.as_object()).filter(|id| *id != 0);
             let enabled = self.heap.get_instance_field(*view_id, "mEnabled")
                 .map(|value| value.as_int() != 0).unwrap_or(true);
-            if enabled && self.heap.contains(listener) { Some(*view_id) } else { None }
+            if enabled && (click_listener.is_some() || touch_listener.is_some()) { Some(*view_id) } else { None }
         })
     }
 
+    fn dispatch_view_touch(&mut self, view_id: u32, action: i32, x: f32, y: f32, step_budget: usize) -> Result<bool, String> {
+        let listener_id = self.heap.get_instance_field(view_id, "mOnTouchListener")
+            .map_err(|error| format!("View touch listener lookup failed: {:?}", error))?
+            .as_object().filter(|id| *id != 0);
+        let Some(listener_id) = listener_id else { return Ok(false) };
+        let listener_class = self.heap.get(listener_id)
+            .map_err(|error| format!("Touch listener object lookup failed: {:?}", error))?
+            .class_descriptor().to_owned();
+        let method_id = self.class_loader.find_method(&listener_class, "onTouch", "(Landroid/view/View;Landroid/view/MotionEvent;)Z");
+        let Some(method_id) = method_id else { return Ok(false) };
+        let method_id = u16::try_from(method_id).map_err(|_| "View touch listener method ID exceeds interpreter limit".to_string())?;
+        let event_id = self.heap.allocate_instance("Landroid/view/MotionEvent;")
+            .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
+        self.heap.set_instance_field(event_id, "action", Value::Int(action)).map_err(|e| format!("MotionEvent action setup failed: {:?}", e))?;
+        self.heap.set_instance_field(event_id, "x", Value::Float(x)).map_err(|e| format!("MotionEvent X setup failed: {:?}", e))?;
+        self.heap.set_instance_field(event_id, "y", Value::Float(y)).map_err(|e| format!("MotionEvent Y setup failed: {:?}", e))?;
+        let method_map = self.class_loader.export_method_codes();
+        let metadata = self.class_loader.dex_inventories.first().cloned();
+        let strings = metadata.as_ref().map(|i| i.strings.as_slice()).unwrap_or(&[]);
+        let mut vm = ArtVm::new(&mut self.heap, &mut self.hierarchy, &mut self.monitors, &mut self.jni, &method_map, strings);
+        vm.attach_diagnostics(&self.diagnostics);
+        vm.attach_static_fields(&mut self.static_fields);
+        if let Some(inventory) = metadata.as_ref() {
+            vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+            vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+        }
+        let args = [Value::Object(listener_id), Value::Object(view_id), Value::Object(event_id)];
+        let report = vm.execute_method(method_id, &args, step_budget.max(1))
+            .map_err(|error| format!("View touch listener interpreter error: {}", error))?;
+        match report.stop_reason {
+            ExecutionStopReason::ReturnedValue(value) => Ok(value.as_int() != 0),
+            ExecutionStopReason::UncaughtException(exception) => Err(format!("View touch listener threw {}: {:?}", exception.class_descriptor, exception.message)),
+            ExecutionStopReason::StepLimitExceeded => Err("View touch listener exceeded its per-event instruction budget".to_string()),
+            ExecutionStopReason::ReturnedVoid => Ok(false),
+        }
+    }
     fn dispatch_view_click(&mut self, view_id: u32, step_budget: usize) -> Result<bool, String> {
         let listener_id = self.heap.get_instance_field(view_id, "mOnClickListener")
             .map_err(|error| format!("View click listener lookup failed: {:?}", error))?
@@ -1290,6 +1328,13 @@ impl AndroidRuntime {
                     ),
                     ExecutionStopReason::ReturnedValue(value) => activity_consumed = value.as_int() != 0,
                     ExecutionStopReason::ReturnedVoid => activity_consumed = false,
+                }
+            }
+
+            if !activity_consumed {
+                let touch_target = self.pressed_view.or_else(|| self.hit_test_clickable_view(x, y));
+                if let Some(view_id) = touch_target {
+                    activity_consumed = self.dispatch_view_touch(view_id, event.action, x, y, step_budget)?;
                 }
             }
 
