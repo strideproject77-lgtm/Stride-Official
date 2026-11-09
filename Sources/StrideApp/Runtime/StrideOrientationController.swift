@@ -4,6 +4,7 @@ import UIKit
 final class StrideOrientationController {
     static let shared = StrideOrientationController()
     private(set) var supportedMask: UIInterfaceOrientationMask = .allButUpsideDown
+    private var previousMask: UIInterfaceOrientationMask?
     private init() {}
 
     static func mask(for androidValue: Int32) -> UIInterfaceOrientationMask {
@@ -18,12 +19,16 @@ final class StrideOrientationController {
     }
 
     func apply(androidValue: Int32) {
+        if previousMask == nil {
+            previousMask = Self.currentSceneMask()
+        }
         supportedMask = Self.mask(for: androidValue)
         requestSceneGeometry()
     }
 
     func reset() {
-        supportedMask = .allButUpsideDown
+        supportedMask = previousMask ?? .allButUpsideDown
+        previousMask = nil
         requestSceneGeometry()
     }
 

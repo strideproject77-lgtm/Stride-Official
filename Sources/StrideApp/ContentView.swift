@@ -43,6 +43,7 @@ struct ContentView: View {
                 }
                 .sheet(item: $selectedPackage) { item in
                     APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted)
+                        .interactiveDismissDisabled(true)
                 }
                 Spacer(minLength: 12)
                 tabBar
@@ -799,6 +800,7 @@ private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingExecutionScreen = false
     @State private var isExecutionChromeHidden = false
+    @State private var launchTask: Task<Void, Never>?
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
@@ -894,7 +896,7 @@ private struct APKDetailSheet: View {
 
                     Button {
                         showingExecutionScreen = true
-                        Task {
+                        launchTask = Task {
                             isExecuting = true
                             executionError = nil
                             executionResult = nil
@@ -908,21 +910,27 @@ private struct APKDetailSheet: View {
                                 let res = try await backend.launch(packageAt: item.fileURL) { line in
                                     Task { @MainActor in appendSessionLog(line) }
                                 }
+                                guard !Task.isCancelled else {
+                                    res.session.close()
+                                    return
+                                }
                                 executionResult = res
                                 await MainActor.run {
+                                    guard !Task.isCancelled else { return }
                                     StrideOrientationController.shared.apply(androidValue: res.screenOrientation)
                                 }
                                 appendSessionLog("[SESSION] Applied APK screenOrientation=\(res.screenOrientation)")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] Runtime handle retained; guest event loop is not active yet")
-                                appendSessionLog("[SESSION] Close the app detail sheet to release runtime resources")
+                                appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
                             } catch {
+                                guard !Task.isCancelled else { return }
                                 executionError = error.localizedDescription
                                 lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
                                 diagnostics.finishSession(status: "failed: \(error.localizedDescription)")
                             }
-                            isExecuting = false
+                            if !Task.isCancelled { isExecuting = false }
                         }
                     } label: {
                         HStack(spacing: 9) {
@@ -1082,6 +1090,8 @@ private struct APKDetailSheet: View {
         }
         .onAppear(perform: loadPreviousSession)
         .onDisappear {
+            launchTask?.cancel()
+            launchTask = nil
             StrideOrientationController.shared.reset()
             executionResult?.session.close()
             if executionResult != nil {
@@ -1149,18 +1159,6 @@ private struct APKDetailSheet: View {
                 VStack {
                     Spacer()
                     HStack(alignment: .bottom) {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack(spacing: 7) {
-                                Text("FPS  \(liveFPSLabel)")
-                                Text("·")
-                                Text("TOUCH  \(touchLatencyLabel)")
-                            }
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.95))
-                            Text("Triple tap with 3 fingers to show status bar")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.58))
-                        }
                         Spacer()
                     }
                     .padding(.horizontal, 14)
@@ -1172,9 +1170,8 @@ private struct APKDetailSheet: View {
         .contentShape(Rectangle())
         .overlay {
             ThreeFingerTapOverlay {
-                guard isExecutionChromeHidden else { return }
                 withAnimation(.easeInOut(duration: 0.18)) {
-                    isExecutionChromeHidden = false
+                    isExecutionChromeHidden.toggle()
                 }
             }
             .allowsHitTesting(true)
@@ -1188,13 +1185,16 @@ private struct APKDetailSheet: View {
     }
 
     private func closeExecutionSession() {
+        launchTask?.cancel()
+        launchTask = nil
         showingExecutionScreen = false
         isExecutionChromeHidden = false
-        StrideOrientationController.shared.reset()
         executionResult?.session.close()
         executionResult = nil
+        StrideOrientationController.shared.reset()
         diagnostics.finishSession(status: "runtime released by user")
         appendSessionLog("[SESSION] Runtime closed safely by user")
+        dismiss()
     }
 
     private var executionStatusText: String {
@@ -1410,44 +1410,60 @@ private struct ActivityViewController: UIViewControllerRepresentable {
 }
 
 
-/// Detects a deliberate three-finger tap without consuming ordinary game input.
+/// Window-level recognizer observes the three-finger tap without intercepting
+/// Close/Hide buttons or ordinary touches on the execution screen.
 private struct ThreeFingerTapOverlay: UIViewRepresentable {
     let onTripleFingerTap: () -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onTripleFingerTap: onTripleFingerTap)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(onTripleFingerTap: onTripleFingerTap) }
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
         view.backgroundColor = .clear
-        view.isUserInteractionEnabled = true
-        let recognizer = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleTap)
-        )
-        recognizer.numberOfTouchesRequired = 3
-        recognizer.numberOfTapsRequired = 1
-        recognizer.cancelsTouchesInView = false
-        recognizer.delaysTouchesBegan = false
-        recognizer.delaysTouchesEnded = false
-        view.addGestureRecognizer(recognizer)
+        view.isUserInteractionEnabled = false
+        DispatchQueue.main.async { context.coordinator.attach(to: view.window) }
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.onTripleFingerTap = onTripleFingerTap
+        DispatchQueue.main.async { context.coordinator.attach(to: uiView.window) }
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.detach()
     }
 
     final class Coordinator: NSObject {
         var onTripleFingerTap: () -> Void
+        private weak var attachedWindow: UIWindow?
+        private var recognizer: UITapGestureRecognizer?
 
         init(onTripleFingerTap: @escaping () -> Void) {
             self.onTripleFingerTap = onTripleFingerTap
         }
 
-        @objc func handleTap() {
-            onTripleFingerTap()
+        func attach(to window: UIWindow?) {
+            guard let window else { return }
+            if attachedWindow === window, recognizer != nil { return }
+            detach()
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            tap.numberOfTouchesRequired = 3
+            tap.numberOfTapsRequired = 1
+            tap.cancelsTouchesInView = false
+            tap.delaysTouchesBegan = false
+            tap.delaysTouchesEnded = false
+            window.addGestureRecognizer(tap)
+            attachedWindow = window
+            recognizer = tap
         }
+
+        func detach() {
+            if let recognizer { attachedWindow?.removeGestureRecognizer(recognizer) }
+            recognizer = nil
+            attachedWindow = nil
+        }
+
+        @objc func handleTap() { onTripleFingerTap() }
     }
 }
