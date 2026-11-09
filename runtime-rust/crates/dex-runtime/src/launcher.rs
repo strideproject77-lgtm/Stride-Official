@@ -1389,3 +1389,38 @@ mod framework_bridge_tests {
         }
     }
 }
+
+
+#[cfg(test)]
+mod managed_view_input_tests {
+    use super::*;
+
+    #[test]
+    fn hit_testing_finds_topmost_enabled_view_with_click_listener() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let root = runtime.heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
+        let button = runtime.heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        let listener = runtime.heap.allocate_instance("Ltest/CalculatorClickListener;").unwrap();
+        runtime.heap.set_instance_field(button, "mOnClickListener", Value::Object(listener)).unwrap();
+        runtime.heap.set_instance_field(button, "mEnabled", Value::Int(1)).unwrap();
+        runtime.rendered_view_bounds = vec![
+            (root, RectF::new(0.0, 0.0, 1080.0, 1920.0)),
+            (button, RectF::new(100.0, 300.0, 500.0, 600.0)),
+        ];
+
+        assert_eq!(runtime.hit_test_clickable_view(250.0, 450.0), Some(button));
+        assert_eq!(runtime.hit_test_clickable_view(700.0, 450.0), None);
+    }
+
+    #[test]
+    fn disabled_view_is_not_a_click_target() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let button = runtime.heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        let listener = runtime.heap.allocate_instance("Ltest/CalculatorClickListener;").unwrap();
+        runtime.heap.set_instance_field(button, "mOnClickListener", Value::Object(listener)).unwrap();
+        runtime.heap.set_instance_field(button, "mEnabled", Value::Int(0)).unwrap();
+        runtime.rendered_view_bounds = vec![(button, RectF::new(0.0, 0.0, 100.0, 100.0))];
+
+        assert_eq!(runtime.hit_test_clickable_view(50.0, 50.0), None);
+    }
+}
