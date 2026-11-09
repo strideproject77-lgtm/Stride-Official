@@ -15,7 +15,7 @@ use crate::hierarchy::ClassHierarchy;
 use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
-use stride_dex_inspector::classes::{FieldReference, MethodReference};
+use stride_dex_inspector::classes::{ClassInventory, FieldReference, MethodReference};
 use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -57,6 +57,8 @@ pub struct ArtVm<'a> {
     pub method_lookup: Option<&'a HashMap<(String, String, String), u32>>,
     pub type_descriptors: Option<&'a [String]>,
     pub field_references: Option<&'a [FieldReference]>,
+    dex_inventories: Option<&'a [ClassInventory]>,
+    method_dex_indices: Option<&'a HashMap<u32, usize>>,
 }
 
 fn decode_invoke_arguments(
@@ -132,6 +134,8 @@ impl<'a> ArtVm<'a> {
             method_lookup: None,
             type_descriptors: None,
             field_references: None,
+            dex_inventories: None,
+            method_dex_indices: None,
         }
     }
 
@@ -190,6 +194,17 @@ impl<'a> ArtVm<'a> {
     ) {
         self.method_references = Some(references);
         self.method_lookup = Some(lookup);
+    }
+
+    /// Attaches every DEX inventory and the runtime-method-to-DEX ownership map.
+    /// DEX string/type/method/field indices are local to the DEX that owns the caller.
+    pub fn attach_multi_dex_metadata(
+        &mut self,
+        inventories: &'a [ClassInventory],
+        method_dex_indices: &'a HashMap<u32, usize>,
+    ) {
+        self.dex_inventories = Some(inventories);
+        self.method_dex_indices = Some(method_dex_indices);
     }
 
     pub fn execute_method(
@@ -306,6 +321,19 @@ impl<'a> ArtVm<'a> {
         let mut pending_exception: Option<u32> = None;
 
         while pc < code_units.len() && steps < step_limit {
+            // Restore the active caller's DEX tables after nested calls. A method
+            // index such as method@0007 or field@0007 has meaning only in its
+            // defining DEX; using classes.dex tables for classes2.dex corrupts dispatch.
+            if let (Some(inventories), Some(owners)) = (self.dex_inventories, self.method_dex_indices) {
+                if let Some(index) = owners.get(&(method_id as u32)).copied() {
+                    if let Some(inventory) = inventories.get(index) {
+                        self.strings = &inventory.strings;
+                        self.type_descriptors = Some(&inventory.type_descriptors);
+                        self.method_references = Some(&inventory.method_references);
+                        self.field_references = Some(&inventory.field_references);
+                    }
+                }
+            }
             steps += 1;
             let first = code_units[pc];
             let op = (first & 0xff) as u8;

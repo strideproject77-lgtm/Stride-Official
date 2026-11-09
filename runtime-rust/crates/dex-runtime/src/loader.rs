@@ -56,6 +56,8 @@ pub struct AppClassLoader {
     pub method_lookup: HashMap<(String, String, String), u32>,
     pub next_method_id: u32,
     pub dex_inventories: Vec<ClassInventory>,
+    /// DEX-local identifier tables are selected by the method currently executing.
+    pub method_dex_indices: HashMap<u32, usize>,
     pub string_pool: Vec<String>,
 }
 
@@ -67,6 +69,7 @@ impl AppClassLoader {
             method_lookup: HashMap::new(),
             next_method_id: 1,
             dex_inventories: Vec::new(),
+            method_dex_indices: HashMap::new(),
             string_pool: Vec::new(),
         }
     }
@@ -123,6 +126,7 @@ impl AppClassLoader {
         }
 
         let mut classes_loaded = 0;
+        let dex_index = self.dex_inventories.len();
 
         for class_def in &inventory.classes {
             let descriptor = class_def.descriptor.clone();
@@ -217,6 +221,7 @@ impl AppClassLoader {
                 };
 
                 self.methods_by_id.insert(mid, loaded_m);
+                self.method_dex_indices.insert(mid, dex_index);
                 self.method_lookup.insert(
                     (descriptor.clone(), m.name.clone(), m.prototype.clone()),
                     mid,
@@ -334,7 +339,10 @@ impl AppClassLoader {
             let metadata = self.dex_inventories.first().cloned();
             let dex_strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(strings);
             let method_lookup = self.method_lookup.clone();
+            let dex_inventories = self.dex_inventories.clone();
+            let method_dex_indices = self.method_dex_indices.clone();
             let mut vm = ArtVm::new(heap, hierarchy, monitors, jni, &method_map, dex_strings);
+            vm.attach_multi_dex_metadata(&dex_inventories, &method_dex_indices);
             if let Some(inventory) = metadata.as_ref() {
                 vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                 vm.attach_method_resolver(&inventory.method_references, &method_lookup);

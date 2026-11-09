@@ -535,6 +535,7 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
                 if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -623,6 +624,7 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
                 if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -722,6 +724,7 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
                 if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -817,6 +820,7 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
                 if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -1193,6 +1197,7 @@ impl AndroidRuntime {
         let mut vm = ArtVm::new(&mut self.heap, &mut self.hierarchy, &mut self.monitors, &mut self.jni, &method_map, strings);
         vm.attach_diagnostics(&self.diagnostics);
         vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
         if let Some(inventory) = metadata.as_ref() {
             vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
             vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -1242,6 +1247,7 @@ impl AndroidRuntime {
         );
         vm.attach_diagnostics(&self.diagnostics);
         vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
         if let Some(inventory) = dex_metadata.as_ref() {
             vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
             vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
@@ -1312,6 +1318,7 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
                 if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
