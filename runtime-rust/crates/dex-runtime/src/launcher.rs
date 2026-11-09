@@ -784,15 +784,32 @@ impl AndroidRuntime {
             }
             let count=field("mChildCount")?.as_int().clamp(0,4096)as usize;
             if count==0{return Ok(());}
-            let orientation=field("mOrientation")?.as_int();
-            let vertical=orientation!=0;
-            let segment=if vertical{bounds.height()/count as f32}else{bounds.width()/count as f32};
-            for index in 0..count{
+            let orientation=field("mOrientation")?.as_int();let vertical=orientation!=0;
+            let main_extent=if vertical{bounds.height()}else{bounds.width()};
+            let mut weighted_total=0.0f32;
+            let mut weights=Vec::with_capacity(count);
+            for index in 0..count {
                 let child=field(&format!("mChild{}",index))?;
-                let Some(child_id)=child.as_object()else{continue};
-                let child_bounds=if vertical{RectF::new(bounds.left,bounds.top+index as f32*segment,bounds.right,bounds.top+(index+1)as f32*segment)}
-                    else{RectF::new(bounds.left+index as f32*segment,bounds.top,bounds.left+(index+1)as f32*segment,bounds.bottom)};
+                let Some(child_id)=child.as_object()else{weights.push((0,0.0));continue};
+                let raw=heap.get_instance_field(child_id,"mLayoutWeight").map(|v|v.as_float()).unwrap_or(0.0);
+                let weight=if raw.is_finite(){raw.max(0.0)}else{0.0};weighted_total+=weight;weights.push((child_id,weight));
+            }
+            let mut cursor=if vertical{bounds.top}else{bounds.left};
+            let mut remaining=main_extent;
+            let mut remaining_weight=weighted_total;
+            let equal_segment=main_extent/count as f32;
+            for (child_id,weight) in weights {
+                if child_id==0{continue;}
+                let extent=if weight>0.0&&remaining_weight>0.0{remaining*weight/remaining_weight}else if weighted_total>0.0{equal_segment.min(remaining)}else{equal_segment};
+                let read_int=|name:&str|heap.get_instance_field(child_id,name).map(|v|v.as_int()).unwrap_or(0).max(0) as f32;
+                let ml=read_int("mMarginLeft");let mt=read_int("mMarginTop");let mr=read_int("mMarginRight");let mb=read_int("mMarginBottom");
+                let child_bounds=if vertical {
+                    RectF::new(bounds.left+ml,cursor+mt,(bounds.right-mr).max(bounds.left+ml),cursor+extent-mb)
+                } else {
+                    RectF::new(cursor+ml,bounds.top+mt,cursor+extent-mr,(bounds.bottom-mb).max(bounds.top+mt))
+                };
                 draw(heap,canvas,child_id,child_bounds,depth+1,seen)?;
+                cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
             }
             Ok(())
         }
