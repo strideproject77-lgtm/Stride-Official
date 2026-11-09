@@ -192,31 +192,47 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         var soDataList: [(String, Data)] = []
         var resourceTableData = Data()
 
-        for entry in archive {
-            if entry.path == "resources.arsc" {
-                _ = try archive.extract(entry) { chunk in resourceTableData.append(chunk) }
-            } else if entry.path == "AndroidManifest.xml" {
-                _ = try archive.extract(entry) { chunk in
-                    manifestData.append(chunk)
+        // XAPK/APKS/APKM imports are normalized to <package>/base.apk and
+        // <package>/components/*.apk. Read the base first, then each retained split.
+        var packageArchives: [Archive] = [archive]
+        let componentsURL = url.deletingLastPathComponent().appendingPathComponent("components", isDirectory: true)
+        let splitURLs = (try? FileManager.default.contentsOfDirectory(
+            at: componentsURL, includingPropertiesForKeys: nil
+        ))?.filter { $0.pathExtension.lowercased() == "apk" } ?? []
+        for splitURL in splitURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            if let splitArchive = Archive(url: splitURL, accessMode: .read) {
+                packageArchives.append(splitArchive)
+            } else {
+                onLog("[WARN] Could not open preserved split APK: \\(splitURL.lastPathComponent)")
+            }
+        }
+        onLog("[INFO] Package components discovered: \\(packageArchives.count) APK(s), \\(splitURLs.count) split(s)")
+
+        for (archiveIndex, packageArchive) in packageArchives.enumerated() {
+            for entry in packageArchive {
+                if entry.path == "resources.arsc" {
+                    // ResourceCatalog currently accepts one table. Prefer the base table.
+                    if resourceTableData.isEmpty {
+                        _ = try packageArchive.extract(entry) { chunk in resourceTableData.append(chunk) }
+                    }
+                } else if entry.path == "AndroidManifest.xml" {
+                    if archiveIndex == 0 && manifestData.isEmpty {
+                        _ = try packageArchive.extract(entry) { chunk in manifestData.append(chunk) }
+                    }
+                } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\\.dex$"#, options: .regularExpression) != nil {
+                    var dex = Data()
+                    _ = try packageArchive.extract(entry) { chunk in dex.append(chunk) }
+                    dexDataList.append(dex)
+                } else if (entry.path.hasPrefix("lib/arm64-v8a/") || entry.path.hasPrefix("lib/armeabi-v7a/")) && entry.path.hasSuffix(".so") {
+                    var so = Data()
+                    _ = try packageArchive.extract(entry) { chunk in so.append(chunk) }
+                    let name = URL(fileURLWithPath: entry.path).lastPathComponent
+                    soDataList.append((name, so))
                 }
-            } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
-                var dex = Data()
-                _ = try archive.extract(entry) { chunk in
-                    dex.append(chunk)
-                }
-                dexDataList.append(dex)
-            } else if (entry.path.hasPrefix("lib/arm64-v8a/") || entry.path.hasPrefix("lib/armeabi-v7a/")) && entry.path.hasSuffix(".so") {
-                var so = Data()
-                _ = try archive.extract(entry) { chunk in
-                    so.append(chunk)
-                }
-                let name = URL(fileURLWithPath: entry.path).lastPathComponent
-                soDataList.append((name, so))
             }
         }
 
-        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count)")
-        onLog("[INFO] APK inventory: dex_bytes=\(dexDataList.reduce(0) { $0 + $1.count }), native_names=\(soDataList.map { $0.0 }.joined(separator: ","))")
+        onLog("[INFO] Archive scan complete: manifest=\\(!manifestData.isEmpty), manifest_bytes=\\(manifestData.count), DEX=\\(dexDataList.count), native libraries=\\(soDataList.count), APK components=\\(packageArchives.count)")
         guard !manifestData.isEmpty else {
             onLog("[ERROR] AndroidManifest.xml is absent or empty")
             throw RuntimeExecutionError.missingManifest
