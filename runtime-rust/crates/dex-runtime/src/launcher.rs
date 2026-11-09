@@ -643,6 +643,9 @@ impl AndroidRuntime {
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
+                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                    vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                }
                 let args = [Value::Object(activity_obj)];
                 match vm.execute_method(mid16, &args, step_budget.saturating_sub(total_steps)) {
                     Ok(report) => {
