@@ -135,26 +135,33 @@ impl AndroidRuntime {
             );
         }
 
-        // MotionEvent instances created by the host input bridge expose the
+        // MotionEvent instances created by the host input bridge expose
         // Android getters used by Activity.onTouchEvent implementations.
-        for (name, prototype, field, kind) in [
-            ("getAction", "()I", "action", 0u8),
-            ("getActionMasked", "()I", "action", 0u8),
-            ("getX", "()F", "x", 1u8),
-            ("getY", "()F", "y", 1u8),
-            ("getRawX", "()F", "x", 1u8),
-            ("getRawY", "()F", "y", 1u8),
-            ("getPressure", "()F", "pressure", 1u8),
+        for (name, prototype, field) in [
+            ("getAction", "()I", "action"),
+            ("getX", "()F", "x"),
+            ("getY", "()F", "y"),
+            ("getRawX", "()F", "x"),
+            ("getRawY", "()F", "y"),
+            ("getPressure", "()F", "pressure"),
         ] {
             jni.register("Landroid/view/MotionEvent;", name, prototype, move |env, args| {
                 let receiver = args.first().and_then(|value| value.as_object())
                     .ok_or_else(|| "MotionEvent receiver is null".to_string())?;
                 let value = env.heap.get_instance_field(receiver, field)
                     .map_err(|error| format!("MotionEvent.{} read failed: {:?}", field, error))?;
-                let result = if kind == 0 { Value::Int(value.as_int()) } else { Value::Float(value.as_float()) };
+                let result = if prototype == "()I" { Value::Int(value.as_int()) } else { Value::Float(value.as_float()) };
                 Ok(Some(result))
             });
         }
+        jni.register("Landroid/view/MotionEvent;", "getActionMasked", "()I", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or_else(|| "MotionEvent receiver is null".to_string())?;
+            let action = env.heap.get_instance_field(receiver, "action")
+                .map_err(|error| format!("MotionEvent action read failed: {:?}", error))?
+                .as_int();
+            Ok(Some(Value::Int(action & 0xff)))
+        });
 
         jni.register(
             "Ljava/lang/System;",
