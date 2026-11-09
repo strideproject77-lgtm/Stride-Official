@@ -319,26 +319,6 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         Ok(Some(env.get_object_field(parent, &format!("mChild{}", index))?))
     });
 
-    // MotionEvent accessors used by Activity touch handlers. The event pump
-    // stores the host-delivered action and pointer coordinates on these fields.
-    jni.register("Landroid/view/MotionEvent;", "getAction", "()I", |env, args| {
-        let id = receiver(args)?;
-        Ok(Some(env.get_object_field(id, "action")?))
-    });
-    jni.register("Landroid/view/MotionEvent;", "getActionMasked", "()I", |env, args| {
-        let id = receiver(args)?;
-        let action = env.get_object_field(id, "action")?.as_int();
-        Ok(Some(Value::Int(action & 0xff)))
-    });
-    jni.register("Landroid/view/MotionEvent;", "getX", "()F", |env, args| {
-        let id = receiver(args)?;
-        Ok(Some(env.get_object_field(id, "x")?))
-    });
-    jni.register("Landroid/view/MotionEvent;", "getY", "()F", |env, args| {
-        let id = receiver(args)?;
-        Ok(Some(env.get_object_field(id, "y")?))
-    });
-
     // Activity content ownership is real managed-object state. Layout-resource
     // inflation and recursive ViewGroup traversal are intentionally not faked.
     jni.register("Landroid/app/Activity;", "setContentView", "(Landroid/view/View;)V", |env, args| {
@@ -513,26 +493,6 @@ mod tests {
             "()I", &[Value::Object(view)]).unwrap(), Some(Value::Int(0xff12ab34u32 as i32)));
         assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getTextSize",
             "()F", &[Value::Object(view)]).unwrap(), Some(Value::Float(22.0)));
-    }
-
-    #[test]
-    fn motion_event_accessors_return_pumped_action_and_coordinates() {
-        let mut jni = JniNativeRegistry::new();
-        register_view_framework(&mut jni);
-        let mut heap = ManagedHeap::default();
-        let event = heap.allocate_instance("Landroid/view/MotionEvent;").unwrap();
-        heap.set_instance_field(event, "action", Value::Int(0x102)).unwrap();
-        heap.set_instance_field(event, "x", Value::Float(123.5)).unwrap();
-        heap.set_instance_field(event, "y", Value::Float(456.25)).unwrap();
-
-        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/MotionEvent;", "getAction", "()I",
-            &[Value::Object(event)]).unwrap(), Some(Value::Int(0x102)));
-        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/MotionEvent;", "getActionMasked", "()I",
-            &[Value::Object(event)]).unwrap(), Some(Value::Int(2)));
-        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/MotionEvent;", "getX", "()F",
-            &[Value::Object(event)]).unwrap(), Some(Value::Float(123.5)));
-        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/MotionEvent;", "getY", "()F",
-            &[Value::Object(event)]).unwrap(), Some(Value::Float(456.25)));
     }
 
     #[test]
