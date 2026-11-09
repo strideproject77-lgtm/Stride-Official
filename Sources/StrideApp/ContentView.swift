@@ -1187,16 +1187,17 @@ private struct APKDetailSheet: View {
             }
         }
         .contentShape(Rectangle())
-        // Keep this simultaneous with the guest drag recognizer so triple-taps
-        // toggle the chrome without stealing ordinary APK touch input.
-        .simultaneousGesture(
-            TapGesture(count: 3)
-                .onEnded {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isExecutionChromeHidden.toggle()
-                    }
+        // Detect a simultaneous three-finger chord, not three sequential taps.
+        // The recognizer is non-blocking and coexists with guest touch input.
+        .background {
+            ThreeFingerTouchToggle {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExecutionChromeHidden.toggle()
                 }
-        )
+            }
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showingLogShare) {
             if let logExportURL {
@@ -1464,3 +1465,131 @@ private struct ActivityViewController: UIViewControllerRepresentable {
 
 
 
+
+
+private struct ThreeFingerTouchToggle: UIViewRepresentable {
+    let onToggle: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onToggle: onToggle)
+    }
+
+    func makeUIView(context: Context) -> GestureAnchorView {
+        let view = GestureAnchorView()
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.install(on: window)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: GestureAnchorView, context: Context) {
+        context.coordinator.onToggle = onToggle
+        context.coordinator.install(on: uiView.window)
+    }
+
+    static func dismantleUIView(_ uiView: GestureAnchorView, coordinator: Coordinator) {
+        coordinator.remove()
+    }
+
+    final class Coordinator {
+        var onToggle: () -> Void
+        private let recognizer: ThreeFingerChordRecognizer
+
+        init(onToggle: @escaping () -> Void) {
+            self.onToggle = onToggle
+            self.recognizer = ThreeFingerChordRecognizer()
+            self.recognizer.onRecognized = { [weak self] in self?.onToggle() }
+        }
+
+        func install(on window: UIWindow?) {
+            guard let window else { return }
+            if recognizer.view !== window {
+                recognizer.view?.removeGestureRecognizer(recognizer)
+                window.addGestureRecognizer(recognizer)
+            }
+        }
+
+        func remove() {
+            recognizer.view?.removeGestureRecognizer(recognizer)
+        }
+    }
+}
+
+private final class GestureAnchorView: UIView {
+    var onWindowChange: ((UIWindow?) -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        onWindowChange?(window)
+    }
+}
+
+private final class ThreeFingerChordRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    var onRecognized: (() -> Void)?
+    private var touchStartTimes: [ObjectIdentifier: TimeInterval] = [:]
+    private var didFire = false
+    private let maximumFingerArrivalSpread: TimeInterval = 0.22
+
+    override init(target: Any?, action: Selector?) {
+        super.init(target: target, action: action)
+        delegate = self
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard !didFire else { return }
+        for touch in touches {
+            touchStartTimes[ObjectIdentifier(touch)] = touch.timestamp
+        }
+
+        guard touchStartTimes.count >= 3 else { return }
+        let starts = Array(touchStartTimes.values)
+        guard let earliest = starts.min(), let latest = starts.max(),
+              latest - earliest <= maximumFingerArrivalSpread else {
+            state = .failed
+            return
+        }
+
+        didFire = true
+        state = .recognized
+        onRecognized?()
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        for touch in touches {
+            touchStartTimes.removeValue(forKey: ObjectIdentifier(touch))
+        }
+        if touchStartTimes.isEmpty && state == .possible {
+            state = .failed
+        }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = .cancelled
+    }
+
+    override func reset() {
+        super.reset()
+        touchStartTimes.removeAll(keepingCapacity: true)
+        didFire = false
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        true
+    }
+
+    override func canPrevent(_ preventedGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+
+    override func canBePrevented(by preventingGestureRecognizer: UIGestureRecognizer) -> Bool {
+        false
+    }
+}
