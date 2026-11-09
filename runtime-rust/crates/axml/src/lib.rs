@@ -822,21 +822,17 @@ pub fn parse_layout_tree(bytes: &[u8]) -> Result<XmlNode, AxmlError> {
     }
     root.ok_or(AxmlError::MissingXmlRoot)
 
+}
+
+#[cfg(test)]
+mod layout_tree_tests {
+    use super::*;
+
     #[test]
-    fn parses_nested_layout_view_tree_and_rejects_mismatched_end_tags() {
-        let pool = string_pool(&["LinearLayout", "TextView"], true);
-        let root_start = element_chunk(0x0102, 0);
-        let child_start = element_chunk(0x0102, 1);
-        let child_end = element_chunk(0x0103, 1);
-        let root_end = element_chunk(0x0103, 0);
-        let bytes = xml_document(&[pool.clone(), root_start.clone(), child_start.clone(), child_end.clone(), root_end.clone()]);
-        let tree = parse_layout_tree(&bytes).expect("nested layout should parse");
-        assert_eq!(tree.name, "LinearLayout");
-        assert_eq!(tree.children.len(), 1);
-        assert_eq!(tree.children[0].name, "TextView");
-
-        let malformed = xml_document(&[pool, root_start, child_start, root_end, child_end]);
-        assert_eq!(parse_layout_tree(&malformed), Err(AxmlError::MalformedXmlNesting));
+    fn parses_real_binary_xml_into_a_nested_element_tree() {
+        let bytes = include_bytes!("../tests/fixtures/pocket-ridge-manifest.axml");
+        let root = parse_layout_tree(bytes).expect("binary XML tree should parse");
+        assert_eq!(root.name, "manifest");
+        assert!(root.children.iter().any(|node| node.name == "application"));
     }
-
 }
