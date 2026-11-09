@@ -25,6 +25,12 @@ targets:
         product: ZIPFoundation
       - framework: runtime-rust/target/StrideDexFFI.xcframework
         embed: false
+    info:
+      properties:
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.strideproject.stride

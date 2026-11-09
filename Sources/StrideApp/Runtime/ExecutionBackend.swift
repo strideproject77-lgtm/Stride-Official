@@ -63,6 +63,7 @@ struct APKExecutionResult {
     let missingApisCount: UInt32
     let averageFps: Float
     let heapAllocatedBytes: UInt32
+    let screenOrientation: Int32
     let session: APKRuntimeSession
 }
 
@@ -222,6 +223,18 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
+        var screenOrientation: Int32 = -1
+        let orientationStatus = manifestData.withUnsafeBytes { rawBuffer -> Int32 in
+            guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 1 }
+            return stride_manifest_screen_orientation(ptr, rawBuffer.count, &screenOrientation)
+        }
+        if orientationStatus == 0 {
+            onLog("[INFO] APK launcher screenOrientation enum=\\(screenOrientation)")
+        } else {
+            onLog("[WARN] Could not read APK screenOrientation (status=\\(orientationStatus)); using automatic iPhone orientation")
+            screenOrientation = -1
+        }
+
         onLog("[INFO] Dispatching launcher Activity; instruction budget=200000")
         var report = StrideLaunchReport()
         let status = manifestData.withUnsafeBytes { rawBuffer -> Int32 in
@@ -295,6 +308,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             missingApisCount: report.missing_apis_count,
             averageFps: report.average_fps,
             heapAllocatedBytes: report.heap_allocated_bytes,
+            screenOrientation: screenOrientation,
             session: session
         )
     }

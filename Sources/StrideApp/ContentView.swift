@@ -907,6 +907,10 @@ private struct APKDetailSheet: View {
                                     Task { @MainActor in appendSessionLog(line) }
                                 }
                                 executionResult = res
+                                await MainActor.run {
+                                    StrideOrientationController.shared.apply(androidValue: res.screenOrientation)
+                                }
+                                appendSessionLog("[SESSION] Applied APK screenOrientation=\(res.screenOrientation)")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] Runtime handle retained; guest event loop is not active yet")
                                 appendSessionLog("[SESSION] Close the app detail sheet to release runtime resources")
@@ -1076,6 +1080,7 @@ private struct APKDetailSheet: View {
         }
         .onAppear(perform: loadPreviousSession)
         .onDisappear {
+            StrideOrientationController.shared.reset()
             executionResult?.session.close()
             if executionResult != nil {
                 diagnostics.finishSession(status: "runtime released by user")
@@ -1103,6 +1108,7 @@ private struct APKDetailSheet: View {
                     Spacer()
                     Button {
                         showingExecutionScreen = false
+                        StrideOrientationController.shared.reset()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 12, weight: .bold))
@@ -1186,6 +1192,7 @@ private struct APKDetailSheet: View {
                 HStack(spacing: 12) {
                     Button {
                         showingExecutionScreen = false
+                        StrideOrientationController.shared.reset()
                     } label: {
                         Text("BACK TO DETAILS")
                             .font(.system(size: 10, weight: .bold))

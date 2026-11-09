@@ -135,6 +135,20 @@ pub unsafe extern "C" fn stride_runtime_load_so(
     }
 }
 
+
+#[no_mangle]
+pub unsafe extern "C" fn stride_manifest_screen_orientation(
+    manifest_data: *const u8, manifest_len: usize, out_orientation: *mut i32,
+) -> i32 {
+    if manifest_data.is_null() || out_orientation.is_null() || manifest_len == 0
+        || manifest_len > isize::MAX as usize { return 1; }
+    let bytes = unsafe { slice::from_raw_parts(manifest_data, manifest_len) };
+    match stride_dex_runtime::parse_manifest(bytes) {
+        Ok(manifest) => { unsafe { out_orientation.write(manifest.screen_orientation.unwrap_or(-1)) }; 0 }
+        Err(_) => 2,
+    }
+}
+
 /// Launches the main Activity from AndroidManifest.xml and executes its lifecycle.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_launch_apk(
@@ -377,6 +391,22 @@ mod tests {
             assert!(report.contains("DEX class inspection failed: TruncatedHeader"), "{report}");
             stride_runtime_destroy(rt);
         }
+    }
+
+    #[test]
+    fn manifest_orientation_reader_rejects_invalid_input() {
+        let mut orientation = 99;
+        assert_eq!(unsafe { stride_manifest_screen_orientation(std::ptr::null(), 0, &mut orientation) }, 1);
+        assert_eq!(unsafe { stride_manifest_screen_orientation([0u8; 8].as_ptr(), 8, &mut orientation) }, 2);
+        assert_eq!(orientation, 99);
+    }
+
+    #[test]
+    fn manifest_orientation_reader_defaults_to_unspecified_for_real_fixture() {
+        let bytes = include_bytes!("../../axml/tests/fixtures/pocket-ridge-manifest.axml");
+        let mut orientation = 99;
+        assert_eq!(unsafe { stride_manifest_screen_orientation(bytes.as_ptr(), bytes.len(), &mut orientation) }, 0);
+        assert_eq!(orientation, -1);
     }
 
     #[test]

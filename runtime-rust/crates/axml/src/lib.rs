@@ -284,6 +284,7 @@ pub struct ManifestComponent {
     pub name: String,
     pub exported: Option<bool>,
     pub has_launcher_intent: bool,
+    pub screen_orientation: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,6 +298,7 @@ pub struct ManifestMetadata {
     pub application_name: Option<String>,
     pub components: Vec<ManifestComponent>,
     pub launcher_activity: Option<String>,
+    pub screen_orientation: Option<i32>,
 }
 
 fn string_at(pool: &StringPool, index: u32) -> Result<Option<String>, AxmlError> {
@@ -322,6 +324,20 @@ fn typed_attr(bytes: &[u8], offset: usize, pool: &StringPool) -> Result<Option<S
     }
 }
 
+
+fn parse_screen_orientation(value: &str) -> Option<i32> {
+    if let Ok(raw) = value.parse::<u32>() {
+        return match raw { u32::MAX => Some(-1), 0..=14 => Some(raw as i32), _ => None };
+    }
+    match value {
+        "unspecified" => Some(-1), "landscape" => Some(0), "portrait" => Some(1),
+        "user" => Some(2), "behind" => Some(3), "sensor" => Some(4), "nosensor" => Some(5),
+        "sensorLandscape" => Some(6), "sensorPortrait" => Some(7), "reverseLandscape" => Some(8),
+        "reversePortrait" => Some(9), "fullSensor" => Some(10), "userLandscape" => Some(11),
+        "userPortrait" => Some(12), "fullUser" => Some(13), "locked" => Some(14), _ => None,
+    }
+}
+
 /// Extracts package identity, SDK levels, permissions, application and launchable components.
 pub fn parse_manifest(bytes: &[u8]) -> Result<ManifestMetadata, AxmlError> {
     let document = inspect_binary_xml(bytes)?;
@@ -338,6 +354,7 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<ManifestMetadata, AxmlError> {
         application_name: None,
         components: Vec::new(),
         launcher_activity: None,
+        screen_orientation: None,
     };
     let mut element_stack: Vec<String> = Vec::new();
     let mut component_stack: Vec<Option<usize>> = Vec::new();
@@ -420,6 +437,8 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<ManifestMetadata, AxmlError> {
                             name: component_name.clone(),
                             exported: attributes.get("exported").map(|value| value == "true"),
                             has_launcher_intent: false,
+                            screen_orientation: attributes.get("screenOrientation")
+                                .and_then(|value| parse_screen_orientation(value)),
                         });
                         component_index = Some(index);
                     }
@@ -475,9 +494,10 @@ pub fn parse_manifest(bytes: &[u8]) -> Result<ManifestMetadata, AxmlError> {
     if !element_stack.is_empty() || !intent_filters.is_empty() {
         return Err(AxmlError::MalformedXmlNesting);
     }
-    output.launcher_activity = output.components.iter()
-        .find(|component| component.kind == "activity" && component.has_launcher_intent)
-        .map(|component| component.name.clone());
+    let launcher = output.components.iter()
+        .find(|component| component.kind == "activity" && component.has_launcher_intent);
+    output.launcher_activity = launcher.map(|component| component.name.clone());
+    output.screen_orientation = launcher.and_then(|component| component.screen_orientation);
     Ok(output)
 }
 
@@ -646,6 +666,19 @@ mod tests {
         let final_end = element_chunk(0x0103, 1);
         let malformed = xml_document(&[pool, start, nested_start, wrong_end, final_end]);
         assert_eq!(parse_manifest(&malformed), Err(AxmlError::MalformedXmlNesting));
+    }
+
+    #[test]
+    fn maps_android_screen_orientation_values() {
+        assert_eq!(parse_screen_orientation("0"), Some(0));
+        assert_eq!(parse_screen_orientation("1"), Some(1));
+        assert_eq!(parse_screen_orientation("6"), Some(6));
+        assert_eq!(parse_screen_orientation("14"), Some(14));
+        assert_eq!(parse_screen_orientation("4294967295"), Some(-1));
+        assert_eq!(parse_screen_orientation("landscape"), Some(0));
+        assert_eq!(parse_screen_orientation("reversePortrait"), Some(9));
+        assert_eq!(parse_screen_orientation("unknown"), None);
+        assert_eq!(parse_screen_orientation("15"), None);
     }
 
     #[test]

@@ -59,6 +59,12 @@ int32_t stride_runtime_load_so(
 );
 
 /*
+ * Read the launch Activity's AndroidManifest.xml screenOrientation enum.
+ * Returns 0 on success, 1 for invalid pointers, or 2 for invalid manifest data.
+ */
+int32_t stride_manifest_screen_orientation(const uint8_t *manifest_data, size_t manifest_len, int32_t *out_orientation);
+
+/*
  * Launch the application from AndroidManifest.xml and execute its main activity.
  */
 int32_t stride_runtime_launch_apk(
