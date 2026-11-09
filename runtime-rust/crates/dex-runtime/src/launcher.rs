@@ -126,6 +126,27 @@ impl AndroidRuntime {
             );
         }
 
+        // MotionEvent instances created by the host input bridge expose the
+        // Android getters used by Activity.onTouchEvent implementations.
+        for (name, prototype, field, kind) in [
+            ("getAction", "()I", "action", 0u8),
+            ("getActionMasked", "()I", "action", 0u8),
+            ("getX", "()F", "x", 1u8),
+            ("getY", "()F", "y", 1u8),
+            ("getRawX", "()F", "x", 1u8),
+            ("getRawY", "()F", "y", 1u8),
+            ("getPressure", "()F", "pressure", 1u8),
+        ] {
+            jni.register("Landroid/view/MotionEvent;", name, prototype, move |env, args| {
+                let receiver = args.first().and_then(|value| value.as_object())
+                    .ok_or_else(|| "MotionEvent receiver is null".to_string())?;
+                let value = env.heap.get_instance_field(receiver, field)
+                    .map_err(|error| format!("MotionEvent.{} read failed: {:?}", field, error))?;
+                let result = if kind == 0 { Value::Int(value.as_int()) } else { Value::Float(value.as_float()) };
+                Ok(Some(result))
+            });
+        }
+
         jni.register(
             "Ljava/lang/System;",
             "currentTimeMillis",
@@ -721,6 +742,73 @@ impl AndroidRuntime {
             status: LaunchStatus::LifecycleReady,
             diagnostics_summary: self.diagnostics.format_summary(),
         }
+    }
+
+    /// Pumps queued Android touch events on the host display-link cadence.
+    /// The guest Activity receives real MotionEvent objects through its DEX
+    /// onTouchEvent/dispatchTouchEvent override; no event is reported as
+    /// delivered when the APK has no compatible callback.
+    pub fn pump_guest_events(&mut self, max_events: usize, step_budget: usize) -> Result<usize, String> {
+        let activity_obj = self.active_activity_obj
+            .ok_or_else(|| "No resumed Android Activity is active".to_string())?;
+        let activity_class = self.active_activity_class.clone()
+            .ok_or_else(|| "No active Android Activity class is recorded".to_string())?;
+
+        let callback = self.class_loader
+            .find_method(&activity_class, "dispatchTouchEvent", "(Landroid/view/MotionEvent;)Z")
+            .or_else(|| self.class_loader.find_method(
+                &activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z"
+            ));
+        let Some(method_id) = callback else {
+            return Ok(0);
+        };
+        let method_id = u16::try_from(method_id)
+            .map_err(|_| "Touch callback method ID exceeds the interpreter limit".to_string())?;
+        let method_map = self.class_loader.export_method_codes();
+        let mut delivered = 0usize;
+
+        while delivered < max_events {
+            let Some(event) = self.input_queue.poll_motion() else { break };
+            let event_obj = self.heap.allocate_instance("Landroid/view/MotionEvent;")
+                .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
+            self.heap.set_instance_field(event_obj, "action", Value::Int(event.action))
+                .map_err(|error| format!("MotionEvent action setup failed: {:?}", error))?;
+            let pointer = event.pointers.first();
+            self.heap.set_instance_field(event_obj, "x", Value::Float(pointer.map(|p| p.x).unwrap_or(0.0)))
+                .map_err(|error| format!("MotionEvent X setup failed: {:?}", error))?;
+            self.heap.set_instance_field(event_obj, "y", Value::Float(pointer.map(|p| p.y).unwrap_or(0.0)))
+                .map_err(|error| format!("MotionEvent Y setup failed: {:?}", error))?;
+            self.heap.set_instance_field(event_obj, "pressure", Value::Float(pointer.map(|p| p.pressure).unwrap_or(0.0)))
+                .map_err(|error| format!("MotionEvent pressure setup failed: {:?}", error))?;
+
+            let mut vm = ArtVm::new(
+                &mut self.heap,
+                &mut self.hierarchy,
+                &mut self.monitors,
+                &mut self.jni,
+                &method_map,
+                &[],
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            let args = [Value::Object(activity_obj), Value::Object(event_obj)];
+            let report = vm.execute_method(method_id, &args, step_budget.max(1))
+                .map_err(|error| format!("Touch callback interpreter error: {}", error))?;
+            drop(vm);
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) => {
+                    return Err(format!("Touch callback threw {}: {:?}", exception.class_descriptor, exception.message));
+                }
+                ExecutionStopReason::StepLimitExceeded => {
+                    return Err("Touch callback exceeded its per-event instruction budget".to_string());
+                }
+                _ => { delivered += 1; }
+            }
+        }
+        Ok(delivered)
     }
 }
 
