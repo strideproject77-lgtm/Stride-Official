@@ -858,7 +858,7 @@ impl<'a> ArtVm<'a> {
                 0x53 => { // iget-wide
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
                     rf.write_long(a4, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
@@ -866,7 +866,7 @@ impl<'a> ArtVm<'a> {
                 0x54 => { // iget-object
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
                     rf.write_object(a4, val.as_object().unwrap_or(0)).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
@@ -874,7 +874,7 @@ impl<'a> ArtVm<'a> {
                 0x59 | 0x5c..=0x5f => { // iput, iput-boolean/byte/char/short
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = rf.read_int(a4).map_err(|e| format!("Invalid reg {}", e))?;
                     self.heap.set_instance_field(obj_id, &field_name, Value::Int(val)).map_err(|e| format!("{:?}", e))?;
                     pc += 2;
@@ -882,7 +882,7 @@ impl<'a> ArtVm<'a> {
                 0x5a => { // iput-wide
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = rf.read_long(a4).map_err(|e| format!("Invalid reg {}", e))?;
                     self.heap.set_instance_field(obj_id, &field_name, Value::Long(val)).map_err(|e| format!("{:?}", e))?;
                     pc += 2;
@@ -890,7 +890,7 @@ impl<'a> ArtVm<'a> {
                 0x5b => { // iput-object
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = rf.read_object(a4).map_err(|e| format!("Invalid reg {}", e))?;
                     self.heap.set_instance_field(obj_id, &field_name, Value::Object(val)).map_err(|e| format!("{:?}", e))?;
                     pc += 2;
@@ -913,8 +913,10 @@ impl<'a> ArtVm<'a> {
                 }
                 0x67..=0x6d => { // sput variants
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
-                    let key = (method_class.clone(), field_name);
+                    let field = self.resolve_field_reference(field_idx);
+                    let field_name = field.map(|reference| reference.name.clone()).unwrap_or_else(|| format!("sfield_{}", field_idx));
+                    let field_owner = field.map(|reference| reference.class_descriptor.clone()).unwrap_or_else(|| method_class.clone());
+                    let key = (field_owner, field_name);
                     let val = if op == 0x68 {
                         Value::Long(rf.read_long(a8).map_err(|e| format!("Invalid reg {}", e))?)
                     } else if op == 0x69 {
