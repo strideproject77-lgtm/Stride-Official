@@ -21,6 +21,7 @@ use crate::gl::OpenGlEsEngine;
 use crate::activity_manager::ActivityManager;
 use crate::service_manager::ServiceManager;
 use crate::telemetry::PerformanceTelemetry;
+use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -745,6 +746,53 @@ impl AndroidRuntime {
             status: LaunchStatus::LifecycleReady,
             diagnostics_summary: self.diagnostics.format_summary(),
         }
+    }
+
+
+    /// Rebuilds the current Activity's managed View hierarchy into the guest Surface.
+    /// This is the first real Activity -> Canvas -> Surface bridge; unsupported custom
+    /// drawing callbacks and unresolved layout-resource IDs are deliberately skipped.
+    pub fn render_active_activity_surface(&mut self) -> Result<bool, String> {
+        let Some(activity)=self.active_activity_obj else{return Ok(false)};
+        let root=self.heap.get_instance_field(activity,"mContentView")
+            .map_err(|e|format!("Activity content lookup failed: {:?}",e))?;
+        let Some(root_id)=root.as_object() else{return Ok(false)};
+        self.surface.clear(0xff000000);
+        let width=self.surface.width as f32;let height=self.surface.height as f32;
+        let mut canvas=Canvas::new(&mut self.surface);
+        fn draw(heap:&ManagedHeap,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
+            if depth>128||!seen.insert(id){return Ok(());}
+            let field=|name:&str|heap.get_instance_field(id,name).map_err(|e|format!("View field {} read failed: {:?}",name,e));
+            let visibility=field("mVisibility")?.as_int();if visibility!=0{return Ok(());}
+            let bg=field("mBackgroundColor")?.as_int() as u32;
+            if bg!=0{let mut p=Paint::new();p.color=bg;p.style=PaintStyle::Fill;canvas.draw_rect(bounds,&p);}
+            let text_value=field("mText")?;
+            if let Some(text_id)=text_value.as_object(){
+                if let Ok(text)=heap.get_string(text_id){
+                    let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;
+                    p.color=if color==0{0xff000000}else{color};
+                    let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};
+                    let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;
+                    let text_width=text.chars().count()as f32*p.text_size*6.0/7.0;
+                    canvas.draw_text(text,bounds.left+(bounds.width()-text_width).max(0.0)*0.5,baseline,&p);
+                }
+            }
+            let count=field("mChildCount")?.as_int().clamp(0,4096)as usize;
+            if count==0{return Ok(());}
+            let orientation=field("mOrientation")?.as_int();
+            let vertical=orientation!=0;
+            let segment=if vertical{bounds.height()/count as f32}else{bounds.width()/count as f32};
+            for index in 0..count{
+                let child=field(&format!("mChild{}",index))?;
+                let Some(child_id)=child.as_object()else{continue};
+                let child_bounds=if vertical{RectF::new(bounds.left,bounds.top+index as f32*segment,bounds.right,bounds.top+(index+1)as f32*segment)}
+                    else{RectF::new(bounds.left+index as f32*segment,bounds.top,bounds.left+(index+1)as f32*segment,bounds.bottom)};
+                draw(heap,canvas,child_id,child_bounds,depth+1,seen)?;
+            }
+            Ok(())
+        }
+        draw(&self.heap,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
+        Ok(true)
     }
 
     /// Pumps queued Android touch events on the host display-link cadence.
