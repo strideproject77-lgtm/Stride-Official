@@ -226,6 +226,45 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             if resourceStatus == 0 { onLog("[INFO] Android resource table decoded") }
             else { onLog("[WARN] Resource table decode unavailable (status \(resourceStatus)); literal UI text remains available") }
         }
+        if !resourceTableData.isEmpty {
+            let fileCount = stride_runtime_resource_file_count(runtime)
+            var decodedImages = 0
+            for index in 0..<min(fileCount, 4096) {
+                var resourceID: UInt32 = 0
+                var pathBuffer = [UInt8](repeating: 0, count: 1024)
+                let pathLength = pathBuffer.withUnsafeMutableBufferPointer { buffer in
+                    stride_runtime_resource_file_entry(runtime, index, &resourceID, buffer.baseAddress, buffer.count)
+                }
+                guard pathLength > 1, pathLength <= pathBuffer.count,
+                      let path = String(bytes: pathBuffer.prefix(pathLength - 1), encoding: .utf8),
+                      let entry = archive.first(where: { $0.path == path }) else { continue }
+                var encoded = Data()
+                _ = try archive.extract(entry) { encoded.append($0) }
+                guard let image = UIImage(data: encoded), let cgImage = image.cgImage else { continue }
+                let width = cgImage.width, height = cgImage.height
+                guard width > 0, height > 0, width * height <= 4_194_304 else { continue }
+                var rgba = [UInt8](repeating: 0, count: width * height * 4)
+                let rendered = rgba.withUnsafeMutableBytes { raw -> Bool in
+                    guard let context = CGContext(data: raw.baseAddress, width: width, height: height,
+                        bitsPerComponent: 8, bytesPerRow: width * 4,
+                        space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
+                    context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+                    return true
+                }
+                guard rendered else { continue }
+                var argb = [UInt32](repeating: 0, count: width * height)
+                for pixel in 0..<(width * height) {
+                    let p = pixel * 4
+                    argb[pixel] = (UInt32(rgba[p + 3]) << 24) | (UInt32(rgba[p]) << 16) | (UInt32(rgba[p + 1]) << 8) | UInt32(rgba[p + 2])
+                }
+                let status = argb.withUnsafeBufferPointer { buffer in
+                    stride_runtime_set_resource_image(runtime, resourceID, UInt32(width), UInt32(height), buffer.baseAddress, buffer.count)
+                }
+                if status == 0 { decodedImages += 1 }
+            }
+            onLog("[INFO] Decoded \(decodedImages) Android image resources")
+        }
         var runtimeOwnershipTransferred = false
         defer {
             if !runtimeOwnershipTransferred {
