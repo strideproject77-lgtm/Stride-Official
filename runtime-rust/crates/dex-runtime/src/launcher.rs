@@ -68,10 +68,12 @@ pub struct AndroidRuntime {
     pub service_manager: ServiceManager,
     pub telemetry: PerformanceTelemetry,
     pub resources: ResourceCatalog,
+    pub image_assets: std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,
 }
 
 impl AndroidRuntime {
     pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{self.resources=ResourceCatalog::parse(data)?;Ok(())}
+    pub fn set_resource_image(&mut self,id:u32,width:u32,height:u32,pixels:&[u32])->Result<(),String>{let count=(width as usize).checked_mul(height as usize).ok_or("image dimensions overflow")?;if width==0||height==0||count>16_777_216||pixels.len()!=count{return Err("invalid decoded image dimensions".into());}self.image_assets.insert(id,(width,height,pixels.to_vec()));Ok(())}
 
     /// Creates a new Android runtime environment.
     pub fn new(package_name: &str) -> Self {
@@ -98,6 +100,7 @@ impl AndroidRuntime {
             service_manager: ServiceManager::new(),
             telemetry: PerformanceTelemetry::default(),
             resources: ResourceCatalog::default(),
+            image_assets: std::collections::HashMap::new(),
         }
     }
 
@@ -770,7 +773,7 @@ impl AndroidRuntime {
         self.surface.clear(0xff000000);
         let width=self.surface.width as f32;let height=self.surface.height as f32;
         let mut canvas=Canvas::new(&mut self.surface);
-        fn draw(heap:&ManagedHeap,resources:&ResourceCatalog,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
+        fn draw(heap:&ManagedHeap,resources:&ResourceCatalog,images:&std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
             if depth>128||!seen.insert(id){return Ok(());}
             let field=|name:&str|heap.get_instance_field(id,name).map_err(|e|format!("View field {} read failed: {:?}",name,e));
             let visibility=field("mVisibility")?.as_int();if visibility!=0{return Ok(());}
@@ -790,6 +793,10 @@ impl AndroidRuntime {
             } else if text_resource!=0 {
                 if let Some(text)=resources.string(text_resource){let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;p.color=if color==0{0xff000000}else{color};let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;canvas.draw_text(text,bounds.left+2.0,baseline,&p);}
             }
+            let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
+            if image_id!=0{if let Some((iw,ih,pixels))=resources_image_placeholder(image_id){let _=(iw,ih,pixels);}}
+            let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
+            if let Some((iw,ih,pixels))=images.get(&image_id){canvas.draw_image_argb(pixels,*iw,*ih,bounds.left as i32,bounds.top as i32);}
             let bg_resource=field("mBackgroundResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
             if bg_resource!=0{if let Some(color)=resources.color(bg_resource){let mut p=Paint::new();p.color=color;canvas.draw_rect(bounds,&p);}}
             let count=field("mChildCount")?.as_int().clamp(0,4096)as usize;
@@ -818,12 +825,12 @@ impl AndroidRuntime {
                 } else {
                     RectF::new(cursor+ml,bounds.top+mt,cursor+extent-mr,(bounds.bottom-mb).max(bounds.top+mt))
                 };
-                draw(heap,resources,canvas,child_id,child_bounds,depth+1,seen)?;
+                draw(heap,resources,images,canvas,child_id,child_bounds,depth+1,seen)?;
                 cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
             }
             Ok(())
         }
-        draw(&self.heap,&self.resources,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
+        draw(&self.heap,&self.resources,&self.image_assets,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
         Ok(true)
     }
 

@@ -61,5 +61,6 @@ impl ResourceCatalog {
  pub fn string(&self,id:u32)->Option<&str>{self.strings.get(&id).map(String::as_str)}
  pub fn color(&self,id:u32)->Option<u32>{self.colors.get(&id).copied()}
  pub fn file(&self,id:u32)->Option<&str>{self.files.get(&id).map(String::as_str)}
+ pub fn file_entries(&self)->Vec<(u32,String)>{self.files.iter().map(|(id,path)|(*id,path.clone())).collect()}
 }
 #[cfg(test)]mod tests{use super::*;#[test]fn rejects_truncated_table(){assert!(ResourceCatalog::parse(&[2,0,12,0,12,0,0,0]).is_err());}}

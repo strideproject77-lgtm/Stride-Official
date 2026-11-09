@@ -155,4 +155,4 @@ void stride_runtime_destroy(AndroidRuntime *runtime);
 
 int32_t stride_runtime_copy_framebuffer(const AndroidRuntime *runtime, uint32_t *out_width, uint32_t *out_height, uint32_t *out_pixels, size_t capacity_pixels);
 
-int32_t stride_runtime_load_resource_table(AndroidRuntime *runtime, const uint8_t *data, size_t len);
+int32_t stride_runtime_load_resource_table(AndroidRuntime *runtime, const uint8_t *data, size_t len);\nsize_t stride_runtime_resource_file_count(const AndroidRuntime *runtime);\nsize_t stride_runtime_resource_file_entry(const AndroidRuntime *runtime, size_t index, uint32_t *out_id, uint8_t *out_path, size_t capacity);\nint32_t stride_runtime_set_resource_image(AndroidRuntime *runtime, uint32_t id, uint32_t width, uint32_t height, const uint32_t *pixels, size_t count);

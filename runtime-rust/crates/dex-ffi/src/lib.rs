@@ -89,6 +89,25 @@ pub unsafe extern "C" fn stride_runtime_create(package_name: *const c_char) -> *
 }
 
 
+
+/// Copy resource file entries as packed (id, UTF-8 path) records.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_resource_file_count(runtime:*const AndroidRuntime)->usize{
+ if runtime.is_null(){return 0;} unsafe{(&*runtime).resources.file_entries().len()}
+}
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_resource_file_entry(runtime:*const AndroidRuntime,index:usize,out_id:*mut u32,out_path:*mut u8,capacity:usize)->usize{
+ if runtime.is_null()||out_id.is_null(){return 0;}let entries=unsafe{(&*runtime).resources.file_entries()};
+ let Some((id,path))=entries.get(index)else{return 0};let bytes=path.as_bytes();unsafe{out_id.write(*id)};
+ if !out_path.is_null()&&capacity>0{let n=bytes.len().min(capacity-1);unsafe{std::ptr::copy_nonoverlapping(bytes.as_ptr(),out_path,n);out_path.add(n).write(0);}}
+ bytes.len()+1
+}
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_set_resource_image(runtime:*mut AndroidRuntime,id:u32,width:u32,height:u32,pixels:*const u32,count:usize)->i32{
+ if runtime.is_null()||pixels.is_null()||count>16_777_216{return 1;}let data=unsafe{slice::from_raw_parts(pixels,count)};
+ match catch_unwind(AssertUnwindSafe(||unsafe{(&mut *runtime).set_resource_image(id,width,height,data)})){Ok(Ok(()))=>0,Ok(Err(_))=>2,Err(_)=>3}
+}
+
 /// Loads Android resources.arsc into the runtime resource catalog.
 #[no_mangle]
 pub unsafe extern "C" fn stride_runtime_load_resource_table(runtime:*mut AndroidRuntime,data:*const u8,len:usize)->i32{
