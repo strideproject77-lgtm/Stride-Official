@@ -281,7 +281,17 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         default: lifecycleDescription = "Destroyed"
         }
 
-        onLog("[INFO] Runtime returned status=\(report.status_code), lifecycle=\(report.lifecycle_state), classes=\(report.total_classes_loaded), instructions=\(report.instructions_executed), missing APIs=\(report.missing_apis_count)")
+        let runtimeStatusDescription: String
+        switch report.status_code {
+        case 0: runtimeStatusDescription = "GuestRuntimeActive"
+        case 1: runtimeStatusDescription = "FinishedNormally"
+        case 2: runtimeStatusDescription = "UncaughtException"
+        case 3: runtimeStatusDescription = "ActivityNotFound"
+        case 4: runtimeStatusDescription = "ManifestError"
+        case 5: runtimeStatusDescription = "LifecycleReady (guest loop inactive)"
+        default: runtimeStatusDescription = "UnknownRuntimeStatus"
+        }
+        onLog("[INFO] Runtime returned status=\(runtimeStatusDescription)[\(report.status_code)], lifecycle=\(lifecycleDescription), classes=\(report.total_classes_loaded), instructions=\(report.instructions_executed), missing APIs=\(report.missing_apis_count)")
         if report.status_code == 2 {
             onLog("[CRASH] Runtime reported an uncaught Activity lifecycle exception")
             throw RuntimeExecutionError.uncaughtException("Runtime reported uncaught exception during Activity lifecycle")
