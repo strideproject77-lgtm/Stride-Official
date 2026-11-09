@@ -42,6 +42,13 @@ fn register_view_constructor(
         _env.set_object_field(view, "mTextSize", Value::Float(14.0))?;
         _env.set_object_field(view, "mOrientation", Value::Int(1))?;
         _env.set_object_field(view, "mImageResourceId", Value::Int(0))?;
+        _env.set_object_field(view, "mLayoutWidth", Value::Int(-1))?;
+        _env.set_object_field(view, "mLayoutHeight", Value::Int(-2))?;
+        _env.set_object_field(view, "mLayoutWeight", Value::Float(0.0))?;
+        _env.set_object_field(view, "mMarginLeft", Value::Int(0))?;
+        _env.set_object_field(view, "mMarginTop", Value::Int(0))?;
+        _env.set_object_field(view, "mMarginRight", Value::Int(0))?;
+        _env.set_object_field(view, "mMarginBottom", Value::Int(0))?;
         Ok(None)
     });
 }
@@ -145,6 +152,23 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         let id=receiver(args)?;let orientation=args.get(1).map(Value::as_int).unwrap_or(1);
         env.set_object_field(id,"mOrientation",Value::Int(if orientation==0{0}else{1}))?;
         env.set_object_field(id,"mNeedsLayout",Value::Int(1))?;Ok(None)
+    });
+
+    jni.register("Landroid/view/View;","setLayoutParams","(Landroid/view/ViewGroup$LayoutParams;)V",|env,args|{
+        let view=receiver(args)?;let Some(params)=args.get(1).and_then(Value::as_object)else{return Err("setLayoutParams received null".into())};
+        for (src,dst) in [("width","mLayoutWidth"),("height","mLayoutHeight"),("weight","mLayoutWeight"),("leftMargin","mMarginLeft"),("topMargin","mMarginTop"),("rightMargin","mMarginRight"),("bottomMargin","mMarginBottom")] {
+            if let Ok(value)=env.get_object_field(params,src){env.set_object_field(view,dst,value)?;}
+        }
+        env.set_object_field(view,"mNeedsLayout",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/view/ViewGroup$LayoutParams;","<init>","(II)V",|env,args|{
+        let params=receiver(args)?;env.set_object_field(params,"width",Value::Int(args.get(1).map(Value::as_int).unwrap_or(-1)))?;
+        env.set_object_field(params,"height",Value::Int(args.get(2).map(Value::as_int).unwrap_or(-2)))?;Ok(None)
+    });
+    jni.register("Landroid/widget/LinearLayout$LayoutParams;","<init>","(IIF)V",|env,args|{
+        let params=receiver(args)?;env.set_object_field(params,"width",Value::Int(args.get(1).map(Value::as_int).unwrap_or(-1)))?;
+        env.set_object_field(params,"height",Value::Int(args.get(2).map(Value::as_int).unwrap_or(-2)))?;
+        let weight=args.get(3).map(Value::as_float).unwrap_or(0.0);env.set_object_field(params,"weight",Value::Float(if weight.is_finite(){weight.max(0.0)}else{0.0}))?;Ok(None)
     });
     jni.register("Landroid/view/View;", "getWidth", "()I", |env, args| {
         let id = receiver(args)?;
