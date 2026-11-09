@@ -67,6 +67,16 @@ final class APKLibraryStore: ObservableObject {
         }
     }
 
+    func deletePackage(_ package: ImportedAPK) throws {
+        guard package.fileURL.pathExtension.lowercased() == "apk" else {
+            throw APKLibraryImportError.unreadableSource
+        }
+        try fileManager.removeItem(at: package.fileURL)
+        packages.removeAll { $0.id == package.id || $0.fileURL == package.fileURL }
+        StrideDiagnostics.shared.record(.info, stage: "LIBRARY", code: "APK_DELETED",
+            "Removed \(package.displayName) from the local APK library")
+    }
+
     private func copyPackageToLibrary(from sourceURL: URL) throws -> URL {
         guard sourceURL.pathExtension.lowercased() == "apk" else {
             StrideDiagnostics.shared.record(.warning, stage: "IMPORT", code: "UNSUPPORTED_FILE",
