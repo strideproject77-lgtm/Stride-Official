@@ -25,6 +25,7 @@ pub mod package;
 pub mod paint;
 pub mod telemetry;
 pub mod view;
+pub mod layout;
 #[cfg(test)]
 pub mod compatibility_tests;
 
@@ -45,6 +46,7 @@ pub use graphics::{
     ScreenOrientation, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL, KEYCODE_BACK,
 };
 pub use canvas::{Canvas, Paint, PaintStyle, RectF, Path};
+pub use layout::{inflate_layout_tree, InflateError, InflatedView, InflatedViewKind, LayoutDimension};
 pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 pub use stride_axml::{parse_manifest, parse_layout_tree, XmlNode};
 pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
