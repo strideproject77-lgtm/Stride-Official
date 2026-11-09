@@ -724,7 +724,7 @@ impl<'a> ArtVm<'a> {
                         pc += 3;
                     }
                 }
-                0x1f..=0x23 if op >= 0x2d => { // comparisons: cmpl-float, cmpg-float, cmpl-double, cmpg-double, cmp-long
+                0x2d..=0x31 => { // comparisons: cmpl-float, cmpg-float, cmpl-double, cmpg-double, cmp-long
                     match op {
                         0x2d => { // cmpl-float
                             let second = code_units[pc + 1];
@@ -1691,6 +1691,34 @@ mod tests {
         assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
         drop(vm);
         assert_eq!(static_fields.get(&("Ltest/Owner;".into(), "score".into())), Some(&Value::Int(7)));
+    }
+
+    #[test]
+    fn art_vm_executes_double_comparison_opcodes() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u16,
+            MethodCode {
+                class_descriptor: "Ltest/DoubleCompare;".into(),
+                name: "compare".into(),
+                prototype: "()I".into(),
+                code_units: vec![
+                    0x0018, 0x0000, 0x0000, 0x0000, 0x3ff0, // v0 = 1.0
+                    0x0218, 0x0000, 0x0000, 0x0000, 0x4000, // v2 = 2.0
+                    0x042f, 0x0200, // cmpl-double v4, v0, v2
+                    0x040f, // return v4
+                ],
+                registers_size: 5,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        let report = vm.execute_method(1, &[], 32).expect("cmpl-double should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(-1)));
     }
 
 }
