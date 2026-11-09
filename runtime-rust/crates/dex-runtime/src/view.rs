@@ -134,6 +134,15 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         let id=receiver(args)?;env.set_object_field(id,"mBackgroundResourceId",Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
     });
+    jni.register("Landroid/widget/TextView;","getText","()Ljava/lang/CharSequence;",|env,args|{
+        let id=receiver(args)?;Ok(Some(env.get_object_field(id,"mText")?))
+    });
+    jni.register("Landroid/widget/TextView;","getCurrentTextColor","()I",|env,args|{
+        let id=receiver(args)?;Ok(Some(env.get_object_field(id,"mTextColor")?))
+    });
+    jni.register("Landroid/widget/TextView;","getTextSize","()F",|env,args|{
+        let id=receiver(args)?;Ok(Some(env.get_object_field(id,"mTextSize")?))
+    });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;)V",|env,args|{
         let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
@@ -458,6 +467,32 @@ mod tests {
         assert_eq!(heap.get_instance_field(text, "mContext").unwrap(), Value::Object(activity));
         assert_eq!(heap.get_instance_field(text, "mTextColor").unwrap(), Value::Int(0xff000000u32 as i32));
         assert_eq!(heap.get_instance_field(text, "mNeedsDraw").unwrap(), Value::Int(1));
+    }
+
+    #[test]
+    fn text_view_text_and_style_getters_return_managed_state() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let view = heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        let text = heap.allocate_string("Tap Trail").unwrap();
+
+        invoke(&jni, &mut heap, "Landroid/widget/TextView;", "<init>",
+            "(Landroid/content/Context;)V", &[Value::Object(view), Value::Null]).unwrap();
+        invoke(&jni, &mut heap, "Landroid/widget/TextView;", "setText",
+            "(Ljava/lang/CharSequence;)V", &[Value::Object(view), Value::Object(text)]).unwrap();
+        invoke(&jni, &mut heap, "Landroid/widget/TextView;", "setTextColor",
+            "(I)V", &[Value::Object(view), Value::Int(0xff12ab34u32 as i32)]).unwrap();
+        invoke(&jni, &mut heap, "Landroid/widget/TextView;", "setTextSize",
+            "(F)V", &[Value::Object(view), Value::Float(22.0)]).unwrap();
+
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getText",
+            "()Ljava/lang/CharSequence;", &[Value::Object(view)]).unwrap(),
+            Some(Value::Object(text)));
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getCurrentTextColor",
+            "()I", &[Value::Object(view)]).unwrap(), Some(Value::Int(0xff12ab34u32 as i32)));
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getTextSize",
+            "()F", &[Value::Object(view)]).unwrap(), Some(Value::Float(22.0)));
     }
 
     #[test]
