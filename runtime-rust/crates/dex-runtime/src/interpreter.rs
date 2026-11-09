@@ -1628,4 +1628,71 @@ mod tests {
         assert!(report.contains("INTERPRETER_EXECUTION_FAILED"), "{report}");
     }
 
+    #[test]
+    fn resolves_new_instance_type_index_through_type_ids() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u16,
+            MethodCode {
+                class_descriptor: "Ltest/Factory;".into(),
+                name: "create".into(),
+                prototype: "()Ljava/lang/Object;".into(),
+                code_units: vec![0x0022, 0x0000, 0x0011],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let types = vec!["Ltest/Allocated;".to_string()];
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        let report = vm.execute_method(1, &[], 16).expect("new-instance should execute");
+        let Value::Object(object_id) = match report.stop_reason {
+            ExecutionStopReason::ReturnedValue(value) => value,
+            other => panic!("unexpected execution result: {:?}", other),
+        } else {
+            panic!("new-instance did not return an object");
+        };
+        assert_eq!(heap.get(object_id).unwrap().class_descriptor(), "Ltest/Allocated;");
+    }
+
+    #[test]
+    fn static_field_operands_resolve_owner_and_name_from_field_ids() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u16,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "write".into(),
+                prototype: "()V".into(),
+                code_units: vec![0x7012, 0x0067, 0x0000, 0x000e],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let types = Vec::new();
+        let fields = vec![FieldReference {
+            field_index: 0,
+            class_descriptor: "Ltest/Owner;".into(),
+            name: "score".into(),
+            field_type: "I".into(),
+        }];
+        let mut static_fields = HashMap::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_static_fields(&mut static_fields);
+        let report = vm.execute_method(1, &[], 16).expect("sput should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+        drop(vm);
+        assert_eq!(static_fields.get(&("Ltest/Owner;".into(), "score".into())), Some(&Value::Int(7)));
+    }
+
 }
