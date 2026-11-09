@@ -111,6 +111,13 @@ impl AndroidRuntime {
         // transitions; this bridge safely accepts the Activity's super call.
         jni.register(
             "Landroid/app/Activity;",
+            "<init>",
+            "()V",
+            |_env, _args| Ok(None),
+        );
+
+        jni.register(
+            "Landroid/app/Activity;",
             "onCreate",
             "(Landroid/os/Bundle;)V",
             |_env, _args| Ok(None),
@@ -504,6 +511,83 @@ impl AndroidRuntime {
 
         self.active_activity_obj = Some(activity_obj);
         self.active_activity_class = Some(activity_descriptor.clone());
+
+        // Android constructs an Activity before dispatching onCreate. Java field
+        // initializers live in <init>, so skipping this callback leaves app state null.
+        if let Some(constructor_id) = self.class_loader.find_method(&activity_descriptor, "<init>", "()V") {
+            if let Ok(constructor_id16) = u16::try_from(constructor_id) {
+                let method_map = self.class_loader.export_method_codes();
+                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+                let dex_strings = dex_metadata.as_ref()
+                    .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+                let mut vm = ArtVm::new(
+                    &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                    &mut self.jni, &method_map, dex_strings,
+                );
+                vm.attach_diagnostics(&self.diagnostics);
+                vm.attach_static_fields(&mut self.static_fields);
+                if let Some(inventory) = dex_metadata.as_ref() {
+                    vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                    vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                }
+                match vm.execute_method(constructor_id16, &[Value::Object(activity_obj)], step_budget) {
+                    Ok(report) => match report.stop_reason {
+                        ExecutionStopReason::UncaughtException(ex) => {
+                            self.diagnostics.record_detailed(
+                                DiagnosticSeverity::RuntimeError, "Lifecycle", "ACTIVITY_CONSTRUCTOR_FAILED",
+                                "Activity constructor terminated with an uncaught exception",
+                                Some(&format!("{:?}", ex)), None,
+                            );
+                            return LaunchReport {
+                                package_name: self.environment.package_name.clone(),
+                                launcher_activity: activity_descriptor,
+                                lifecycle_state: ActivityLifecycleState::NotStarted,
+                                total_classes_loaded: self.class_loader.classes.len(),
+                                instructions_executed: report.steps_executed,
+                                status: LaunchStatus::UncaughtException {
+                                    class: ex.class_descriptor, message: ex.message,
+                                },
+                                diagnostics_summary: self.diagnostics.format_summary(),
+                            };
+                        }
+                        ExecutionStopReason::StepLimitExceeded => {
+                            return LaunchReport {
+                                package_name: self.environment.package_name.clone(),
+                                launcher_activity: activity_descriptor,
+                                lifecycle_state: ActivityLifecycleState::NotStarted,
+                                total_classes_loaded: self.class_loader.classes.len(),
+                                instructions_executed: report.steps_executed,
+                                status: LaunchStatus::UncaughtException {
+                                    class: "InstructionBudgetExceeded".into(),
+                                    message: Some("Activity constructor exceeded the instruction budget".into()),
+                                },
+                                diagnostics_summary: self.diagnostics.format_summary(),
+                            };
+                        }
+                        _ => {}
+                    },
+                    Err(error) => {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError, "Lifecycle", "ACTIVITY_CONSTRUCTOR_INTERPRETER_ERROR",
+                            "ART interpreter failed while executing the Activity constructor",
+                            Some(&error), None,
+                        );
+                        return LaunchReport {
+                            package_name: self.environment.package_name.clone(),
+                            launcher_activity: activity_descriptor,
+                            lifecycle_state: ActivityLifecycleState::NotStarted,
+                            total_classes_loaded: self.class_loader.classes.len(),
+                            instructions_executed: 0,
+                            status: LaunchStatus::UncaughtException {
+                                class: "ConstructorError".into(), message: Some(error),
+                            },
+                            diagnostics_summary: self.diagnostics.format_summary(),
+                        };
+                    }
+                }
+            }
+        }
+
         self.environment.transition_activity(&activity_descriptor, ActivityLifecycleState::Created);
         self.diagnostics.record(DiagnosticSeverity::Info, "Lifecycle", "Activity created", Some(&activity_descriptor));
 
