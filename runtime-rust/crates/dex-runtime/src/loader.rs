@@ -291,6 +291,7 @@ impl AppClassLoader {
         hierarchy: &mut ClassHierarchy,
         monitors: &mut MonitorTable,
         jni: &mut JniNativeRegistry,
+        static_fields: &mut HashMap<(String, String), Value>,
         strings: &[String],
     ) -> Result<(), String> {
         let state = self.classes.get(class_descriptor).map(|c| c.init_state);
@@ -307,7 +308,7 @@ impl AppClassLoader {
         // Initialize superclass first
         let super_desc = self.classes.get(class_descriptor).and_then(|c| c.super_descriptor.clone());
         if let Some(ref superclass) = super_desc {
-            if let Err(error) = self.initialize_class(superclass, heap, hierarchy, monitors, jni, strings) {
+            if let Err(error) = self.initialize_class(superclass, heap, hierarchy, monitors, jni, static_fields, strings) {
                 if let Some(class) = self.classes.get_mut(class_descriptor) {
                     class.init_state = ClassInitState::Error;
                 }
@@ -325,7 +326,15 @@ impl AppClassLoader {
                 format!("Class initializer method ID {} exceeds the interpreter's 16-bit limit for {}", mid, class_descriptor)
             })?;
             let method_map = self.export_method_codes();
-            let mut vm = ArtVm::new(heap, hierarchy, monitors, jni, &method_map, strings);
+            let metadata = self.dex_inventories.first().cloned();
+            let dex_strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(strings);
+            let method_lookup = self.method_lookup.clone();
+            let mut vm = ArtVm::new(heap, hierarchy, monitors, jni, &method_map, dex_strings);
+            if let Some(inventory) = metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &method_lookup);
+            }
+            vm.attach_static_fields(static_fields);
             let report = vm.execute_method(id16, &[], 50_000)?;
             match report.stop_reason {
                 ExecutionStopReason::UncaughtException(ex) => {
