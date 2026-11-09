@@ -257,3 +257,122 @@ Latest branch HEAD at this handoff update: `7abf5e92ceaba89962d26d76737508240697
 
 ### Accuracy boundary
 The latest green Rust workflow confirms the current Rust test suite passes on the tested commit. It does **not** prove that the keyboard bridge, TextWatcher, touch dispatch, multi-DEX behavior, or a real calculator APK works end-to-end on an iPhone. The IPA build is still queued, and device verification remains pending.
+
+
+---
+
+# Full development handoff — all repository updates from 2026-11-08 through 2026-11-09
+
+This section is the consolidated day-to-day record, not just the Phase 2 subset. It was compiled from the development-branch commit history for Nov 8 and Nov 9. The commit history contains many small implementation, regression-fixture, compiler-fix, and integration commits; related commits are grouped below so the next session can resume without overlooking work outside Phase 2.
+
+## Branch, scope, and current revision
+- Repository: https://github.com/strideproject77-lgtm/Stride-Official
+- Active branch: `feat/dex-class-method-loader`.
+- Stable branch: `main`, still unchanged by this work. The observed main HEAD remains `6aa5594c2719b19a33565a3278ce2937ad1e15c3`.
+- Development HEAD when this handoff was written: `0b29780bfb55474e111907ab5eede9f723b6e29d`.
+- Keep all new implementation and bug fixes on the development branch. Do not merge PR #1 until checks pass and the resulting IPA has also been physically checked on the iPhone.
+- User's preferred verification cadence: batch the remaining implementation, then do one consolidated final test/IPA checkpoint. Do not cancel an already queued IPA workflow; do not launch duplicate builds just to try to clear the queue.
+
+## Nov 8 — runtime framework and app-execution groundwork
+
+### Runtime and Android framework
+- Added a managed Android View/Activity content bridge, including stateful View properties and Activity content APIs.
+- Added Activity lifecycle superclass bridges and execution of `onStart`; retained the AndroidRuntime handle after launch so later event/input calls can continue against the same runtime.
+- Persisted app static fields across lifecycle interpreter calls.
+- Connected the Activity `onCreate` framework super call and resolved DEX invoke references before ART dispatch.
+- Added a real Pocket Ridge DEX loader regression fixture and a real Pocket Ridge Android binary-manifest (AXML) regression fixture. These are controlled loader/parser fixtures, not a claim that Pocket Ridge runs on-device.
+- Improved native-library loading behavior to continue best-effort APK launch after a native-library load failure, while reporting that native loading failed or was only planned/inspected rather than implying the library executed.
+- Added Android Paint framework bridge and corrected the default Paint color fixture.
+- Earlier Phase 3 groundwork in this period also includes ActivityManager task/backstack lifecycle handling, ServiceManager start/stop/foreground promotion, and XAPK/split-APK/OBB package container handling.
+
+### DEX, AXML, and runtime diagnostics
+- Fixed DEX `goto/10t` branch-offset decoding.
+- Improved AXML string-pool parsing, UTF-16 length handling, header offsets, node bounds, and parser regression fixtures.
+- Added classified runtime faults and actionable launch diagnostics, covering archive/native failures, DEX loading, interpreter faults, unresolved methods, and lifecycle failures.
+- Added persistent, batched per-session diagnostics with event identifiers, archive rotation, detailed runtime checkpoints, and export of the complete ART/runtime report after launch.
+- Exposed diagnostics export through C FFI and the Swift session-log UI; corrected C header declarations, header guards, Swift interpolation, Codable event identifiers, and log line breaks.
+- Added per-APK crash reports and categorized runtime diagnostics.
+- Added a real-manifest/DEX regression path and more precise loader failure messages. Diagnostic output should distinguish static inspection, metadata loading, lifecycle readiness, and active guest execution.
+
+### Graphics, native and compatibility subsystems
+- Added Android Canvas 2D rasterization with Paint, RectF, Path, matrix transforms, and Surface output; added Android orientation configuration handling and Surface resizing.
+- Added Bionic libc/libm symbol emulation for the implemented common symbols, plus a native shared-library linker that inspects ELF shared libraries, DT_NEEDED dependencies, dynamic symbols and JNI bindings; connected APK ARM64 `.so` extraction/loading through the Swift execution backend.
+- Important boundary: this is a bounded initial symbol/runtime layer, not full Bionic, complete ELF relocation support, or proof that arbitrary native libraries execute correctly.
+- Added EGL/OpenGL ES initial state/context/window-surface handling, viewport/clear/draw tracking and buffer presentation into Stride's RGBA Surface.
+- Added ActivityManager backstack and ServiceManager integration, XAPK split assembly and OBB parsing.
+- Added end-to-end compatibility integration coverage that exercises the current orchestration for selected Bionic symbols, SharedPreferences, Canvas rasterization, EGL/GLES clear/swap, MotionEvent/InputQueue, ServiceManager lifecycle, FPS telemetry and ANR watchdog. This verifies those test paths, not arbitrary APK compatibility.
+- Added performance telemetry: rolling FPS estimates, 1% low frame-time/FPS calculation, heap allocation reporting, frame recording FFI, and a 5-second ANR watchdog; connected available metrics to the Swift execution UI.
+
+### Diagnostics and test/CI corrections
+- Fixed Swift interpolation in multi-DEX gap and runtime log diagnostics.
+- Corrected diagnostic export assertions and stable DEX failure wording.
+- Corrected a Rust `goto/10t` decoder bug and AXML fixture/offset issues.
+- Fixed compatibility-test APIs/borrows and ensured ActivityManager/ServiceManager use the VM-owned heap.
+- Fixed the OpenGL color-buffer FFI flag and SharedPreferences `commit()`/`apply()` API bridges.
+- Restored manual-only IPA workflow behavior after temporary validation-trigger commits; the workflow policy at the time required explicitly enabling the iOS build input.
+
+## Nov 8 — user-facing iOS app, importing, execution UI and design
+- Reworked APK import to copy document-picker files safely into the app sandbox, removed duplicate import controls, improved selection reliability, added import progress/completion feedback, and moved archive inspection off the main thread with concurrency-safe result handling and cleanup for incomplete imports.
+- Improved launcher/library layout and responsive game-library home; added switchable grid/list layouts, import/delete actions, safer removal of imported APKs, and removed low-value technical APK details from launcher cards.
+- Added persistent force-execution session history and TXT log export UI, plus a dedicated black APK execution session screen and hideable live status bar.
+- Added structured launch event logs, touch-event tracing without MOVE-event spam, native-library error reporting, and explicit lifecycle-ready status wording.
+- Added selectable themes and palettes, including clean white, warm dark bronze, exact Indigo Navy, and purple hero variants; updated the selected/default theme during the day's iterations.
+- Added theme customization/accent settings and made the redesigned settings/header shortcut interactive.
+- Generated and selected Stride app icon variants, added the iOS AppIcon asset catalog and metadata, and added workflow-side icon generation/verification.
+- Corrected adaptive Android launcher icon extraction to composite foreground and background rather than stripping the original icon background; expanded launcher image discovery across resource variants.
+- Corrected document picker/package detail sheet presenter conflicts and made the package detail sheet follow the selected theme.
+- Fixed iOS 15 SwiftUI compatibility issues (kerning/letter spacing/button modifiers) and Swift compilation issues in the log-export sheet.
+- Hardened unsigned IPA workflow configuration, ARM64 executable architecture verification, and removed duplicate Rust test execution from the IPA job.
+
+## Nov 9 — execution screen interaction and device behavior
+- Added the guest Activity touch-event pump, exposed it through C FFI, connected it to the iOS display-link scheduler, and wired touch input plus frame/event pumping into the execution screen.
+- Added hit-testing and guest View click-listener dispatch, including tests for hit-testing and background rendering.
+- Added common Android Button/EditText constructors, LinearLayout/ViewGroup constructors, TextView constructors and TextView text/style getters.
+- Added MotionEvent JNI accessors needed by touch-driven APKs, removed duplicate registrations, and corrected `getActionMasked()` action masking.
+- Added ViewGroup hierarchy/recursive Activity lookup, child mutation methods, bounded Android binary XML layout-tree parsing, and a bounded layout inflater model.
+- Added ViewGroup layout and Surface background rendering, then connected the resumed Activity View tree to the Surface renderer. The guest framebuffer is bridged into SwiftUI.
+- Added weighted Android LinearLayout layout and per-edge margins/layout params, TextView/ImageView state/resource hooks, and Activity Surface rerendering after each guest event pump.
+- Added Android string/color resource lookup from `resources.arsc`, APK drawable decoding into guest image resources, and a runtime image-resource bridge; removed the temporary image placeholder.
+- Added calculator-oriented Java String and Double bridges, including both Java String substring overloads, safer return values/borrows, numeric/string JNI bridge coverage, and DEX floating-point comparison opcode dispatch fixes.
+- Added calculator display rendering regression coverage, calculator glyph pixel-decoding coverage, and corrected guest touch coordinate mapping. Native iOS system fonts were added for managed text rendering.
+- Added Activity constructor execution before `onCreate`, DEX type/field index regression coverage, preservation of DEX identifier table indices, and persistent static field/DEX metadata propagation through lifecycle callbacks.
+- Added inherited Activity Window framework method resolution and framework bridge resolution when linked ancestor classes are absent.
+- Fixed duplicate MotionEvent JNI registration, test result extraction, fixture syntax, and canvas rendering tests.
+- Added three-finger execution chrome toggle and moved its gesture into the SwiftUI gesture arena; corrected triple-tap/toggle behavior in earlier iterations, and improved execution chrome placement below the portrait notch/safe area.
+- Kept iOS auto-rotation, presented execution full-screen, and corrected orientation restoration for no-sensor/locked policies and repeated close cleanup. APK manifest screen orientation is applied to the iOS execution scene; explicit Info.plist orientation support was added.
+- Redesigned the Stride app icon in additional iterations and polished the library.
+- Added native keyboard focus and text input bridge for guest EditText (details and known limitations are in the Phase 2 section above).
+
+## Nov 9 — DEX runtime correctness, class loading and input follow-ups
+- Fixed floating-point DEX comparison dispatch and several JNI String/Double bridge issues.
+- Added Activity constructor dispatch before lifecycle callbacks and corrected class/type/field reference table handling.
+- Added DEX-local string/type/method/field reference preservation and resolution, including field operands through `field_ids`, persistent static fields and DEX metadata passed to Activity callbacks and class initializers.
+- Added runtime virtual/interface dispatch and corrected virtual-dispatch regression fixtures.
+- Corrected superclass descriptor resolution using DEX `type_idx`, parsed and linked interface declarations, resolved inherited interface default methods, and excluded private/direct/static methods from virtual override candidates.
+- Added View.OnTouchListener registration and callback dispatch for down/move/up/cancel, including managed MotionEvent values and event-consumption/click-suppression behavior.
+- Added per-method owning-DEX metadata for multi-DEX execution and switched active DEX reference tables while executing methods.
+- Added native iOS keyboard overlay/focus behavior, focused guest EditText tracking, FFI text updates, and initial TextWatcher registration/callback support.
+- Added multi-DEX and focused EditText regression tests. One test initially failed because its fixture omitted the enabled-state field; commit `7abf5e9` corrected the fixture by setting `mEnabled = 1`. The latest Rust test workflow subsequently passed.
+- Exact commit history for this date is available on the branch; the entries above consolidate the implementation themes rather than reproducing every tiny commit title.
+
+## Workflow and verification status at this handoff
+- Latest relevant Rust verification: workflow run `42618604737`, commit `7abf5e92ceaba89962d26d76737508240697d30c`; Rust runtime test job succeeded (101 runtime tests reported in the run summary).
+- The unsigned iOS IPA job in run `42618604737` was still **QUEUED** at last check. No IPA artifact from that run is confirmed until its macOS job completes and the artifact list is checked.
+- The handoff documentation update commit `0b29780bfb55474e111907ab5eede9f723b6e29d` triggered a separate push workflow `42619217671`, which was **PENDING** at last check. This is a docs-only push and must not be confused with the IPA job from run `42618604737`.
+- Workflow `42618009233` was an earlier cancelled run; do not treat it as the active IPA build.
+- Do not cancel run `42618604737` to clear the queue and do not start duplicate IPA runs while it is queued.
+- `main` remains at `6aa5594c2719b19a33565a3278ce2937ad1e15c3`; no merge has been performed.
+
+## Remaining work / explicit limitations
+1. Let the active IPA workflow finish; then inspect the macOS job and verify whether an unsigned IPA artifact was actually uploaded. Record artifact name, size, and expiry only from the completed run.
+2. Continue the multi-DEX audit: nested invocation context, class initialization, method resolver ownership, and any remaining first-DEX-only paths.
+3. Complete Android TextWatcher semantics and regression tests: `beforeTextChanged` must run before mutation, then update the text, run `onTextChanged`, then `afterTextChanged`; validate old/new text and lengths.
+4. Complete guest EditText behavior beyond direct string replacement: selection/cursor, composing text, InputConnection/IME, key events, filters and error/status handling. Current keyboard bridge is only initial text synchronization.
+5. Add explicit View.OnTouchListener tests for consumed/unconsumed events and click suppression.
+6. Continue framework coverage only against observed APK dependencies; do not infer support from constructors or static UI rendering alone.
+7. Test the real calculator APK on the iPhone: verify readable text, correct initial display, keyboard entry updates the guest app, calculator buttons invoke guest callbacks, and no built-in demo/fake calculator is displayed.
+8. Test a clean minimal Java APK and then the chosen real target APK. Record exact APK version/hash, ABI, API level, device/iOS version and observed result.
+9. Keep all fixes on `feat/dex-class-method-loader`; merge only verified passing changes to `main`.
+
+## Truthful compatibility boundary
+The commits from Nov 8–9 add substantial UI rendering, Android framework, event/input, DEX loading, JNI, graphics, native-linker, diagnostics, and telemetry groundwork. Passing unit/integration tests validate only the exercised paths. They do not establish general Android compatibility, arbitrary native library execution, complete ART behavior, or a successful real APK launch on the iPhone. Do not report a compatibility percentage based only on code volume or commit count.
