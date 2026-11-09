@@ -1177,6 +1177,67 @@ impl AndroidRuntime {
         })
     }
 
+    fn dispatch_text_watcher_callbacks(
+        &mut self,
+        view_id: u32,
+        old_text_id: u32,
+        new_text_id: u32,
+        old_length: usize,
+        new_length: usize,
+        step_budget: usize,
+    ) -> Result<(), String> {
+        let watcher_id = self.heap.get_instance_field(view_id, "mTextWatcher")
+            .ok().and_then(|value| value.as_object()).filter(|id| *id != 0);
+        let Some(watcher_id) = watcher_id else { return Ok(()) };
+        let watcher_class = self.heap.get(watcher_id)
+            .map_err(|error| format!("TextWatcher lookup failed: {:?}", error))?
+            .class_descriptor().to_owned();
+        let callbacks = [
+            ("beforeTextChanged", "(Ljava/lang/CharSequence;III)V", old_text_id, old_length, new_length),
+            ("onTextChanged", "(Ljava/lang/CharSequence;III)V", new_text_id, old_length, new_length),
+        ];
+        let resolved: Vec<_> = callbacks.iter().filter_map(|(name, proto, text_id, before, after)| {
+            self.class_loader.find_method(&watcher_class, name, proto)
+                .map(|id| (*name, id, *text_id, *before, *after))
+        }).collect();
+        if resolved.is_empty() { return Ok(()) }
+        let method_map = self.class_loader.export_method_codes();
+        let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+        let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let mut vm = ArtVm::new(
+            &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+            &mut self.jni, &method_map, dex_strings,
+        );
+        vm.attach_diagnostics(&self.diagnostics);
+        vm.attach_static_fields(&mut self.static_fields);
+        vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+        if let Some(inventory) = dex_metadata.as_ref() {
+            vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+            vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+        }
+        for (name, id, text_id, before, after) in resolved {
+            let method_id = u16::try_from(id)
+                .map_err(|_| format!("TextWatcher.{} method ID exceeds interpreter limit", name))?;
+            let args = [
+                Value::Object(watcher_id),
+                Value::Object(text_id),
+                Value::Int(0),
+                Value::Int(before.min(i32::MAX as usize) as i32),
+                Value::Int(after.min(i32::MAX as usize) as i32),
+            ];
+            let report = vm.execute_method(method_id, &args, step_budget.max(1))
+                .map_err(|error| format!("TextWatcher.{} failed: {}", name, error))?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) =>
+                    return Err(format!("TextWatcher.{} threw {}: {:?}", name, exception.class_descriptor, exception.message)),
+                ExecutionStopReason::StepLimitExceeded =>
+                    return Err(format!("TextWatcher.{} exceeded its instruction budget", name)),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// Replaces the text in the EditText selected by the most recent guest tap.
     /// Text is stored in the guest heap and the next FFI render publishes the new frame.
     pub fn set_focused_edit_text(&mut self, text: &str) -> Result<bool, String> {
@@ -1184,6 +1245,14 @@ impl AndroidRuntime {
             return Err("Guest text input exceeds the 1 MiB safety limit".to_string());
         }
         let Some(view_id) = self.focused_edit_text else { return Ok(false) };
+        let previous_value = self.heap.get_instance_field(view_id, "mText").unwrap_or(Value::Null);
+        let old_text = previous_value.as_object()
+            .and_then(|id| self.heap.get_string(id).ok().map(str::to_owned))
+            .unwrap_or_default();
+        let old_text_id = previous_value.as_object()
+            .filter(|id| *id != 0)
+            .unwrap_or(self.heap.allocate_string(&old_text)
+                .map_err(|error| format!("Previous EditText string allocation failed: {:?}", error))?);
         let string_id = self.heap.allocate_string(text)
             .map_err(|error| format!("Guest input string allocation failed: {:?}", error))?;
         self.heap.set_instance_field(view_id, "mText", Value::Object(string_id))
@@ -1196,6 +1265,10 @@ impl AndroidRuntime {
             .map_err(|error| format!("EditText selection update failed: {:?}", error))?;
         self.heap.set_instance_field(view_id, "mNeedsDraw", Value::Int(1))
             .map_err(|error| format!("EditText redraw flag update failed: {:?}", error))?;
+        self.dispatch_text_watcher_callbacks(
+            view_id, old_text_id, string_id, old_text.chars().count(),
+            text.chars().count(), 20_000,
+        )?;
         Ok(true)
     }
 

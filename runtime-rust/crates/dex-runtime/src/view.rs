@@ -156,6 +156,24 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
     jni.register("Landroid/widget/TextView;","getTextSize","()F",|env,args|{
         let id=receiver(args)?;Ok(Some(env.get_object_field(id,"mTextSize")?))
     });
+    jni.register("Landroid/widget/TextView;","addTextChangedListener","(Landroid/text/TextWatcher;)V",|env,args|{
+        let id=receiver(args)?;
+        env.set_object_field(id,"mTextWatcher",args.get(1).copied().unwrap_or(Value::Null))?;
+        Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","removeTextChangedListener","(Landroid/text/TextWatcher;)V",|env,args|{
+        let id=receiver(args)?;
+        let current=env.get_object_field(id,"mTextWatcher")?.as_object();
+        let requested=args.get(1).and_then(Value::as_object);
+        if current.is_some() && current==requested {
+            env.set_object_field(id,"mTextWatcher",Value::Null)?;
+        }
+        Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","getText","()Ljava/lang/CharSequence;",|env,args|{
+        let id=receiver(args)?;
+        Ok(Some(env.get_object_field(id,"mText")?))
+    });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;)V",|env,args|{
         let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
