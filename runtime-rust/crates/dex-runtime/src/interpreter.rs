@@ -1651,11 +1651,9 @@ mod tests {
         let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
         vm.attach_dex_metadata(&types, &fields);
         let report = vm.execute_method(1, &[], 16).expect("new-instance should execute");
-        let Value::Object(object_id) = match report.stop_reason {
-            ExecutionStopReason::ReturnedValue(value) => value,
-            other => panic!("unexpected execution result: {:?}", other),
-        } else {
-            panic!("new-instance did not return an object");
+        let object_id = match report.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(object_id)) => object_id,
+            other => panic!("new-instance returned an unexpected result: {:?}", other),
         };
         assert_eq!(heap.get(object_id).unwrap().class_descriptor(), "Ltest/Allocated;");
     }
