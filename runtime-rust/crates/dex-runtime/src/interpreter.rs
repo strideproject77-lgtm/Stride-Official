@@ -1234,10 +1234,10 @@ impl<'a> ArtVm<'a> {
                     } else {
                         None
                     };
-                    let target_method = runtime_method_id.and_then(|id| self.methods.get(&id));
+                    let exact_target_method = runtime_method_id.and_then(|id| self.methods.get(&id));
                     let (target_class, target_name, target_proto) = if let Some(r) = reference {
                         (r.class_descriptor.as_str(), r.name.as_str(), r.prototype.as_str())
-                    } else if let Some(target) = target_method {
+                    } else if let Some(target) = exact_target_method {
                         (target.class_descriptor.as_str(), target.name.as_str(), target.prototype.as_str())
                     } else {
                         ("<unknown>", "<unknown>", "()V")
@@ -1249,6 +1249,27 @@ impl<'a> ArtVm<'a> {
                             "Invalid invoke arguments for {}->{}{} at PC {}: {}",
                             target_class, target_name, target_proto, pc, error
                         ))?;
+
+                    // invoke-virtual and invoke-interface must dispatch against the
+                    // receiver's runtime class, not merely the declaring class in method_ids.
+                    // Without this, overridden callbacks and inherited app methods silently
+                    // execute the base implementation (or fail when the interface is abstract).
+                    let mut dispatched_method_id = runtime_method_id;
+                    if matches!(op, 0x6e | 0x72 | 0x74 | 0x78) {
+                        if let Some(receiver_id) = args.first().and_then(Value::as_object).filter(|id| *id != 0) {
+                            if let Ok(receiver_object) = self.heap.get(receiver_id) {
+                                let receiver_class = receiver_object.class_descriptor().to_owned();
+                                if let Some((_, implementation)) = self.hierarchy.resolve_virtual_method(
+                                    &receiver_class, target_name, target_proto,
+                                ) {
+                                    if let Ok(id) = u16::try_from(implementation.method_index) {
+                                        dispatched_method_id = Some(id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let target_method = dispatched_method_id.and_then(|id| self.methods.get(&id));
 
                     // Framework and native references are dispatched by their complete
                     // DEX signature even when no app-defined MethodCode exists.
@@ -1297,7 +1318,7 @@ impl<'a> ArtVm<'a> {
                         ));
                     }
 
-                    let runtime_method_id = runtime_method_id.expect("target method implies runtime ID");
+                    let runtime_method_id = dispatched_method_id.expect("target method implies runtime ID");
                     let remaining = step_limit.saturating_sub(steps);
                     let sub_report = self.execute_internal(runtime_method_id, &args, remaining, call_depth + 1, trace)
                         .map_err(|error| format!(
@@ -1609,6 +1630,79 @@ mod tests {
             ExecutionStopReason::ReturnedValue(Value::Int(42))
         );
     }
+    #[test]
+    fn invoke_virtual_dispatches_to_the_receivers_most_specific_override() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+
+        let mut base = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Base;", Some("Ljava/lang/Object;"),
+        );
+        base.register_method("value", "()I", 2, false);
+        hierarchy.register_class(base);
+
+        let mut child = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Child;", Some("Ltest/Base;"),
+        );
+        child.register_method("value", "()I", 3, false);
+        hierarchy.register_class(child);
+
+        let methods = HashMap::from([
+            (1u16, MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "run".into(),
+                prototype: "()I".into(),
+                // new Child; invoke-virtual Base.value(); move-result; return
+                code_units: vec![0x0022, 0x0000, 0x106e, 0x0000, 0x0000, 0x010a, 0x010f],
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: vec![],
+            }),
+            (2u16, MethodCode {
+                class_descriptor: "Ltest/Base;".into(),
+                name: "value".into(),
+                prototype: "()I".into(),
+                code_units: vec![0x1012, 0x010f], // return 1
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: vec![],
+            }),
+            (3u16, MethodCode {
+                class_descriptor: "Ltest/Child;".into(),
+                name: "value".into(),
+                prototype: "()I".into(),
+                code_units: vec![0x2012, 0x010f], // return 2
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: vec![],
+            }),
+        ]);
+        let types = vec!["Ltest/Child;".to_string()];
+        let fields = Vec::new();
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ltest/Base;".into(),
+            name: "value".into(),
+            prototype: "()I".into(),
+        }];
+        let lookup = HashMap::from([
+            (("Ltest/Base;".into(), "value".into(), "()I".into()), 2u32),
+            (("Ltest/Child;".into(), "value".into(), "()I".into()), 3u32),
+        ]);
+
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+        let report = vm.execute_method(1, &[], 32).expect("caller method should execute");
+        assert_eq!(
+            report.stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(2)),
+            "invoke-virtual must call Child.value(), not Base.value()",
+        );
+    }
+
     #[test]
     fn records_missing_method_ids_in_attached_session_diagnostics() {
         let mut heap = ManagedHeap::default();
