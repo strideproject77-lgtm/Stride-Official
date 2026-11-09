@@ -539,6 +539,8 @@ mod tests {
             prototype: "()Lx;".to_string(),
         }]);
         assert!(inventory.field_references.is_empty());
+        assert_eq!(inventory.strings, vec!["Lx;".to_string(), "foo".to_string()]);
+        assert_eq!(inventory.type_descriptors, vec!["Lx;".to_string(), "Lx;".to_string()]);
     }
 
     fn sample_with_code(opcode: u16) -> (Vec<u8>, usize) {
