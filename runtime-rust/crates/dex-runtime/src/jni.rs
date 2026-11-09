@@ -238,7 +238,7 @@ impl JniNativeRegistry {
             let left = env.get_string_utf(receiver)?.to_owned();
             let right = args.get(1).and_then(Value::as_object)
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
-            Ok(Some(Value::Int(i32::from(left == right))))
+            Ok(Some(Value::Int(if left == right { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "length", "()I", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.length receiver is null")?;
@@ -250,14 +250,14 @@ impl JniNativeRegistry {
             let text = env.get_string_utf(receiver)?.to_owned();
             let prefix = args.get(1).and_then(Value::as_object)
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
-            Ok(Some(Value::Int(i32::from(text.starts_with(prefix)))))
+            Ok(Some(Value::Int(if text.starts_with(prefix) { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "contains", "(Ljava/lang/CharSequence;)Z", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.contains receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
             let needle = args.get(1).and_then(Value::as_object)
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
-            Ok(Some(Value::Int(i32::from(text.contains(needle)))))
+            Ok(Some(Value::Int(if text.contains(needle) { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "substring", "(I)Ljava/lang/String;", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.substring receiver is null")?;
@@ -270,7 +270,7 @@ impl JniNativeRegistry {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.concat receiver is null")?;
             let left = env.get_string_utf(receiver)?.to_owned();
             let right = args.get(1).and_then(Value::as_object)
-                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
             Ok(Some(Value::Object(env.new_string_utf(&format!("{}{}", left, right))?)))
         });
         self.register("Ljava/lang/String;", "valueOf", "(D)Ljava/lang/String;", |env, args| {
