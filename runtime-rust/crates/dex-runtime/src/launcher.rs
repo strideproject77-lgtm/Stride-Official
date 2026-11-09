@@ -36,7 +36,8 @@ pub struct LaunchReport {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LaunchStatus {
-    Running,
+    /// Launcher lifecycle callbacks completed, but no persistent guest loop is active yet.
+    LifecycleReady,
     FinishedNormally,
     UncaughtException { class: String, message: Option<String> },
     ActivityNotFound(String),
@@ -717,7 +718,7 @@ impl AndroidRuntime {
             lifecycle_state: ActivityLifecycleState::Resumed,
             total_classes_loaded: self.class_loader.classes.len(),
             instructions_executed: total_steps,
-            status: LaunchStatus::Running,
+            status: LaunchStatus::LifecycleReady,
             diagnostics_summary: self.diagnostics.format_summary(),
         }
     }

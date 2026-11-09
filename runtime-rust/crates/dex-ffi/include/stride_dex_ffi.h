@@ -65,7 +65,10 @@ int32_t stride_runtime_load_so(
 int32_t stride_manifest_screen_orientation(const uint8_t *manifest_data, size_t manifest_len, int32_t *out_orientation);
 
 /*
- * Launch the application from AndroidManifest.xml and execute its main activity.
+ * Dispatch the launch Activity lifecycle from AndroidManifest.xml.
+ * out_report.status_code: 0=active guest runtime (reserved), 1=finished,
+ * 2=uncaught exception, 3=activity not found, 4=manifest error,
+ * 5=lifecycle callbacks returned but no persistent guest loop is active.
  */
 int32_t stride_runtime_launch_apk(
     AndroidRuntime *runtime,

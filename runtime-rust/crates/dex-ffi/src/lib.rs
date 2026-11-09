@@ -168,7 +168,8 @@ pub unsafe extern "C" fn stride_runtime_launch_apk(
     let report: LaunchReport = rt.launch_application(manifest_bytes, step_budget);
 
     let status_code = match report.status {
-        LaunchStatus::Running => 0,
+        // Lifecycle dispatch completed; this is not a claim that guest frames are running.
+        LaunchStatus::LifecycleReady => 5,
         LaunchStatus::FinishedNormally => 1,
         LaunchStatus::UncaughtException { .. } => 2,
         LaunchStatus::ActivityNotFound(_) => 3,

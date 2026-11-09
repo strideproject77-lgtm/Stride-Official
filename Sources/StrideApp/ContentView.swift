@@ -1200,7 +1200,7 @@ private struct APKDetailSheet: View {
     private var executionStatusText: String {
         if isExecuting { return "Starting…" }
         if executionError != nil { return "Could not start — see the log" }
-        if executionResult != nil { return "Starting — guest loop not active" }
+        if executionResult != nil { return "Activity ready — guest loop not active" }
         return "Ready"
     }
 
