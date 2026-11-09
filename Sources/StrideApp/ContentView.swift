@@ -1131,6 +1131,13 @@ private struct APKDetailSheet: View {
 
             if !isExecutionChromeHidden {
                 VStack(spacing: 0) {
+                    // Keep execution controls below the Dynamic Island/notch in portrait.
+                    // Landscape retains a compact offset to preserve guest viewport height.
+                    GeometryReader { proxy in
+                        Color.clear.frame(height: proxy.size.height > proxy.size.width ? 0 : 0)
+                    }
+                    .frame(height: 0)
+                    .overlay(alignment: .top) { Color.clear }
                     HStack(spacing: 10) {
                         Button {
                             closeExecutionSession()
@@ -1179,6 +1186,7 @@ private struct APKDetailSheet: View {
 
                     guestTouchSurface
                 }
+                .padding(.top, 44)
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 guestTouchSurface
