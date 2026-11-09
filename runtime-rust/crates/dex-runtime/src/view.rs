@@ -496,6 +496,21 @@ mod tests {
     }
 
     #[test]
+    fn view_background_color_is_stored_for_rendering() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let view = heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        invoke(&jni, &mut heap, "Landroid/view/View;", "<init>",
+            "(Landroid/content/Context;)V", &[Value::Object(view), Value::Null]).unwrap();
+        let color = 0xff35c9ffu32 as i32;
+        invoke(&jni, &mut heap, "Landroid/view/View;", "setBackgroundColor",
+            "(I)V", &[Value::Object(view), Value::Int(color)]).unwrap();
+        assert_eq!(heap.get_instance_field(view, "mBackgroundColor").unwrap(), Value::Int(color));
+        assert_eq!(heap.get_instance_field(view, "mNeedsDraw").unwrap(), Value::Int(1));
+    }
+
+    #[test]
     fn activity_owns_content_view_and_finds_root_id() {
         let mut jni = JniNativeRegistry::new();
         register_view_framework(&mut jni);
