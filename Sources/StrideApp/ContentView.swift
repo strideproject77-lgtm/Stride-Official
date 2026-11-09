@@ -62,16 +62,9 @@ struct ContentView: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            StrideCoreMark(size: 40, accent: accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("STRIDE")
-                    .font(.system(size: 21, weight: .black, design: .rounded))
-                    .kerning(2.4)
-                Text("ANDROID APP RUNTIME")
-                    .font(.system(size: 8, weight: .semibold))
-                    .kerning(1.2)
-                    .foregroundStyle(muted)
-            }
+            Text("Stride")
+                .font(.system(size: 25, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
             Spacer()
             if isImporting {
                 ProgressView().tint(accent).frame(width: 34, height: 34)
@@ -920,11 +913,7 @@ private struct APKDetailSheet: View {
                                     return
                                 }
                                 executionResult = res
-                                await MainActor.run {
-                                    guard !Task.isCancelled else { return }
-                                    StrideOrientationController.shared.apply(androidValue: res.screenOrientation)
-                                }
-                                appendSessionLog("[SESSION] Applied APK screenOrientation=\(res.screenOrientation)")
+                                appendSessionLog("[SESSION] APK screenOrientation=\(res.screenOrientation) recorded; iOS auto-rotation remains enabled")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 let scheduler = GuestFrameScheduler { _ in
                                     let pump = res.session.pumpGuestEvents()
@@ -939,7 +928,7 @@ private struct APKDetailSheet: View {
                                 }
                                 frameScheduler = scheduler
                                 scheduler.start()
-                                appendSessionLog("[SESSION] Host display-link event pump started; guest rendering is not yet verified")
+                                appendSessionLog("[SESSION] Host display-link input pump started; Android guest loop and rendering remain inactive")
                                 appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
                             } catch {
                                 guard !Task.isCancelled else { return }
@@ -1099,12 +1088,11 @@ private struct APKDetailSheet: View {
             }
         }
         .background(canvas.ignoresSafeArea())
-        .overlay {
-            if showingExecutionScreen {
-                executionScreen
-                    .transition(.opacity)
-                    .zIndex(10)
-            }
+        .fullScreenCover(isPresented: $showingExecutionScreen) {
+            executionScreen
+                .ignoresSafeArea()
+                .statusBarHidden(true)
+                .interactiveDismissDisabled(true)
         }
         .onAppear(perform: loadPreviousSession)
         .onDisappear {
@@ -1217,7 +1205,7 @@ private struct APKDetailSheet: View {
     private var executionStatusText: String {
         if isExecuting { return "Starting…" }
         if executionError != nil { return "Could not start — see the log" }
-        if executionResult != nil { return "Activity resumed · event pump active" }
+        if executionResult != nil { return "Activity resumed · guest loop inactive" }
         return "Ready"
     }
 
