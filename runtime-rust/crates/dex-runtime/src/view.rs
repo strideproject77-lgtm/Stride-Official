@@ -60,7 +60,12 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
     // Android framework constructors are invoked on the concrete DEX owner.
     // Register TextView explicitly as well as View so ordinary
     // new TextView(context) applications do not fail before setContentView.
-    for class_descriptor in ["Landroid/view/View;", "Landroid/widget/TextView;"] {
+    for class_descriptor in [
+        "Landroid/view/View;",
+        "Landroid/view/ViewGroup;",
+        "Landroid/widget/LinearLayout;",
+        "Landroid/widget/TextView;",
+    ] {
         register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;)V");
         register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;)V");
         register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;I)V");
@@ -403,6 +408,23 @@ mod tests {
         assert_eq!(heap.get_instance_field(view, "mContext").unwrap(), Value::Object(context));
         assert_eq!(heap.get_instance_field(view, "mVisibility").unwrap(), Value::Int(0));
         assert_eq!(heap.get_instance_field(view, "mEnabled").unwrap(), Value::Int(1));
+    }
+
+    #[test]
+    fn linear_layout_context_constructor_initializes_managed_view_state() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let layout = heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
+        let context = heap.allocate_instance("Landroid/app/Activity;").unwrap();
+
+        invoke(&jni, &mut heap, "Landroid/widget/LinearLayout;", "<init>",
+            "(Landroid/content/Context;)V",
+            &[Value::Object(layout), Value::Object(context)]).unwrap();
+
+        assert_eq!(heap.get_instance_field(layout, "mContext").unwrap(), Value::Object(context));
+        assert_eq!(heap.get_instance_field(layout, "mOrientation").unwrap(), Value::Int(1));
+        assert_eq!(heap.get_instance_field(layout, "mNeedsLayout").unwrap(), Value::Int(1));
     }
 
     #[test]
