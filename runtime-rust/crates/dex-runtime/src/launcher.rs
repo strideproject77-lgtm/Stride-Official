@@ -444,6 +444,7 @@ impl AndroidRuntime {
             &mut self.hierarchy,
             &mut self.monitors,
             &mut self.jni,
+            &mut self.static_fields,
             &[],
         ) {
             self.diagnostics.record_detailed(
@@ -517,17 +518,20 @@ impl AndroidRuntime {
         if let Some(mid) = on_create_mid {
             if let Ok(mid16) = u16::try_from(mid) {
                 let method_map = self.class_loader.export_method_codes();
+                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+                let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
                 let mut vm = ArtVm::new(
                     &mut self.heap,
                     &mut self.hierarchy,
                     &mut self.monitors,
                     &mut self.jni,
                     &method_map,
-                    &[],
+                    dex_strings,
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
-                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                if let Some(inventory) = dex_metadata.as_ref() {
+                    vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
                 // Call onCreate with this=activity_obj, savedInstanceState=null
@@ -617,13 +621,16 @@ impl AndroidRuntime {
         if let Some(mid) = self.class_loader.find_method(&activity_descriptor, "onStart", "()V") {
             if let Ok(mid16) = u16::try_from(mid) {
                 let method_map = self.class_loader.export_method_codes();
+                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+                let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
                 let mut vm = ArtVm::new(
                     &mut self.heap, &mut self.hierarchy, &mut self.monitors,
-                    &mut self.jni, &method_map, &[],
+                    &mut self.jni, &method_map, dex_strings,
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
-                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                if let Some(inventory) = dex_metadata.as_ref() {
+                    vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
                 match vm.execute_method(mid16, &[Value::Object(activity_obj)], step_budget.saturating_sub(total_steps)) {
@@ -705,17 +712,20 @@ impl AndroidRuntime {
         if let Some(mid) = on_resume_mid {
             if let Ok(mid16) = u16::try_from(mid) {
                 let method_map = self.class_loader.export_method_codes();
+                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+                let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
                 let mut vm = ArtVm::new(
                     &mut self.heap,
                     &mut self.hierarchy,
                     &mut self.monitors,
                     &mut self.jni,
                     &method_map,
-                    &[],
+                    dex_strings,
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
-                if let Some(inventory) = self.class_loader.dex_inventories.first() {
+                if let Some(inventory) = dex_metadata.as_ref() {
+                    vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
                 let args = [Value::Object(activity_obj)];
@@ -917,6 +927,8 @@ impl AndroidRuntime {
         let method_id = u16::try_from(method_id)
             .map_err(|_| "Touch callback method ID exceeds the interpreter limit".to_string())?;
         let method_map = self.class_loader.export_method_codes();
+                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+                let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
         let mut delivered = 0usize;
 
         while delivered < max_events {
@@ -939,13 +951,14 @@ impl AndroidRuntime {
                 &mut self.monitors,
                 &mut self.jni,
                 &method_map,
-                &[],
+                dex_strings,
             );
             vm.attach_diagnostics(&self.diagnostics);
             vm.attach_static_fields(&mut self.static_fields);
-            if let Some(inventory) = self.class_loader.dex_inventories.first() {
-                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
-            }
+            if let Some(inventory) = dex_metadata.as_ref() {
+                    vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                    vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                }
             let args = [Value::Object(activity_obj), Value::Object(event_obj)];
             let report = vm.execute_method(method_id, &args, step_budget.max(1))
                 .map_err(|error| format!("Touch callback interpreter error: {}", error))?;
