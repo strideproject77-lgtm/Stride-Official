@@ -47,7 +47,7 @@ final class APKLibraryStore: ObservableObject {
 
     func importPackageAsync(from sourceURL: URL) async throws {
         StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START", "Starting Android package import: \(sourceURL.lastPathComponent)")
-        let prepared = try preparePackage(from: sourceURL)
+        let prepared = try await preparePackageAsync(from: sourceURL)
         do {
             let archiveInspector = inspector
             let report = try await Task.detached(priority: .userInitiated) {
@@ -76,6 +76,15 @@ final class APKLibraryStore: ObservableObject {
 
     private func preparePackage(from sourceURL: URL) throws -> PreparedAndroidPackage {
         try packageImporter.prepare(sourceURL, in: libraryFolder())
+    }
+
+    /// ZIP extraction and component validation run away from the main actor.
+    private func preparePackageAsync(from sourceURL: URL) async throws -> PreparedAndroidPackage {
+        let importer = packageImporter
+        let folder = try libraryFolder()
+        return try await Task.detached(priority: .userInitiated) {
+            try importer.prepare(sourceURL, in: folder)
+        }.value
     }
 
     private func reload() {

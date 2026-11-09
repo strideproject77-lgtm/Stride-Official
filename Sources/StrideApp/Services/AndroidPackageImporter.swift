@@ -10,7 +10,7 @@ struct PreparedAndroidPackage: Sendable {
 }
 
 /// Normalizes Android distribution containers into a bounded, persistent package directory.
-struct AndroidPackageImporter: Sendable {
+struct AndroidPackageImporter: @unchecked Sendable {
     private let fileManager = FileManager.default
     private let maxAPKBytes: UInt64 = 512 * 1_024 * 1_024
     private let maxTotalAPKBytes: UInt64 = 1_024 * 1_024 * 1_024
