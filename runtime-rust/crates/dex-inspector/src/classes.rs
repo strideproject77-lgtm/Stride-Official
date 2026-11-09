@@ -442,7 +442,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
             field_index: index,
             class_descriptor: type_descriptor(b, &string_ids, &types, string_count, type_count, owner)?,
             name: dex_string(b, &string_ids, string_count, name_index)?,
-            field_type: type_descriptor(b, &strings, &types, string_count, type_count, field_type)?,
+            field_type: type_descriptor(b, &string_ids, &types, string_count, type_count, field_type)?,
         });
     }
 
@@ -464,11 +464,11 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
             }
         } else {
             class_data(
-                b, data_off, id, &fields, &methods, &strings, &types, &protos,
+                b, data_off, id, &fields, &methods, &string_ids, &types, &protos,
                 field_count, method_count, string_count, type_count,
             )?
         };
-        class.descriptor = type_descriptor(b, &strings, &types, string_count, type_count, id)?;
+        class.descriptor = type_descriptor(b, &string_ids, &types, string_count, type_count, id)?;
         class.access_flags = flags;
         class.superclass_index = (super_id != NO_INDEX).then_some(super_id);
         classes.push(class);
