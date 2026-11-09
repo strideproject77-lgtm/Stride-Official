@@ -1233,8 +1233,16 @@ mod framework_bridge_tests {
         runtime.heap.set_instance_field(root, "mVisibility", Value::Int(0)).unwrap();
         runtime.heap.set_instance_field(root, "mBackgroundColor", Value::Int(0xff000000u32 as i32)).unwrap();
         runtime.heap.set_instance_field(root, "mOrientation", Value::Int(1)).unwrap();
-        runtime.heap.set_instance_field(root, "mChildCount", Value::Int(1)).unwrap();
+        runtime.heap.set_instance_field(root, "mChildCount", Value::Int(6)).unwrap();
         runtime.heap.set_instance_field(root, "mChild0", Value::Object(display)).unwrap();
+        // Match the calculator's six vertical segments: one display plus five key rows.
+        for index in 0..5 {
+            let row = runtime.heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
+            runtime.heap.set_instance_field(row, "mVisibility", Value::Int(0)).unwrap();
+            runtime.heap.set_instance_field(row, "mOrientation", Value::Int(0)).unwrap();
+            runtime.heap.set_instance_field(row, "mChildCount", Value::Int(0)).unwrap();
+            runtime.heap.set_instance_field(root, &format!("mChild{}", index + 1), Value::Object(row)).unwrap();
+        }
         runtime.heap.set_instance_field(display, "mVisibility", Value::Int(0)).unwrap();
         runtime.heap.set_instance_field(display, "mBackgroundColor", Value::Int(0xff000000u32 as i32)).unwrap();
         runtime.heap.set_instance_field(display, "mText", Value::Object(zero)).unwrap();
