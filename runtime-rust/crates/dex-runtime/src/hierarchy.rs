@@ -122,7 +122,9 @@ impl ClassHierarchy {
         let mut current = receiver_class.to_owned();
         while let Some(class) = self.classes.get(&current) {
             if let Some(method) = class.methods.get(&(name.to_owned(), prototype.to_owned())) {
-                return Some((class, method));
+                if !method.is_direct && method.access_flags & (0x0008 | 0x0002) == 0 {
+                    return Some((class, method));
+                }
             }
             if let Some(super_desc) = &class.superclass_descriptor {
                 current = super_desc.clone();

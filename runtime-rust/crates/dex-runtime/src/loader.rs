@@ -125,9 +125,10 @@ impl AppClassLoader {
 
         for class_def in &inventory.classes {
             let descriptor = class_def.descriptor.clone();
-            let super_descriptor = class_def.superclass_index.and_then(|idx| {
-                inventory.classes.iter().find(|c| c.class_index == idx).map(|c| c.descriptor.clone())
-            });
+            // DEX superclass_idx is a type_idx, not a class_def_idx.
+            // Resolve against the owning DEX type table, including external parents.
+            let super_descriptor = class_def.superclass_index
+                .and_then(|idx| inventory.type_descriptors.get(idx as usize).cloned());
 
             let mut static_fields = HashMap::new();
             let mut instance_field_names = Vec::new();
