@@ -122,6 +122,11 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         env.set_object_field(id, "mClickable", Value::Int(1))?;
         Ok(None)
     });
+    jni.register("Landroid/view/View;", "setOnTouchListener", "(Landroid/view/View$OnTouchListener;)V", |env, args| {
+        let id = receiver(args)?;
+        env.set_object_field(id, "mOnTouchListener", args.get(1).copied().unwrap_or(Value::Null))?;
+        Ok(None)
+    });
     jni.register("Landroid/view/View;", "setTag", "(Ljava/lang/Object;)V", |env, args| {
         let id = receiver(args)?;
         env.set_object_field(id, "mTag", args.get(1).copied().unwrap_or(Value::Null))?;
