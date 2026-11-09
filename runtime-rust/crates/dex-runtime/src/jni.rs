@@ -245,6 +245,10 @@ impl JniNativeRegistry {
             let text = env.get_string_utf(receiver)?;
             Ok(Some(Value::Int(text.encode_utf16().count() as i32)))
         });
+        self.register("Ljava/lang/String;", "isEmpty", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.isEmpty receiver is null")?;
+            Ok(Some(Value::Int(i32::from(env.get_string_utf(receiver)?.is_empty()))))
+        });
         self.register("Ljava/lang/String;", "startsWith", "(Ljava/lang/String;)Z", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.startsWith receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
@@ -288,11 +292,23 @@ impl JniNativeRegistry {
             let value = args.first().map(Value::as_double).unwrap_or(0.0);
             Ok(Some(Value::Object(env.new_string_utf(&value.to_string())?)))
         });
+        self.register("Ljava/lang/String;", "valueOf", "(J)Ljava/lang/String;", |env, args| {
+            let value = args.first().map(Value::as_long).unwrap_or(0);
+            Ok(Some(Value::Object(env.new_string_utf(&value.to_string())?)))
+        });
         self.register("Ljava/lang/Double;", "parseDouble", "(Ljava/lang/String;)D", |env, args| {
             let value = args.first().and_then(Value::as_object)
                 .and_then(|id| env.get_string_utf(id).ok())
                 .and_then(|text| text.parse::<f64>().ok()).unwrap_or(0.0);
             Ok(Some(Value::Double(value)))
+        });
+        self.register("Ljava/lang/Double;", "isNaN", "(D)Z", |_env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            Ok(Some(Value::Int(i32::from(value.is_nan()))))
+        });
+        self.register("Ljava/lang/Double;", "isInfinite", "(D)Z", |_env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            Ok(Some(Value::Int(i32::from(value.is_infinite()))))
         });
 
         // android.os.SystemClock.uptimeMillis()J
@@ -325,6 +341,14 @@ impl JniNativeRegistry {
         self.register("Ljava/lang/Math;", "abs", "(J)J", |_env, args| {
             let v = args.first().map(|v| v.as_long()).unwrap_or(0);
             Ok(Some(Value::Long(v.abs())))
+        });
+        self.register("Ljava/lang/Math;", "abs", "(D)D", |_env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            Ok(Some(Value::Double(value.abs())))
+        });
+        self.register("Ljava/lang/Math;", "rint", "(D)D", |_env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            Ok(Some(Value::Double(value.round_ties_even())))
         });
         self.register("Ljava/lang/Math;", "min", "(II)I", |_env, args| {
             let a = args.get(0).map(|v| v.as_int()).unwrap_or(0);
@@ -426,6 +450,25 @@ mod tests {
         let rendered = stringify(&mut env, &[Value::Double(2.5)]).unwrap()
             .and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(rendered).unwrap(), "2.5");
+
+        let value_of_long = registry.find(
+            "Ljava/lang/String;", "valueOf", "(J)Ljava/lang/String;",
+        ).unwrap();
+        let integer_text = value_of_long(&mut env, &[Value::Long(-42)]).unwrap()
+            .and_then(|value| value.as_object()).unwrap();
+        assert_eq!(env.get_string_utf(integer_text).unwrap(), "-42");
+
+        let abs_double = registry.find("Ljava/lang/Math;", "abs", "(D)D").unwrap();
+        assert_eq!(abs_double(&mut env, &[Value::Double(-4.5)]).unwrap(), Some(Value::Double(4.5)));
+        let rint = registry.find("Ljava/lang/Math;", "rint", "(D)D").unwrap();
+        assert_eq!(rint(&mut env, &[Value::Double(2.5)]).unwrap(), Some(Value::Double(2.0)));
+        let is_nan = registry.find("Ljava/lang/Double;", "isNaN", "(D)Z").unwrap();
+        assert_eq!(is_nan(&mut env, &[Value::Double(f64::NAN)]).unwrap(), Some(Value::Int(1)));
+        let is_infinite = registry.find("Ljava/lang/Double;", "isInfinite", "(D)Z").unwrap();
+        assert_eq!(is_infinite(&mut env, &[Value::Double(f64::INFINITY)]).unwrap(), Some(Value::Int(1)));
+        let is_empty = registry.find("Ljava/lang/String;", "isEmpty", "()Z").unwrap();
+        let empty = env.new_string_utf("").unwrap();
+        assert_eq!(is_empty(&mut env, &[Value::Object(empty)]).unwrap(), Some(Value::Int(1)));
     }
 
 }
