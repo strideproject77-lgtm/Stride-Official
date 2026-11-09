@@ -851,6 +851,7 @@ private struct APKDetailSheet: View {
     @State private var guestTouchActive = false
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
+    @FocusState private var guestKeyboardFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
@@ -1204,6 +1205,7 @@ private struct APKDetailSheet: View {
                         Button {
                             guestInputText = ""
                             showingGuestKeyboard = true
+                            guestKeyboardFocused = true
                         } label: {
                             Image(systemName: "keyboard")
                                 .font(.system(size: 14, weight: .medium))
@@ -1246,9 +1248,10 @@ private struct APKDetailSheet: View {
                 HStack(spacing: 8) {
                     TextField("Type into Android app", text: $guestInputText)
                         .textFieldStyle(.roundedBorder)
+                        .focused($guestKeyboardFocused)
                         .submitLabel(.done)
-                        .onSubmit { showingGuestKeyboard = false }
-                    Button("Done") { showingGuestKeyboard = false }
+                        .onSubmit { showingGuestKeyboard = false; guestKeyboardFocused = false }
+                    Button("Done") { showingGuestKeyboard = false; guestKeyboardFocused = false }
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .padding(12)
@@ -1289,6 +1292,8 @@ private struct APKDetailSheet: View {
         frameScheduler?.stop()
         frameScheduler = nil
         guestTouchActive = false
+        showingGuestKeyboard = false
+        guestKeyboardFocused = false
         guestFramebufferData = nil
         guestFramebufferWidth = 0
         guestFramebufferHeight = 0
