@@ -521,6 +521,27 @@ mod tests {
     }
 
     #[test]
+    fn decodes_calculator_operator_symbols_from_modified_utf8() {
+        let string_table_start = HEADER;
+        let data_offset = HEADER + 4;
+        let mut bytes = vec![0u8; data_offset];
+        bytes[string_table_start..string_table_start + 4]
+            .copy_from_slice(&(data_offset as u32).to_le_bytes());
+        // DEX Modified UTF-8 stores each of these BMP characters as two or three bytes.
+        bytes.extend_from_slice(&[
+            4,
+            0xc3, 0xb7,             // division sign
+            0xc3, 0x97,             // multiplication sign
+            0xe2, 0x88, 0x92,       // mathematical minus
+            0xe2, 0x8c, 0xab,       // erase/backspace symbol
+            0,
+        ]);
+        let decoded = dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0)
+            .expect("calculator operator symbols should decode from DEX strings");
+        assert_eq!(decoded, "÷×−⌫");
+    }
+
+    #[test]
     fn reads_class_and_method_metadata() {
         let inventory = inspect_classes(&sample(0)).unwrap();
         let class = &inventory.classes[0];

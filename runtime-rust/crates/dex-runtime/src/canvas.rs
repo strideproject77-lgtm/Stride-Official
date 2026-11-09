@@ -404,13 +404,13 @@ mod tests {
     }
 
     #[test]
-    fn calculator_key_glyphs_are_present() {
+    fn calculator_key_glyphs_are_present_and_not_question_mark_fallbacks() {
         for symbol in ['A', 'C', '0', '9', '+', '-', '−', '×', '÷', '%', '=', '⌫'] {
-            assert!(
-                glyph5x7(symbol).iter().any(|row| *row != 0),
-                "missing visible glyph for {:?}",
-                symbol
-            );
+            let glyph = glyph5x7(symbol);
+            assert!(glyph.iter().any(|row| *row != 0), "missing visible glyph for {:?}", symbol);
+            if matches!(symbol, '+' | '-' | '−' | '×' | '÷' | '⌫') {
+                assert_ne!(glyph, glyph5x7('?'), "calculator symbol {:?} fell back to question-mark pixels", symbol);
+            }
         }
     }
 

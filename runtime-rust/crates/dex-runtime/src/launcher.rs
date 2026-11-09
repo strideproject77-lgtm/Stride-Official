@@ -61,6 +61,8 @@ pub struct AndroidRuntime {
     pub display_metrics: DisplayMetrics,
     pub active_activity_obj: Option<u32>,
     pub active_activity_class: Option<String>,
+    /// Ensures the first managed-view render emits one non-sensitive text-pipeline summary.
+    pub initial_render_summary_recorded: bool,
     pub diagnostics: Arc<RuntimeDiagnostics>,
     pub native_linker: NativeLinker,
     pub gl_engine: OpenGlEsEngine,
@@ -93,6 +95,7 @@ impl AndroidRuntime {
             display_metrics: DisplayMetrics::default(),
             active_activity_obj: None,
             active_activity_class: None,
+            initial_render_summary_recorded: false,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
             native_linker: NativeLinker::new(),
             gl_engine: OpenGlEsEngine::new(),
@@ -923,70 +926,222 @@ impl AndroidRuntime {
     /// This is the first real Activity -> Canvas -> Surface bridge; unsupported custom
     /// drawing callbacks and unresolved layout-resource IDs are deliberately skipped.
     pub fn render_active_activity_surface(&mut self) -> Result<bool, String> {
-        let Some(activity)=self.active_activity_obj else{return Ok(false)};
-        let root=self.heap.get_instance_field(activity,"mContentView")
-            .map_err(|e|format!("Activity content lookup failed: {:?}",e))?;
-        let Some(root_id)=root.as_object() else{return Ok(false)};
+        let Some(activity) = self.active_activity_obj else { return Ok(false) };
+        let root = self.heap.get_instance_field(activity, "mContentView")
+            .map_err(|error| format!("Activity content lookup failed: {:?}", error))?;
+        let Some(root_id) = root.as_object() else { return Ok(false) };
+
+        #[derive(Default)]
+        struct RenderStats {
+            views: usize,
+            text_views: usize,
+            text_views_with_text: usize,
+            empty_text_views: usize,
+            unresolved_text_references: usize,
+            text_color_matches_background: usize,
+        }
+
         self.surface.clear(0xff000000);
-        let width=self.surface.width as f32;let height=self.surface.height as f32;
-        let mut canvas=Canvas::new(&mut self.surface);
-        fn draw(heap:&ManagedHeap,resources:&ResourceCatalog,images:&std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,canvas:&mut Canvas<'_>,id:u32,bounds:RectF,depth:usize,seen:&mut std::collections::HashSet<u32>)->Result<(),String>{
-            if depth>128||!seen.insert(id){return Ok(());}
-            let field=|name:&str|heap.get_instance_field(id,name).map_err(|e|format!("View field {} read failed: {:?}",name,e));
-            let visibility=field("mVisibility")?.as_int();if visibility!=0{return Ok(());}
-            let bg=field("mBackgroundColor")?.as_int() as u32;
-            if bg!=0{let mut p=Paint::new();p.color=bg;p.style=PaintStyle::Fill;canvas.draw_rect(bounds,&p);}
-            let text_value=field("mText")?;
-            let text_resource=field("mTextResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
-            if let Some(text_id)=text_value.as_object(){
-                if let Ok(text)=heap.get_string(text_id){
-                    let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;
-                    p.color=if color==0{0xff000000}else{color};
-                    let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};
-                    let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;
-                    let text_width=text.chars().count()as f32*p.text_size*6.0/7.0;
-                    canvas.draw_text(text,bounds.left+(bounds.width()-text_width).max(0.0)*0.5,baseline,&p);
+        let width = self.surface.width as f32;
+        let height = self.surface.height as f32;
+        let mut canvas = Canvas::new(&mut self.surface);
+
+        fn draw(
+            heap: &ManagedHeap,
+            resources: &ResourceCatalog,
+            images: &std::collections::HashMap<u32, (u32, u32, Vec<u32>)>,
+            canvas: &mut Canvas<'_>,
+            id: u32,
+            bounds: RectF,
+            depth: usize,
+            seen: &mut std::collections::HashSet<u32>,
+            stats: &mut RenderStats,
+        ) -> Result<(), String> {
+            if depth > 128 || !seen.insert(id) { return Ok(()); }
+            stats.views += 1;
+
+            let field = |name: &str| heap.get_instance_field(id, name)
+                .map_err(|error| format!("View field {} read failed: {:?}", name, error));
+            let visibility = field("mVisibility")?.as_int();
+            if visibility != 0 { return Ok(()); }
+
+            let bg = field("mBackgroundColor")?.as_int() as u32;
+            if bg != 0 {
+                let mut paint = Paint::new();
+                paint.color = bg;
+                paint.style = PaintStyle::Fill;
+                canvas.draw_rect(bounds, &paint);
+            }
+
+            let is_text_view = heap.get(id)
+                .map(|object| object.class_descriptor() == "Landroid/widget/TextView;")
+                .unwrap_or(false);
+            if is_text_view { stats.text_views += 1; }
+
+            let text_value = field("mText")?;
+            let text_resource = field("mTextResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
+            let mut text_to_draw: Option<String> = None;
+
+            if let Some(text_id) = text_value.as_object() {
+                match heap.get_string(text_id) {
+                    Ok(text) => {
+                        if text.is_empty() {
+                            if is_text_view { stats.empty_text_views += 1; }
+                        } else {
+                            if is_text_view { stats.text_views_with_text += 1; }
+                            text_to_draw = Some(text.to_owned());
+                        }
+                    }
+                    Err(_) => {
+                        if is_text_view { stats.unresolved_text_references += 1; }
+                    }
                 }
-            } else if text_resource!=0 {
-                if let Some(text)=resources.string(text_resource){let mut p=Paint::new();let color=field("mTextColor")?.as_int() as u32;p.color=if color==0{0xff000000}else{color};let size=field("mTextSize")?.as_float();p.text_size=if size.is_finite()&&size>0.0{size}else{14.0};let baseline=(bounds.top+bounds.bottom)*0.5+p.text_size*0.35;canvas.draw_text(text,bounds.left+2.0,baseline,&p);}
+            } else if text_resource != 0 {
+                match resources.string(text_resource) {
+                    Some(text) if !text.is_empty() => {
+                        if is_text_view { stats.text_views_with_text += 1; }
+                        text_to_draw = Some(text.to_owned());
+                    }
+                    Some(_) => {
+                        if is_text_view { stats.empty_text_views += 1; }
+                    }
+                    None => {
+                        if is_text_view { stats.unresolved_text_references += 1; }
+                    }
+                }
+            } else if is_text_view {
+                stats.empty_text_views += 1;
             }
-            let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
-            let image_id=field("mImageResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
-            if let Some((iw,ih,pixels))=images.get(&image_id){canvas.draw_image_argb(pixels,*iw,*ih,bounds.left as i32,bounds.top as i32);}
-            let bg_resource=field("mBackgroundResourceId").map(|v|v.as_int() as u32).unwrap_or(0);
-            if bg_resource!=0{if let Some(color)=resources.color(bg_resource){let mut p=Paint::new();p.color=color;canvas.draw_rect(bounds,&p);}}
-            let count=field("mChildCount")?.as_int().clamp(0,4096)as usize;
-            if count==0{return Ok(());}
-            let orientation=field("mOrientation")?.as_int();let vertical=orientation!=0;
-            let main_extent=if vertical{bounds.height()}else{bounds.width()};
-            let mut weighted_total=0.0f32;
-            let mut weights=Vec::with_capacity(count);
+
+            if let Some(text) = text_to_draw {
+                let mut paint = Paint::new();
+                let color = field("mTextColor")?.as_int() as u32;
+                paint.color = if color == 0 { 0xff000000 } else { color };
+                if is_text_view && bg != 0 && (paint.color & 0x00ff_ffff) == (bg & 0x00ff_ffff) {
+                    stats.text_color_matches_background += 1;
+                }
+                let size = field("mTextSize")?.as_float();
+                paint.text_size = if size.is_finite() && size > 0.0 { size } else { 14.0 };
+                let baseline = (bounds.top + bounds.bottom) * 0.5 + paint.text_size * 0.35;
+                let text_width = text.chars().count() as f32 * paint.text_size * 6.0 / 7.0;
+                canvas.draw_text(
+                    &text,
+                    bounds.left + (bounds.width() - text_width).max(0.0) * 0.5,
+                    baseline,
+                    &paint,
+                );
+            }
+
+            let image_id = field("mImageResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
+            if let Some((image_width, image_height, pixels)) = images.get(&image_id) {
+                canvas.draw_image_argb(pixels, *image_width, *image_height, bounds.left as i32, bounds.top as i32);
+            }
+
+            let background_resource = field("mBackgroundResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
+            if background_resource != 0 {
+                if let Some(color) = resources.color(background_resource) {
+                    let mut paint = Paint::new();
+                    paint.color = color;
+                    canvas.draw_rect(bounds, &paint);
+                }
+            }
+
+            let count = field("mChildCount")?.as_int().clamp(0, 4096) as usize;
+            if count == 0 { return Ok(()); }
+
+            let orientation = field("mOrientation")?.as_int();
+            let vertical = orientation != 0;
+            let main_extent = if vertical { bounds.height() } else { bounds.width() };
+            let mut weighted_total = 0.0f32;
+            let mut weights = Vec::with_capacity(count);
             for index in 0..count {
-                let child=field(&format!("mChild{}",index))?;
-                let Some(child_id)=child.as_object()else{weights.push((0,0.0));continue};
-                let raw=heap.get_instance_field(child_id,"mLayoutWeight").map(|v|v.as_float()).unwrap_or(0.0);
-                let weight=if raw.is_finite(){raw.max(0.0)}else{0.0};weighted_total+=weight;weights.push((child_id,weight));
-            }
-            let mut cursor=if vertical{bounds.top}else{bounds.left};
-            let mut remaining=main_extent;
-            let mut remaining_weight=weighted_total;
-            let equal_segment=main_extent/count as f32;
-            for (child_id,weight) in weights {
-                if child_id==0{continue;}
-                let extent=if weight>0.0&&remaining_weight>0.0{remaining*weight/remaining_weight}else if weighted_total>0.0{equal_segment.min(remaining)}else{equal_segment};
-                let read_int=|name:&str|heap.get_instance_field(child_id,name).map(|v|v.as_int()).unwrap_or(0).max(0) as f32;
-                let ml=read_int("mMarginLeft");let mt=read_int("mMarginTop");let mr=read_int("mMarginRight");let mb=read_int("mMarginBottom");
-                let child_bounds=if vertical {
-                    RectF::new(bounds.left+ml,cursor+mt,(bounds.right-mr).max(bounds.left+ml),cursor+extent-mb)
-                } else {
-                    RectF::new(cursor+ml,bounds.top+mt,cursor+extent-mr,(bounds.bottom-mb).max(bounds.top+mt))
+                let child = field(&format!("mChild{}", index))?;
+                let Some(child_id) = child.as_object() else {
+                    weights.push((0, 0.0));
+                    continue;
                 };
-                draw(heap,resources,images,canvas,child_id,child_bounds,depth+1,seen)?;
-                cursor+=extent;remaining=(remaining-extent).max(0.0);remaining_weight=(remaining_weight-weight).max(0.0);
+                let raw = heap.get_instance_field(child_id, "mLayoutWeight")
+                    .map(|value| value.as_float()).unwrap_or(0.0);
+                let weight = if raw.is_finite() { raw.max(0.0) } else { 0.0 };
+                weighted_total += weight;
+                weights.push((child_id, weight));
+            }
+
+            let mut cursor = if vertical { bounds.top } else { bounds.left };
+            let mut remaining = main_extent;
+            let mut remaining_weight = weighted_total;
+            let equal_segment = main_extent / count as f32;
+            for (child_id, weight) in weights {
+                if child_id == 0 { continue; }
+                let extent = if weight > 0.0 && remaining_weight > 0.0 {
+                    remaining * weight / remaining_weight
+                } else if weighted_total > 0.0 {
+                    equal_segment.min(remaining)
+                } else {
+                    equal_segment
+                };
+                let read_margin = |name: &str| {
+                    heap.get_instance_field(child_id, name)
+                        .map(|value| value.as_int()).unwrap_or(0).max(0) as f32
+                };
+                let left = read_margin("mMarginLeft");
+                let top = read_margin("mMarginTop");
+                let right = read_margin("mMarginRight");
+                let bottom = read_margin("mMarginBottom");
+                let child_bounds = if vertical {
+                    RectF::new(
+                        bounds.left + left,
+                        cursor + top,
+                        (bounds.right - right).max(bounds.left + left),
+                        cursor + extent - bottom,
+                    )
+                } else {
+                    RectF::new(
+                        cursor + left,
+                        bounds.top + top,
+                        cursor + extent - right,
+                        (bounds.bottom - bottom).max(bounds.top + top),
+                    )
+                };
+                draw(heap, resources, images, canvas, child_id, child_bounds, depth + 1, seen, stats)?;
+                cursor += extent;
+                remaining = (remaining - extent).max(0.0);
+                remaining_weight = (remaining_weight - weight).max(0.0);
             }
             Ok(())
         }
-        draw(&self.heap,&self.resources,&self.image_assets,&mut canvas,root_id,RectF::new(0.0,0.0,width,height),0,&mut std::collections::HashSet::new())?;
+
+        let mut stats = RenderStats::default();
+        draw(
+            &self.heap,
+            &self.resources,
+            &self.image_assets,
+            &mut canvas,
+            root_id,
+            RectF::new(0.0, 0.0, width, height),
+            0,
+            &mut std::collections::HashSet::new(),
+            &mut stats,
+        )?;
+        drop(canvas);
+
+        if !self.initial_render_summary_recorded {
+            self.diagnostics.record(
+                DiagnosticSeverity::Info,
+                "Graphics",
+                "ACTIVITY_TEXT_RENDER_SUMMARY",
+                Some(&format!(
+                    "views={} text_views={} text_views_with_text={} empty_text_views={} unresolved_text_references={} text_color_matches_background={}",
+                    stats.views,
+                    stats.text_views,
+                    stats.text_views_with_text,
+                    stats.empty_text_views,
+                    stats.unresolved_text_references,
+                    stats.text_color_matches_background,
+                )),
+            );
+            self.initial_render_summary_recorded = true;
+        }
         Ok(true)
     }
 
@@ -1065,6 +1220,40 @@ impl AndroidRuntime {
 #[cfg(test)]
 mod framework_bridge_tests {
     use super::*;
+
+    #[test]
+    fn managed_text_view_renders_initial_display_pixels_on_black_surface() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let activity = runtime.heap.allocate_instance("Ltest/MainActivity;").unwrap();
+        let root = runtime.heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
+        let display = runtime.heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        let zero = runtime.heap.allocate_string("0").unwrap();
+
+        runtime.heap.set_instance_field(activity, "mContentView", Value::Object(root)).unwrap();
+        runtime.heap.set_instance_field(root, "mVisibility", Value::Int(0)).unwrap();
+        runtime.heap.set_instance_field(root, "mBackgroundColor", Value::Int(0xff000000u32 as i32)).unwrap();
+        runtime.heap.set_instance_field(root, "mOrientation", Value::Int(1)).unwrap();
+        runtime.heap.set_instance_field(root, "mChildCount", Value::Int(1)).unwrap();
+        runtime.heap.set_instance_field(root, "mChild0", Value::Object(display)).unwrap();
+        runtime.heap.set_instance_field(display, "mVisibility", Value::Int(0)).unwrap();
+        runtime.heap.set_instance_field(display, "mBackgroundColor", Value::Int(0xff000000u32 as i32)).unwrap();
+        runtime.heap.set_instance_field(display, "mText", Value::Object(zero)).unwrap();
+        runtime.heap.set_instance_field(display, "mTextColor", Value::Int(0xffffffffu32 as i32)).unwrap();
+        runtime.heap.set_instance_field(display, "mTextSize", Value::Float(42.0)).unwrap();
+        runtime.active_activity_obj = Some(activity);
+
+        assert!(runtime.render_active_activity_surface().unwrap());
+        let white_display_pixels = runtime.surface.as_slice()
+            .iter()
+            .take(1080 * 320)
+            .filter(|pixel| **pixel == 0xffffffff)
+            .count();
+        assert!(white_display_pixels > 0, "the white initial value must be rasterized in the display region");
+
+        let diagnostics = runtime.diagnostics.export_text();
+        assert!(diagnostics.contains("ACTIVITY_TEXT_RENDER_SUMMARY"), "{diagnostics}");
+        assert!(diagnostics.contains("text_views_with_text=1"), "{diagnostics}");
+    }
 
     #[test]
     fn activity_core_lifecycle_super_calls_have_framework_bridges() {
