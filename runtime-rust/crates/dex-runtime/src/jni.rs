@@ -230,6 +230,60 @@ impl JniNativeRegistry {
             },
         );
 
+        // Core java.lang.String operations used by ordinary Activity input handlers.
+        self.register("Ljava/lang/String;", "equals", "(Ljava/lang/Object;)Z", |env, args| {
+            let Some(receiver) = args.first().and_then(Value::as_object) else {
+                return Ok(Some(Value::Int(0)));
+            };
+            let left = env.get_string_utf(receiver)?.to_owned();
+            let right = args.get(1).and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
+            Ok(Some(Value::Int(i32::from(left == right))))
+        });
+        self.register("Ljava/lang/String;", "length", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.length receiver is null")?;
+            let text = env.get_string_utf(receiver)?;
+            Ok(Some(Value::Int(text.encode_utf16().count() as i32)))
+        });
+        self.register("Ljava/lang/String;", "startsWith", "(Ljava/lang/String;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.startsWith receiver is null")?;
+            let text = env.get_string_utf(receiver)?.to_owned();
+            let prefix = args.get(1).and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
+            Ok(Some(Value::Int(i32::from(text.starts_with(prefix)))))
+        });
+        self.register("Ljava/lang/String;", "contains", "(Ljava/lang/CharSequence;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.contains receiver is null")?;
+            let text = env.get_string_utf(receiver)?.to_owned();
+            let needle = args.get(1).and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
+            Ok(Some(Value::Int(i32::from(text.contains(needle)))))
+        });
+        self.register("Ljava/lang/String;", "substring", "(I)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.substring receiver is null")?;
+            let text = env.get_string_utf(receiver)?.to_owned();
+            let start = args.get(1).map(Value::as_int).unwrap_or(0).max(0) as usize;
+            let suffix = text.chars().skip(start).collect::<String>();
+            Ok(Some(Value::Object(env.new_string_utf(&suffix)?)))
+        });
+        self.register("Ljava/lang/String;", "concat", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.concat receiver is null")?;
+            let left = env.get_string_utf(receiver)?.to_owned();
+            let right = args.get(1).and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
+            Ok(Some(Value::Object(env.new_string_utf(&format!("{}{}", left, right))?)))
+        });
+        self.register("Ljava/lang/String;", "valueOf", "(D)Ljava/lang/String;", |env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            Ok(Some(Value::Object(env.new_string_utf(&value.to_string())?)))
+        });
+        self.register("Ljava/lang/Double;", "parseDouble", "(Ljava/lang/String;)D", |env, args| {
+            let value = args.first().and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok())
+                .and_then(|text| text.parse::<f64>().ok()).unwrap_or(0.0);
+            Ok(Some(Value::Double(value)))
+        });
+
         // android.os.SystemClock.uptimeMillis()J
         self.register(
             "Landroid/os/SystemClock;",
