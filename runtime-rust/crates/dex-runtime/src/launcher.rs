@@ -12,7 +12,7 @@ use crate::heap::ManagedHeap;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 use crate::framework::{AndroidEnvironment, ActivityLifecycleState, PackageInfo, ActivityInfo, ServiceInfo};
-use crate::graphics::{Surface, InputQueue, DisplayMetrics};
+use crate::graphics::{Surface, InputQueue, DisplayMetrics, ACTION_DOWN, ACTION_UP, ACTION_CANCEL};
 use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
 use crate::diagnostics::{RuntimeDiagnostics, DiagnosticSeverity};
@@ -63,6 +63,10 @@ pub struct AndroidRuntime {
     pub active_activity_class: Option<String>,
     /// Ensures the first managed-view render emits one non-sensitive text-pipeline summary.
     pub initial_render_summary_recorded: bool,
+    /// Last laid-out managed View bounds, in guest-surface pixels, used for hit testing.
+    pub rendered_view_bounds: Vec<(u32, RectF)>,
+    /// View pressed on ACTION_DOWN; clicks are dispatched only when ACTION_UP lands on it.
+    pub pressed_view: Option<u32>,
     pub diagnostics: Arc<RuntimeDiagnostics>,
     pub native_linker: NativeLinker,
     pub gl_engine: OpenGlEsEngine,
@@ -96,6 +100,8 @@ impl AndroidRuntime {
             active_activity_obj: None,
             active_activity_class: None,
             initial_render_summary_recorded: false,
+            rendered_view_bounds: Vec::new(),
+            pressed_view: None,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
             native_linker: NativeLinker::new(),
             gl_engine: OpenGlEsEngine::new(),
@@ -956,6 +962,7 @@ impl AndroidRuntime {
             depth: usize,
             seen: &mut std::collections::HashSet<u32>,
             stats: &mut RenderStats,
+            bounds_out: &mut Vec<(u32, RectF)>,
         ) -> Result<(), String> {
             if depth > 128 || !seen.insert(id) { return Ok(()); }
             stats.views += 1;
@@ -964,6 +971,7 @@ impl AndroidRuntime {
                 .map_err(|error| format!("View field {} read failed: {:?}", name, error));
             let visibility = field("mVisibility")?.as_int();
             if visibility != 0 { return Ok(()); }
+            bounds_out.push((id, bounds));
 
             let bg = field("mBackgroundColor")?.as_int() as u32;
             if bg != 0 {
@@ -1103,7 +1111,7 @@ impl AndroidRuntime {
                         (bounds.bottom - bottom).max(bounds.top + top),
                     )
                 };
-                draw(heap, resources, images, canvas, child_id, child_bounds, depth + 1, seen, stats)?;
+                draw(heap, resources, images, canvas, child_id, child_bounds, depth + 1, seen, stats, bounds_out)?;
                 cursor += extent;
                 remaining = (remaining - extent).max(0.0);
                 remaining_weight = (remaining_weight - weight).max(0.0);
@@ -1112,6 +1120,7 @@ impl AndroidRuntime {
         }
 
         let mut stats = RenderStats::default();
+        let mut rendered_view_bounds = Vec::new();
         draw(
             &self.heap,
             &self.resources,
@@ -1122,8 +1131,10 @@ impl AndroidRuntime {
             0,
             &mut std::collections::HashSet::new(),
             &mut stats,
+            &mut rendered_view_bounds,
         )?;
         drop(canvas);
+        self.rendered_view_bounds = rendered_view_bounds;
 
         if !self.initial_render_summary_recorded {
             self.diagnostics.record(
@@ -1145,10 +1156,75 @@ impl AndroidRuntime {
         Ok(true)
     }
 
+    fn hit_test_clickable_view(&self, x: f32, y: f32) -> Option<u32> {
+        self.rendered_view_bounds.iter().rev().find_map(|(view_id, bounds)| {
+            let inside = x >= bounds.left && x <= bounds.right
+                && y >= bounds.top && y <= bounds.bottom;
+            if !inside { return None; }
+            let listener = self.heap.get_instance_field(*view_id, "mOnClickListener")
+                .ok().and_then(|value| value.as_object()).filter(|id| *id != 0)?;
+            let enabled = self.heap.get_instance_field(*view_id, "mEnabled")
+                .map(|value| value.as_int() != 0).unwrap_or(true);
+            if enabled && self.heap.contains(listener) { Some(*view_id) } else { None }
+        })
+    }
+
+    fn dispatch_view_click(&mut self, view_id: u32, step_budget: usize) -> Result<bool, String> {
+        let listener_id = self.heap.get_instance_field(view_id, "mOnClickListener")
+            .map_err(|error| format!("View click listener lookup failed: {:?}", error))?
+            .as_object().filter(|id| *id != 0);
+        let Some(listener_id) = listener_id else { return Ok(false) };
+        let listener_class = self.heap.get(listener_id)
+            .map_err(|error| format!("Click listener object lookup failed: {:?}", error))?
+            .class_descriptor().to_owned();
+        let Some(method_id) = self.class_loader.find_method(
+            &listener_class, "onClick", "(Landroid/view/View;)V"
+        ) else {
+            self.diagnostics.record(
+                DiagnosticSeverity::MissingApi,
+                "Input",
+                "VIEW_CLICK_LISTENER_METHOD_MISSING",
+                Some(&format!("{}->onClick(Landroid/view/View;)V", listener_class)),
+            );
+            return Ok(false);
+        };
+        let method_id = u16::try_from(method_id)
+            .map_err(|_| "View click listener method ID exceeds the interpreter limit".to_string())?;
+        let method_map = self.class_loader.export_method_codes();
+        let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+        let dex_strings = dex_metadata.as_ref()
+            .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let mut vm = ArtVm::new(
+            &mut self.heap,
+            &mut self.hierarchy,
+            &mut self.monitors,
+            &mut self.jni,
+            &method_map,
+            dex_strings,
+        );
+        vm.attach_diagnostics(&self.diagnostics);
+        vm.attach_static_fields(&mut self.static_fields);
+        if let Some(inventory) = dex_metadata.as_ref() {
+            vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+            vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+        }
+        let args = [Value::Object(listener_id), Value::Object(view_id)];
+        let report = vm.execute_method(method_id, &args, step_budget.max(1))
+            .map_err(|error| format!("View click listener interpreter error: {}", error))?;
+        match report.stop_reason {
+            ExecutionStopReason::UncaughtException(exception) => Err(format!(
+                "View click listener threw {}: {:?}", exception.class_descriptor, exception.message
+            )),
+            ExecutionStopReason::StepLimitExceeded => Err(
+                "View click listener exceeded its per-event instruction budget".to_string()
+            ),
+            _ => Ok(true),
+        }
+    }
+
     /// Pumps queued Android touch events on the host display-link cadence.
-    /// The guest Activity receives real MotionEvent objects through its DEX
-    /// onTouchEvent/dispatchTouchEvent override; no event is reported as
-    /// delivered when the APK has no compatible callback.
+    /// Activity touch overrides run first; when they do not consume the gesture,
+    /// ordinary View.setOnClickListener callbacks receive matching down/up taps.
     pub fn pump_guest_events(&mut self, max_events: usize, step_budget: usize) -> Result<usize, String> {
         let activity_obj = self.active_activity_obj
             .ok_or_else(|| "No resumed Android Activity is active".to_string())?;
@@ -1160,56 +1236,85 @@ impl AndroidRuntime {
             .or_else(|| self.class_loader.find_method(
                 &activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z"
             ));
-        let Some(method_id) = callback else {
-            return Ok(0);
-        };
-        let method_id = u16::try_from(method_id)
-            .map_err(|_| "Touch callback method ID exceeds the interpreter limit".to_string())?;
+        let callback_method_id = callback.map(|id| u16::try_from(id)
+            .map_err(|_| "Touch callback method ID exceeds the interpreter limit".to_string()))
+            .transpose()?;
         let method_map = self.class_loader.export_method_codes();
-                let dex_metadata = self.class_loader.dex_inventories.first().cloned();
-                let dex_strings = dex_metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+        let dex_strings = dex_metadata.as_ref()
+            .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
         let mut delivered = 0usize;
 
         while delivered < max_events {
             let Some(event) = self.input_queue.poll_motion() else { break };
-            let event_obj = self.heap.allocate_instance("Landroid/view/MotionEvent;")
-                .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
-            self.heap.set_instance_field(event_obj, "action", Value::Int(event.action))
-                .map_err(|error| format!("MotionEvent action setup failed: {:?}", error))?;
             let pointer = event.pointers.first();
-            self.heap.set_instance_field(event_obj, "x", Value::Float(pointer.map(|p| p.x).unwrap_or(0.0)))
-                .map_err(|error| format!("MotionEvent X setup failed: {:?}", error))?;
-            self.heap.set_instance_field(event_obj, "y", Value::Float(pointer.map(|p| p.y).unwrap_or(0.0)))
-                .map_err(|error| format!("MotionEvent Y setup failed: {:?}", error))?;
-            self.heap.set_instance_field(event_obj, "pressure", Value::Float(pointer.map(|p| p.pressure).unwrap_or(0.0)))
-                .map_err(|error| format!("MotionEvent pressure setup failed: {:?}", error))?;
+            let x = pointer.map(|p| p.x).unwrap_or(0.0);
+            let y = pointer.map(|p| p.y).unwrap_or(0.0);
+            let mut activity_consumed = false;
 
-            let mut vm = ArtVm::new(
-                &mut self.heap,
-                &mut self.hierarchy,
-                &mut self.monitors,
-                &mut self.jni,
-                &method_map,
-                dex_strings,
-            );
-            vm.attach_diagnostics(&self.diagnostics);
-            vm.attach_static_fields(&mut self.static_fields);
-            if let Some(inventory) = dex_metadata.as_ref() {
+            if let Some(method_id) = callback_method_id {
+                let event_obj = self.heap.allocate_instance("Landroid/view/MotionEvent;")
+                    .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
+                self.heap.set_instance_field(event_obj, "action", Value::Int(event.action))
+                    .map_err(|error| format!("MotionEvent action setup failed: {:?}", error))?;
+                self.heap.set_instance_field(event_obj, "x", Value::Float(x))
+                    .map_err(|error| format!("MotionEvent X setup failed: {:?}", error))?;
+                self.heap.set_instance_field(event_obj, "y", Value::Float(y))
+                    .map_err(|error| format!("MotionEvent Y setup failed: {:?}", error))?;
+                self.heap.set_instance_field(event_obj, "pressure", Value::Float(pointer.map(|p| p.pressure).unwrap_or(0.0)))
+                    .map_err(|error| format!("MotionEvent pressure setup failed: {:?}", error))?;
+
+                let mut vm = ArtVm::new(
+                    &mut self.heap,
+                    &mut self.hierarchy,
+                    &mut self.monitors,
+                    &mut self.jni,
+                    &method_map,
+                    dex_strings,
+                );
+                vm.attach_diagnostics(&self.diagnostics);
+                vm.attach_static_fields(&mut self.static_fields);
+                if let Some(inventory) = dex_metadata.as_ref() {
                     vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                     vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                 }
-            let args = [Value::Object(activity_obj), Value::Object(event_obj)];
-            let report = vm.execute_method(method_id, &args, step_budget.max(1))
-                .map_err(|error| format!("Touch callback interpreter error: {}", error))?;
-            drop(vm);
-            match report.stop_reason {
-                ExecutionStopReason::UncaughtException(exception) => {
-                    return Err(format!("Touch callback threw {}: {:?}", exception.class_descriptor, exception.message));
+                let args = [Value::Object(activity_obj), Value::Object(event_obj)];
+                let report = vm.execute_method(method_id, &args, step_budget.max(1))
+                    .map_err(|error| format!("Touch callback interpreter error: {}", error))?;
+                match report.stop_reason {
+                    ExecutionStopReason::UncaughtException(exception) => return Err(format!(
+                        "Touch callback threw {}: {:?}", exception.class_descriptor, exception.message
+                    )),
+                    ExecutionStopReason::StepLimitExceeded => return Err(
+                        "Touch callback exceeded its per-event instruction budget".to_string()
+                    ),
+                    ExecutionStopReason::ReturnedValue(value) => activity_consumed = value.as_int() != 0,
+                    ExecutionStopReason::ReturnedVoid => activity_consumed = false,
                 }
-                ExecutionStopReason::StepLimitExceeded => {
-                    return Err("Touch callback exceeded its per-event instruction budget".to_string());
+            }
+
+            match event.action {
+                ACTION_DOWN => {
+                    self.pressed_view = if activity_consumed { None } else { self.hit_test_clickable_view(x, y) };
                 }
-                _ => { delivered += 1; }
+                ACTION_UP => {
+                    let released_view = self.hit_test_clickable_view(x, y);
+                    let pressed_view = self.pressed_view.take();
+                    if !activity_consumed && pressed_view.is_some() && pressed_view == released_view {
+                        if let Some(view_id) = released_view {
+                            if self.dispatch_view_click(view_id, step_budget)? {
+                                delivered += 1;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                ACTION_CANCEL => self.pressed_view = None,
+                _ => {}
+            }
+
+            if callback_method_id.is_some() {
+                delivered += 1;
             }
         }
         Ok(delivered)
