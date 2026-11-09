@@ -16,9 +16,10 @@ fn receiver(args: &[Value]) -> Result<u32, String> {
 
 fn register_view_constructor(
     jni: &mut JniNativeRegistry,
+    class_descriptor: &'static str,
     prototype: &'static str,
 ) {
-    jni.register("Landroid/view/View;", "<init>", prototype, |_env, args| {
+    jni.register(class_descriptor, "<init>", prototype, |_env, args| {
         let view = receiver(args)?;
         let context = args.get(1).copied().unwrap_or(Value::Null);
         _env.set_object_field(view, "mContext", context)?;
@@ -56,10 +57,15 @@ fn register_view_constructor(
 }
 
 fn register_view_framework(jni: &mut JniNativeRegistry) {
-    register_view_constructor(jni, "(Landroid/content/Context;)V");
-    register_view_constructor(jni, "(Landroid/content/Context;Landroid/util/AttributeSet;)V");
-    register_view_constructor(jni, "(Landroid/content/Context;Landroid/util/AttributeSet;I)V");
-    register_view_constructor(jni, "(Landroid/content/Context;Landroid/util/AttributeSet;II)V");
+    // Android framework constructors are invoked on the concrete DEX owner.
+    // Register TextView explicitly as well as View so ordinary
+    // new TextView(context) applications do not fail before setContentView.
+    for class_descriptor in ["Landroid/view/View;", "Landroid/widget/TextView;"] {
+        register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;)V");
+        register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;)V");
+        register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;I)V");
+        register_view_constructor(jni, class_descriptor, "(Landroid/content/Context;Landroid/util/AttributeSet;II)V");
+    }
 
     jni.register("Landroid/view/View;", "getContext", "()Landroid/content/Context;", |env, args| {
         let id = receiver(args)?;
@@ -430,6 +436,28 @@ mod tests {
             &[Value::Object(parent)]).unwrap();
         assert_eq!(invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "getChildCount", "()I",
             &[Value::Object(parent)]).unwrap(), Some(Value::Int(0)));
+    }
+
+    #[test]
+    fn text_view_context_constructor_initializes_managed_view_state() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let activity = heap.allocate_instance("Lgame/MainActivity;").unwrap();
+        let text = heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+
+        invoke(
+            &jni,
+            &mut heap,
+            "Landroid/widget/TextView;",
+            "<init>",
+            "(Landroid/content/Context;)V",
+            &[Value::Object(text), Value::Object(activity)],
+        ).unwrap();
+
+        assert_eq!(heap.get_instance_field(text, "mContext").unwrap(), Value::Object(activity));
+        assert_eq!(heap.get_instance_field(text, "mTextColor").unwrap(), Value::Int(0xff000000u32 as i32));
+        assert_eq!(heap.get_instance_field(text, "mNeedsDraw").unwrap(), Value::Int(1));
     }
 
     #[test]
