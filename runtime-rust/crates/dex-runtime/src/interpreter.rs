@@ -15,7 +15,7 @@ use crate::hierarchy::ClassHierarchy;
 use crate::exceptions::{TryBlock, ThrownException, RuntimeStackTrace};
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
-use stride_dex_inspector::classes::MethodReference;
+use stride_dex_inspector::classes::{FieldReference, MethodReference};
 use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -55,6 +55,8 @@ pub struct ArtVm<'a> {
     pub diagnostics: Option<&'a RuntimeDiagnostics>,
     pub method_references: Option<&'a [MethodReference]>,
     pub method_lookup: Option<&'a HashMap<(String, String, String), u32>>,
+    pub type_descriptors: Option<&'a [String]>,
+    pub field_references: Option<&'a [FieldReference]>,
 }
 
 fn decode_invoke_arguments(
@@ -128,6 +130,8 @@ impl<'a> ArtVm<'a> {
             diagnostics: None,
             method_references: None,
             method_lookup: None,
+            type_descriptors: None,
+            field_references: None,
         }
     }
 
@@ -158,6 +162,27 @@ impl<'a> ArtVm<'a> {
     }
 
     /// Connects DEX-local method reference indexes to loaded runtime method IDs.
+    /// Attaches DEX-local type_ids and field_ids tables. These indexes are not string_ids.
+    pub fn attach_dex_metadata(
+        &mut self,
+        type_descriptors: &'a [String],
+        field_references: &'a [FieldReference],
+    ) {
+        self.type_descriptors = Some(type_descriptors);
+        self.field_references = Some(field_references);
+    }
+
+    fn resolve_type_descriptor(&self, index: usize, fallback: &str) -> String {
+        self.type_descriptors
+            .and_then(|table| table.get(index))
+            .cloned()
+            .unwrap_or_else(|| fallback.to_owned())
+    }
+
+    fn resolve_field_reference(&self, index: usize) -> Option<&FieldReference> {
+        self.field_references.and_then(|table| table.get(index))
+    }
+
     pub fn attach_method_resolver(
         &mut self,
         references: &'a [MethodReference],
@@ -461,7 +486,7 @@ impl<'a> ArtVm<'a> {
                     let obj_id = rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?;
                     if obj_id != 0 {
                         let type_idx = code_units[pc + 1] as usize;
-                        let target_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
+                        let target_type = self.resolve_type_descriptor(type_idx, "Ljava/lang/Object;");
                         let actual_class = self.heap.get(obj_id)
                             .map_err(|e| format!("{:?}", e))?
                             .class_descriptor()
@@ -488,7 +513,7 @@ impl<'a> ArtVm<'a> {
                         0
                     } else {
                         let type_idx = code_units[pc + 1] as usize;
-                        let target_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
+                        let target_type = self.resolve_type_descriptor(type_idx, "Ljava/lang/Object;");
                         let actual_obj = self.heap.get(obj_id).map_err(|e| format!("{:?}", e))?;
                         if self.hierarchy.is_assignable_from(&target_type, actual_obj.class_descriptor()) {
                             1
@@ -507,7 +532,7 @@ impl<'a> ArtVm<'a> {
                 }
                 0x22 => { // new-instance vAA, type@BBBB
                     let type_idx = code_units[pc + 1] as usize;
-                    let descriptor = self.strings.get(type_idx).cloned().unwrap_or_else(|| "Ljava/lang/Object;".into());
+                    let descriptor = self.resolve_type_descriptor(type_idx, "Ljava/lang/Object;");
                     let id = self.heap.allocate_instance(&descriptor).map_err(|e| format!("{:?}", e))?;
                     rf.write_object(a8, id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
@@ -515,7 +540,7 @@ impl<'a> ArtVm<'a> {
                 0x23 => { // new-array vA, vB, type@CCCC
                     let len = rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let type_idx = code_units[pc + 1] as usize;
-                    let elem_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "[I".into());
+                    let elem_type = self.resolve_type_descriptor(type_idx, "[I");
                     let id = self.heap.allocate_array(&elem_type, len).map_err(|e| format!("{:?}", e))?;
                     rf.write_object(a4, id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
@@ -531,7 +556,7 @@ impl<'a> ArtVm<'a> {
                         (packed >> 12) & 0x0f,
                         ((first >> 8) & 0x0f) as u16,
                     ];
-                    let elem_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "[I".into());
+                    let elem_type = self.resolve_type_descriptor(type_idx, "[I");
                     let arr_id = self.heap.allocate_array(&elem_type, count as i32).map_err(|e| format!("{:?}", e))?;
                     for (i, &reg) in candidate_regs[..count].iter().enumerate() {
                         let v = rf.read_int(reg).map_err(|e| format!("Invalid reg {}", e))?;
@@ -544,7 +569,7 @@ impl<'a> ArtVm<'a> {
                     let count = a8 as usize;
                     let type_idx = code_units[pc + 1] as usize;
                     let start_reg = code_units[pc + 2];
-                    let elem_type = self.strings.get(type_idx).cloned().unwrap_or_else(|| "[I".into());
+                    let elem_type = self.resolve_type_descriptor(type_idx, "[I");
                     let arr_id = self.heap.allocate_array(&elem_type, count as i32).map_err(|e| format!("{:?}", e))?;
                     for i in 0..count {
                         let reg = start_reg + i as u16;
@@ -825,7 +850,7 @@ impl<'a> ArtVm<'a> {
                 0x52 | 0x55..=0x58 => { // iget, iget-boolean/byte/char/short
                     let obj_id = rf.read_object(b4).map_err(|e| format!("Invalid reg {}", e))?;
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("field_{}", field_idx));
+                    let field_name = self.resolve_field_reference(field_idx).map(|field| field.name.clone()).unwrap_or_else(|| format!("field_{}", field_idx));
                     let val = self.heap.get_instance_field(obj_id, &field_name).map_err(|e| format!("{:?}", e))?;
                     rf.write_int(a4, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
@@ -872,8 +897,10 @@ impl<'a> ArtVm<'a> {
                 }
                 0x60..=0x66 => { // sget variants
                     let field_idx = code_units[pc + 1] as usize;
-                    let field_name = self.strings.get(field_idx).cloned().unwrap_or_else(|| format!("sfield_{}", field_idx));
-                    let key = (method_class.clone(), field_name);
+                    let field = self.resolve_field_reference(field_idx);
+                    let field_name = field.map(|reference| reference.name.clone()).unwrap_or_else(|| format!("sfield_{}", field_idx));
+                    let field_owner = field.map(|reference| reference.class_descriptor.clone()).unwrap_or_else(|| method_class.clone());
+                    let key = (field_owner, field_name);
                     let val = self.read_static_field(&key);
                     if op == 0x61 {
                         rf.write_long(a8, val.as_long()).map_err(|e| format!("Invalid reg {}", e))?;
