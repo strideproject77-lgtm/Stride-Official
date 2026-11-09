@@ -4,6 +4,7 @@ import UIKit
 @main
 struct StrideApp: App {
     @UIApplicationDelegateAdaptor(StrideAppDelegate.self) private var appDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var library = APKLibraryStore()
 
     init() {
@@ -15,6 +16,11 @@ struct StrideApp: App {
             ContentView()
                 .environmentObject(library)
                 .preferredColorScheme(.dark)
+                .onChange(of: scenePhase) { phase in
+                    if phase == .background || phase == .inactive {
+                        StrideDiagnostics.shared.flush()
+                    }
+                }
         }
     }
 }

@@ -8,16 +8,19 @@ import UIKit
 final class StrideDiagnostics: ObservableObject {
     static let shared = StrideDiagnostics()
 
-    enum Severity: String, Sendable {
+    enum Severity: String, Sendable, Codable {
         case info = "INFO"
         case warning = "WARN"
         case error = "ERROR"
         case fatal = "FATAL"
     }
 
-    struct Entry: Identifiable {
+    struct Entry: Identifiable, Codable {
         let id = UUID()
         let timestamp: Date
+        let sequence: UInt64
+        let sessionID: String
+        let uptimeSeconds: TimeInterval
         let severity: Severity
         let stage: String
         let code: String
@@ -26,7 +29,7 @@ final class StrideDiagnostics: ObservableObject {
         var line: String {
             let stamp = ISO8601DateFormatter().string(from: timestamp)
             let suffix = recovery.map { " | recovery: \($0)" } ?? ""
-            return "[\(stamp)] [\(severity.rawValue)] [\(stage)] [\(code)] \(message)\(suffix)"
+            return "[\(stamp)] [#\(sequence)] [S:\(sessionID.prefix(8))] [\(severity.rawValue)] [\(stage)] [\(code)] \(message)\(suffix)"
         }
     }
 
@@ -38,6 +41,14 @@ final class StrideDiagnostics: ObservableObject {
     private let logger = Logger(subsystem: "com.strideproject.stride", category: "diagnostics")
     private let fileManager = FileManager.default
     private var handle: FileHandle?
+    private var structuredHandle: FileHandle?
+    private var sessionHandle: FileHandle?
+    private var pendingText = Data()
+    private var pendingStructured = Data()
+    private var pendingSession = Data()
+    private var sessionFileURL: URL?
+    private let flushBatchSize = 16
+    private var sequence: UInt64 = 0
     private let capacity = 2000
     private var sessionStartedAt = Date()
 
@@ -51,6 +62,24 @@ final class StrideDiagnostics: ObservableObject {
 
     var logFileURL: URL {
         documentsURL.appendingPathComponent("stride-diagnostics.log")
+    }
+
+    var structuredLogFileURL: URL {
+        documentsURL.appendingPathComponent("stride-diagnostics.jsonl")
+    }
+
+    var currentSessionLogURL: URL? { sessionFileURL }
+
+    func latestSessionLogURL(apkName: String) -> URL? {
+        let folder = documentsURL.appendingPathComponent("StrideLogs/Sessions", isDirectory: true)
+        guard let files = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
+        let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return files.filter { $0.lastPathComponent.hasPrefix(String(safeName.prefix(72)) + "-") && $0.pathExtension == "log" }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }.first
     }
 
     private var reportsFolder: URL {
@@ -73,11 +102,27 @@ final class StrideDiagnostics: ObservableObject {
     }
 
     func beginSession(apkName: String) {
+        if sessionHandle != nil { finishSession(status: "replaced by a new launch") }
         currentAPK = apkName
         issueCount = 0
+        sequence = 0
+        pendingSession.removeAll(keepingCapacity: true)
         entries.removeAll(keepingCapacity: true)
         sessionID = UUID().uuidString
         sessionStartedAt = Date()
+        do {
+            let folder = documentsURL.appendingPathComponent("StrideLogs/Sessions", isDirectory: true)
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+            let file = folder.appendingPathComponent("\(safeName.prefix(72))-\(sessionID.prefix(8)).log")
+            _ = fileManager.createFile(atPath: file.path, contents: nil)
+            sessionHandle = try FileHandle(forWritingTo: file)
+            sessionFileURL = file
+        } catch {
+            record(.error, stage: "SESSION", code: "SESSION_LOG_OPEN_FAILED",
+                   "Could not open per-session log: \(error.localizedDescription)",
+                   recovery: "Global diagnostics remain active; check app storage.")
+        }
         let marker: [String: String] = [
             "session_id": sessionID,
             "apk": apkName,
@@ -99,26 +144,60 @@ final class StrideDiagnostics: ObservableObject {
 
     func record(_ severity: Severity, stage: String, code: String,
                 _ message: String, recovery: String? = nil) {
-        let entry = Entry(timestamp: Date(), severity: severity, stage: stage,
-                          code: code, message: message, recovery: recovery)
+        sequence &+= 1
+        let entry = Entry(timestamp: Date(), sequence: sequence, sessionID: sessionID,
+                          uptimeSeconds: ProcessInfo.processInfo.systemUptime,
+                          severity: severity, stage: stage, code: code,
+                          message: message, recovery: recovery)
         entries.append(entry)
         if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
         if severity == .error || severity == .fatal { issueCount += 1 }
         logger.log("\(entry.line, privacy: .public)")
         guard let data = (entry.line + "\n").data(using: .utf8) else { return }
-        do {
-            try handle?.write(contentsOf: data)
-            try handle?.synchronize()
-        } catch {
-            logger.error("Could not persist diagnostic line: \(error.localizedDescription, privacy: .public)")
+        pendingText.append(data)
+        pendingSession.append(data)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let structured = try? encoder.encode(entry) {
+            pendingStructured.append(structured)
+            pendingStructured.append(0x0A)
         }
+        if severity != .info || sequence % UInt64(flushBatchSize) == 0 { flush() }
     }
 
     func finishSession(status: String) {
         record(.info, stage: "SESSION", code: "END",
                "Session ended: \(status); collected \(issueCount) error(s)")
-        try? handle?.synchronize()
+        flush()
+        try? sessionHandle?.close()
+        sessionHandle = nil
+        sessionFileURL = nil
         try? fileManager.removeItem(at: markerURL)
+    }
+
+
+    /// Batch routine events to reduce disk I/O; flush on warnings, failures and app backgrounding.
+    func flush() {
+        writeBuffered(&pendingText, to: handle, label: "text")
+        writeBuffered(&pendingStructured, to: structuredHandle, label: "structured")
+        writeBuffered(&pendingSession, to: sessionHandle, label: "session")
+        do {
+            try handle?.synchronize()
+            try structuredHandle?.synchronize()
+            try sessionHandle?.synchronize()
+        } catch {
+            logger.error("Could not synchronize diagnostic logs: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func writeBuffered(_ data: inout Data, to file: FileHandle?, label: String) {
+        guard !data.isEmpty, let file else { return }
+        do {
+            try file.write(contentsOf: data)
+            data.removeAll(keepingCapacity: true)
+        } catch {
+            logger.error("Could not append \(label, privacy: .public) diagnostics: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Creates a portable, per-APK report while preserving the unmodified raw session log.
@@ -131,7 +210,9 @@ final class StrideDiagnostics: ObservableObject {
             let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
             let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
-            let lines = rawLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
+            flush()
+            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
+            let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
             let stamp = ISO8601DateFormatter().string(from: sessionStartedAt)
             let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
@@ -170,7 +251,7 @@ final class StrideDiagnostics: ObservableObject {
             report += "- Available-memory samples, virtual address-space mappings, and physical memory are different measurements.\n"
             report += "- Native signal/register/backtrace details appear only if the runtime supplied them; this report does not install a competing signal handler.\n"
             report += "\nFULL RAW SESSION LOG (preserved)\n========================================\n"
-            report += rawLog.isEmpty ? "(No raw session lines were captured.)\n" : rawLog + (rawLog.hasSuffix("\n") ? "" : "\n")
+            report += persistedSessionLog.isEmpty ? "(No raw session lines were captured.)\n" : persistedSessionLog + (persistedSessionLog.hasSuffix("\n") ? "" : "\n")
             report += "\nSTRUCTURED DIAGNOSTIC TIMELINE\n========================================\n"
             report += entries.map(\.line).joined(separator: "\n")
             report += "\n"
@@ -233,6 +314,11 @@ final class StrideDiagnostics: ObservableObject {
         do {
             handle = try FileHandle(forWritingTo: url)
             try handle?.seekToEnd()
+            if !fileManager.fileExists(atPath: structuredLogFileURL.path) {
+                _ = fileManager.createFile(atPath: structuredLogFileURL.path, contents: nil)
+            }
+            structuredHandle = try FileHandle(forWritingTo: structuredLogFileURL)
+            try structuredHandle?.seekToEnd()
         } catch {
             logger.error("Could not open diagnostics file: \(error.localizedDescription, privacy: .public)")
         }

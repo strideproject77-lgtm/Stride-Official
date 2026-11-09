@@ -899,6 +899,7 @@ private struct APKDetailSheet: View {
                             executionResult = nil
                             sessionLogLines = []
                             diagnostics.beginSession(apkName: item.displayName)
+                            logExportURL = diagnostics.currentSessionLogURL
                             appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
                             appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
                             do {
@@ -1229,18 +1230,16 @@ private struct APKDetailSheet: View {
     }
 
     private func logFileURL() -> URL {
-        let safeName = item.displayName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("StrideLogs", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("\(safeName)-latest-session.txt")
+        diagnostics.latestSessionLogURL(apkName: item.displayName) ?? diagnostics.logFileURL
     }
 
     private func appendSessionLog(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
         sessionLogLines.append("[\(stamp)] \(message)")
+        if sessionLogLines.count > 2_000 {
+            sessionLogLines.removeFirst(sessionLogLines.count - 2_000)
+        }
         let upper = message.uppercased()
-        let baseLine = message.replacingOccurrences(of: "[RUNTIME] ", with: "")
         let isNativeCrash = upper.contains("FATAL SIGNAL") || upper.contains("SIGSEGV") ||
             upper.contains("SIGABRT") || upper.contains("SIGBUS") || upper.contains("SIGILL") || upper.contains("SIGFPE")
         let isSyscall = upper.contains("SYSTEM CALL") && (upper.contains("ENOSYS") || upper.contains("NOT PROVIDED"))
@@ -1259,25 +1258,34 @@ private struct APKDetailSheet: View {
             (isNetworkTelemetry ? "NETWORK_TELEMETRY_FAILURE" :
             (isRelocation ? "RELOCATION_FAILURE" :
             (isInterpreterFailure ? "RUNTIME_INTERPRETER_FAILURE" : "RUNTIME_EVENT")))))
-        let stage = isNativeCrash ? "NATIVE_CRASH" :
-            (isNetworkTelemetry ? "NETWORK" :
-            (message.hasPrefix("[SESSION]") ? "SESSION" :
-            (message.hasPrefix("[RUNTIME]") ? "RUST_RUNTIME" : "EXECUTION")))
-        let recovery: String? = isNativeCrash ? "Preserve the complete signal, fault address, register set, module offsets and backtrace; symbolize against the exact library build." :
-            (isSyscall ? "Check syscall compatibility and implement the guest syscall only when its semantics are understood." :
-            (isUnresolvedImport ? "Resolve the import against a compatible Bionic/libc implementation; do not silently bind behavior-changing stubs." : nil))
-        StrideDiagnostics.shared.record(severity, stage: stage, code: code, baseLine, recovery: recovery)
-        let content = sessionLogLines.joined(separator: "\n") + "\n"
-        let url = logFileURL()
-        do {
-            try content.write(to: url, atomically: true, encoding: .utf8)
-            logExportURL = url
-        } catch {
-            executionError = "Could not save session log: \(error.localizedDescription)"
+        let stage: String
+        switch true {
+        case isNativeCrash: stage = "NATIVE_CRASH"
+        case isNetworkTelemetry: stage = "NETWORK"
+        case message.hasPrefix("[SESSION]"): stage = "SESSION"
+        case upper.contains("MANIFEST"): stage = "MANIFEST"
+        case upper.contains("DEX") || isInterpreterFailure: stage = "DEX"
+        case upper.contains("ELF") || upper.contains("NATIVE LIBRARY"): stage = "ELF"
+        case upper.contains("JNI"): stage = "JNI"
+        case upper.contains("TOUCH") || upper.contains("INPUT"): stage = "INPUT"
+        case upper.contains("FRAME") || upper.contains("RENDER") || upper.contains("CANVAS"): stage = "GRAPHICS"
+        case upper.contains("ACTIVITY") || upper.contains("LIFECYCLE"): stage = "LIFECYCLE"
+        case upper.contains("ARCHIVE") || upper.contains("APK"): stage = "ARCHIVE"
+        case upper.contains("CLASS") || upper.contains("METHOD"): stage = "DEX_LINKER"
+        case upper.contains("RUNTIME"): stage = "ART_RUNTIME"
+        default: stage = "EXECUTION"
         }
+        let recovery: String? = isNativeCrash ? "Preserve signal, fault address, registers, module offsets and backtrace; symbolize against the exact library build." :
+            (isSyscall ? "Check syscall compatibility and implement only understood guest semantics." :
+            (isUnresolvedImport ? "Resolve against compatible Bionic/libc behavior; do not silently bind unsafe stubs." : nil))
+        diagnostics.record(severity, stage: stage, code: code,
+                           message.replacingOccurrences(of: "[RUNTIME] ", with: ""),
+                           recovery: recovery)
+        logExportURL = diagnostics.currentSessionLogURL ?? logFileURL()
     }
 
     private func loadPreviousSession() {
+        diagnostics.flush()
         let url = logFileURL()
         guard let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
         sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
