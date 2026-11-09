@@ -266,6 +266,17 @@ impl JniNativeRegistry {
             let suffix = text.chars().skip(start).collect::<String>();
             Ok(Some(Value::Object(env.new_string_utf(&suffix)?)))
         });
+        self.register("Ljava/lang/String;", "substring", "(II)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("String.substring receiver is null")?;
+            let text = env.get_string_utf(receiver)?.to_owned();
+            let chars = text.chars().collect::<Vec<_>>();
+            let start = args.get(1).map(Value::as_int).unwrap_or(0).max(0) as usize;
+            let end = args.get(2).map(Value::as_int).unwrap_or(chars.len() as i32).max(0) as usize;
+            let start = start.min(chars.len());
+            let end = end.max(start).min(chars.len());
+            let result = chars[start..end].iter().collect::<String>();
+            Ok(Some(Value::Object(env.new_string_utf(&result)?)))
+        });
         self.register("Ljava/lang/String;", "concat", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("String.concat receiver is null")?;
             let left = env.get_string_utf(receiver)?.to_owned();
@@ -396,6 +407,13 @@ mod tests {
         let combined = concat(&mut env, &[Value::Object(left), Value::Object(right)]).unwrap()
             .and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(combined).unwrap(), "123");
+
+        let substring = registry.find(
+            "Ljava/lang/String;", "substring", "(II)Ljava/lang/String;",
+        ).unwrap();
+        let middle = substring(&mut env, &[Value::Object(combined), Value::Int(1), Value::Int(2)])
+            .unwrap().and_then(|value| value.as_object()).unwrap();
+        assert_eq!(env.get_string_utf(middle).unwrap(), "2");
 
         let parse = registry.find(
             "Ljava/lang/Double;", "parseDouble", "(Ljava/lang/String;)D",
