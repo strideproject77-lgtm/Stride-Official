@@ -170,6 +170,55 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         env.set_object_field(parent, "mNeedsDraw", Value::Int(1))?;
         Ok(None)
     });
+    jni.register("Landroid/view/ViewGroup;", "addView", "(Landroid/view/View;I)V", |env, args| {
+        let parent = receiver(args)?;
+        let child = args.get(1).and_then(Value::as_object).ok_or_else(|| "ViewGroup.addView received a null child".to_owned())?;
+        if parent == child || !env.heap.contains(child) { return Err("ViewGroup.addView received an invalid child".to_owned()); }
+        let count = env.get_object_field(parent, "mChildCount")?.as_int().max(0) as usize;
+        let requested = args.get(2).map(Value::as_int).unwrap_or(count as i32);
+        let index = if requested < 0 { count } else { (requested as usize).min(count) };
+        for slot in (index..count).rev() {
+            let previous = env.get_object_field(parent, &format!("mChild{}", slot))?;
+            env.set_object_field(parent, &format!("mChild{}", slot + 1), previous)?;
+        }
+        env.set_object_field(parent, &format!("mChild{}", index), Value::Object(child))?;
+        env.set_object_field(parent, "mChildCount", Value::Int((count + 1) as i32))?;
+        env.set_object_field(parent, "mNeedsLayout", Value::Int(1))?;
+        env.set_object_field(parent, "mNeedsDraw", Value::Int(1))?;
+        Ok(None)
+    });
+    jni.register("Landroid/view/ViewGroup;", "removeView", "(Landroid/view/View;)V", |env, args| {
+        let parent = receiver(args)?;
+        let child = args.get(1).and_then(Value::as_object).ok_or_else(|| "ViewGroup.removeView received a null child".to_owned())?;
+        let count = env.get_object_field(parent, "mChildCount")?.as_int().clamp(0, 4096) as usize;
+        let mut found = None;
+        for index in 0..count {
+            if env.get_object_field(parent, &format!("mChild{}", index))?.as_object() == Some(child) {
+                found = Some(index);
+                break;
+            }
+        }
+        if let Some(index) = found {
+            for slot in index..count.saturating_sub(1) {
+                let next = env.get_object_field(parent, &format!("mChild{}", slot + 1))?;
+                env.set_object_field(parent, &format!("mChild{}", slot), next)?;
+            }
+            env.set_object_field(parent, &format!("mChild{}", count - 1), Value::Null)?;
+            env.set_object_field(parent, "mChildCount", Value::Int((count - 1) as i32))?;
+            env.set_object_field(parent, "mNeedsLayout", Value::Int(1))?;
+            env.set_object_field(parent, "mNeedsDraw", Value::Int(1))?;
+        }
+        Ok(None)
+    });
+    jni.register("Landroid/view/ViewGroup;", "removeAllViews", "()V", |env, args| {
+        let parent = receiver(args)?;
+        let count = env.get_object_field(parent, "mChildCount")?.as_int().clamp(0, 4096) as usize;
+        for index in 0..count { env.set_object_field(parent, &format!("mChild{}", index), Value::Null)?; }
+        env.set_object_field(parent, "mChildCount", Value::Int(0))?;
+        env.set_object_field(parent, "mNeedsLayout", Value::Int(1))?;
+        env.set_object_field(parent, "mNeedsDraw", Value::Int(1))?;
+        Ok(None)
+    });
     jni.register("Landroid/view/ViewGroup;", "getChildCount", "()I", |env, args| {
         let parent = receiver(args)?;
         Ok(Some(env.get_object_field(parent, "mChildCount")?))
@@ -284,6 +333,30 @@ mod tests {
             &[Value::Object(view)]).unwrap(), Some(Value::Int(42)));
         assert_eq!(invoke(&jni, &mut heap, "Landroid/view/View;", "getVisibility", "()I",
             &[Value::Object(view)]).unwrap(), Some(Value::Int(4)));
+    }
+
+    #[test]
+    fn view_group_supports_indexed_insert_remove_and_clear() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let parent = heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
+        let first = heap.allocate_instance("Landroid/widget/TextView;").unwrap();
+        let second = heap.allocate_instance("Landroid/widget/Button;").unwrap();
+        invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "addView", "(Landroid/view/View;)V",
+            &[Value::Object(parent), Value::Object(first)]).unwrap();
+        invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "addView", "(Landroid/view/View;I)V",
+            &[Value::Object(parent), Value::Object(second), Value::Int(0)]).unwrap();
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "getChildAt", "(I)Landroid/view/View;",
+            &[Value::Object(parent), Value::Int(0)]).unwrap(), Some(Value::Object(second)));
+        invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "removeView", "(Landroid/view/View;)V",
+            &[Value::Object(parent), Value::Object(second)]).unwrap();
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "getChildCount", "()I",
+            &[Value::Object(parent)]).unwrap(), Some(Value::Int(1)));
+        invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "removeAllViews", "()V",
+            &[Value::Object(parent)]).unwrap();
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/ViewGroup;", "getChildCount", "()I",
+            &[Value::Object(parent)]).unwrap(), Some(Value::Int(0)));
     }
 
     #[test]
