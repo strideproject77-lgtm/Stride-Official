@@ -36,6 +36,12 @@ fn register_view_constructor(
         _env.set_object_field(view, "mBottom", Value::Int(0))?;
         _env.set_object_field(view, "mNeedsLayout", Value::Int(1))?;
         _env.set_object_field(view, "mNeedsDraw", Value::Int(1))?;
+        _env.set_object_field(view, "mBackgroundColor", Value::Int(0))?;
+        _env.set_object_field(view, "mText", Value::Null)?;
+        _env.set_object_field(view, "mTextColor", Value::Int(0xff000000u32 as i32))?;
+        _env.set_object_field(view, "mTextSize", Value::Float(14.0))?;
+        _env.set_object_field(view, "mOrientation", Value::Int(1))?;
+        _env.set_object_field(view, "mImageResourceId", Value::Int(0))?;
         Ok(None)
     });
 }
@@ -107,6 +113,38 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         env.set_object_field(id, "mBackgroundColor", Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
         env.set_object_field(id, "mNeedsDraw", Value::Int(1))?;
         Ok(None)
+    });
+
+    jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","setTextColor","(I)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mTextColor",Value::Int(args.get(1).map(Value::as_int).unwrap_or(0xff000000u32 as i32)))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","setTextSize","(IF)V",|env,args|{
+        let id=receiver(args)?;let size=args.get(2).map(Value::as_float).unwrap_or(14.0);
+        if size.is_finite()&&size>0.0{env.set_object_field(id,"mTextSize",Value::Float(size))?;}
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/TextView;","setTextSize","(F)V",|env,args|{
+        let id=receiver(args)?;let size=args.get(1).map(Value::as_float).unwrap_or(14.0);
+        if size.is_finite()&&size>0.0{env.set_object_field(id,"mTextSize",Value::Float(size))?;}
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/ImageView;","setImageResource","(I)V",|env,args|{
+        let id=receiver(args)?;env.set_object_field(id,"mImageResourceId",Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
+        env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
+    });
+    jni.register("Landroid/widget/LinearLayout;","setOrientation","(I)V",|env,args|{
+        let id=receiver(args)?;let orientation=args.get(1).map(Value::as_int).unwrap_or(1);
+        env.set_object_field(id,"mOrientation",Value::Int(if orientation==0{0}else{1}))?;
+        env.set_object_field(id,"mNeedsLayout",Value::Int(1))?;Ok(None)
     });
     jni.register("Landroid/view/View;", "getWidth", "()I", |env, args| {
         let id = receiver(args)?;
