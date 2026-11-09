@@ -16,7 +16,7 @@ final class StrideDiagnostics: ObservableObject {
     }
 
     struct Entry: Identifiable, Codable {
-        let id = UUID()
+        let id: UUID
         let timestamp: Date
         let sequence: UInt64
         let sessionID: String
@@ -145,7 +145,7 @@ final class StrideDiagnostics: ObservableObject {
     func record(_ severity: Severity, stage: String, code: String,
                 _ message: String, recovery: String? = nil) {
         sequence &+= 1
-        let entry = Entry(timestamp: Date(), sequence: sequence, sessionID: sessionID,
+        let entry = Entry(id: UUID(), timestamp: Date(), sequence: sequence, sessionID: sessionID,
                           uptimeSeconds: ProcessInfo.processInfo.systemUptime,
                           severity: severity, stage: stage, code: code,
                           message: message, recovery: recovery)
