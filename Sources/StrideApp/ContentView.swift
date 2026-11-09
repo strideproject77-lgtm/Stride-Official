@@ -801,6 +801,8 @@ private struct APKDetailSheet: View {
     @State private var showingExecutionScreen = false
     @State private var isExecutionChromeHidden = false
     @State private var launchTask: Task<Void, Never>?
+    @State private var frameScheduler: GuestFrameScheduler?
+    @State private var guestTouchActive = false
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
@@ -899,6 +901,9 @@ private struct APKDetailSheet: View {
                         launchTask = Task {
                             isExecuting = true
                             executionError = nil
+                            frameScheduler?.stop()
+                            frameScheduler = nil
+                            guestTouchActive = false
                             executionResult = nil
                             sessionLogLines = []
                             diagnostics.beginSession(apkName: item.displayName)
@@ -921,7 +926,20 @@ private struct APKDetailSheet: View {
                                 }
                                 appendSessionLog("[SESSION] Applied APK screenOrientation=\(res.screenOrientation)")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
-                                appendSessionLog("[SESSION] Runtime handle retained; guest event loop is not active yet")
+                                let scheduler = GuestFrameScheduler { _ in
+                                    let pump = res.session.pumpGuestEvents()
+                                    if pump.status == 0 {
+                                        if pump.delivered > 0 {
+                                            appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
+                                        }
+                                    } else {
+                                        appendSessionLog("[ERROR] Guest input pump failed with status \(pump.status)")
+                                        frameScheduler?.stop()
+                                    }
+                                }
+                                frameScheduler = scheduler
+                                scheduler.start()
+                                appendSessionLog("[SESSION] Host display-link event pump started; guest rendering is not yet verified")
                                 appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
                             } catch {
                                 guard !Task.isCancelled else { return }
@@ -1092,6 +1110,8 @@ private struct APKDetailSheet: View {
         .onDisappear {
             launchTask?.cancel()
             launchTask = nil
+            frameScheduler?.stop()
+            frameScheduler = nil
             StrideOrientationController.shared.reset()
             executionResult?.session.close()
             if executionResult != nil {
@@ -1152,19 +1172,13 @@ private struct APKDetailSheet: View {
                     .padding(.vertical, 11)
                     .background(Color(white: 0.075))
 
-                    Spacer(minLength: 0)
+                    guestTouchSurface
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else {
-                VStack {
-                    Spacer()
-                    HStack(alignment: .bottom) {
-                        Spacer()
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 12)
-                }
-                .transition(.opacity)
+                guestTouchSurface
+                    .ignoresSafeArea()
+                    .transition(.opacity)
             }
         }
         .contentShape(Rectangle())
@@ -1187,6 +1201,9 @@ private struct APKDetailSheet: View {
     private func closeExecutionSession() {
         launchTask?.cancel()
         launchTask = nil
+        frameScheduler?.stop()
+        frameScheduler = nil
+        guestTouchActive = false
         showingExecutionScreen = false
         isExecutionChromeHidden = false
         executionResult?.session.close()
@@ -1200,8 +1217,38 @@ private struct APKDetailSheet: View {
     private var executionStatusText: String {
         if isExecuting { return "Starting…" }
         if executionError != nil { return "Could not start — see the log" }
-        if executionResult != nil { return "Activity ready — guest loop not active" }
+        if executionResult != nil { return "Activity resumed · event pump active" }
         return "Ready"
+    }
+
+    private var guestTouchSurface: some View {
+        GeometryReader { geometry in
+            Color.clear
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                        .onChanged { value in
+                            let action: Int32 = guestTouchActive ? 2 : 0
+                            guestTouchActive = true
+                            _ = executionResult?.session.dispatchTouch(
+                                action: action,
+                                x: Float(value.location.x),
+                                y: Float(value.location.y)
+                            )
+                        }
+                        .onEnded { value in
+                            _ = executionResult?.session.dispatchTouch(
+                                action: 1,
+                                x: Float(value.location.x),
+                                y: Float(value.location.y)
+                            )
+                            guestTouchActive = false
+                        }
+                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel("Android app touch surface")
     }
 
     private var executionStatusColor: Color {
