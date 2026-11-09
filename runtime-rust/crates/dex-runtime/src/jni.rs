@@ -377,4 +377,37 @@ mod tests {
         env.pop_local_frame();
         assert_eq!(env.local_refs.len(), 0);
     }
+    #[test]
+    fn calculator_string_and_double_core_bridges_execute() {
+        let mut registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let left = env.new_string_utf("12").unwrap();
+        let right = env.new_string_utf("3").unwrap();
+
+        let equals = registry.find(
+            "Ljava/lang/String;", "equals", "(Ljava/lang/Object;)Z",
+        ).unwrap();
+        assert_eq!(equals(&mut env, &[Value::Object(left), Value::Object(left)]).unwrap(), Some(Value::Int(1)));
+
+        let concat = registry.find(
+            "Ljava/lang/String;", "concat", "(Ljava/lang/String;)Ljava/lang/String;",
+        ).unwrap();
+        let combined = concat(&mut env, &[Value::Object(left), Value::Object(right)]).unwrap()
+            .and_then(Value::as_object).unwrap();
+        assert_eq!(env.get_string_utf(combined).unwrap(), "123");
+
+        let parse = registry.find(
+            "Ljava/lang/Double;", "parseDouble", "(Ljava/lang/String;)D",
+        ).unwrap();
+        assert_eq!(parse(&mut env, &[Value::Object(combined)]).unwrap(), Some(Value::Double(123.0)));
+
+        let stringify = registry.find(
+            "Ljava/lang/String;", "valueOf", "(D)Ljava/lang/String;",
+        ).unwrap();
+        let rendered = stringify(&mut env, &[Value::Double(2.5)]).unwrap()
+            .and_then(Value::as_object).unwrap();
+        assert_eq!(env.get_string_utf(rendered).unwrap(), "2.5");
+    }
+
 }
