@@ -341,6 +341,9 @@ impl NativeLinker {
 
     /// Inspects and links an ELF shared library binary into the native environment.
     pub fn load_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<&LoadedNativeModule, String> {
+        if self.modules.contains_key(soname) {
+            return Err(format!("Native library {} is already loaded in this process", soname));
+        }
         let elf_info = inspect_elf(elf_bytes)
             .map_err(|e| format!("ELF inspection failed for {}: {:?}", soname, e))?;
 
@@ -560,12 +563,40 @@ impl NativeLinker {
         None
     }
 
-    /// Finds JNI native method binding for a Java native method.
+    /// Finds a JNI native method using the short symbol first and the
+    /// signature-qualified symbol required for overloaded native methods second.
     pub fn find_jni_binding(&self, class_descriptor: &str, method_name: &str) -> Option<ResolvedSymbol<'_>> {
-        let clean_class = class_descriptor.trim_start_matches('L').trim_end_matches(';').replace('/', "_");
-        let candidate = format!("Java_{}_{}", clean_class, method_name);
-        self.resolve_symbol(&candidate)
+        let class = jni_mangle_component(class_descriptor.trim_start_matches('L').trim_end_matches(';'));
+        let method = jni_mangle_component(method_name);
+        self.resolve_symbol(&format!("Java_{}_{}", class, method))
     }
+
+    pub fn find_jni_binding_with_signature(
+        &self, class_descriptor: &str, method_name: &str, prototype: &str
+    ) -> Option<ResolvedSymbol<'_>> {
+        if let Some(symbol) = self.find_jni_binding(class_descriptor, method_name) { return Some(symbol); }
+        let close = prototype.find(')')?;
+        let parameters = &prototype[..close];
+        let class = jni_mangle_component(class_descriptor.trim_start_matches('L').trim_end_matches(';'));
+        let method = jni_mangle_component(method_name);
+        let signature = jni_mangle_component(parameters);
+        self.resolve_symbol(&format!("Java_{}_{}__{}", class, method, signature))
+    }
+}
+
+fn jni_mangle_component(input: &str) -> String {
+    let mut output = String::new();
+    for ch in input.chars() {
+        match ch {
+            '/' | '.' => output.push('_'),
+            '_' => output.push_str("_1"),
+            ';' => output.push_str("_2"),
+            '[' => output.push_str("_3"),
+            c if c.is_ascii_alphanumeric() => output.push(c),
+            c => output.push_str(&format!("_0{:04x}", c as u32)),
+        }
+    }
+    output
 }
 
 pub enum ResolvedSymbol<'a> {
