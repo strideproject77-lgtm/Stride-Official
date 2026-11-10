@@ -264,6 +264,21 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         env.set_object_field(id, "mNeedsDraw", Value::Int(1))?;
         Ok(None)
     });
+    jni.register("Landroid/view/View;", "setOnApplyWindowInsetsListener",
+        "(Landroid/view/View$OnApplyWindowInsetsListener;)V", |env, args| {
+            let view = receiver(args)?;
+            env.set_object_field(view, "mWindowInsetsListener", args.get(1).copied().unwrap_or(Value::Null))?;
+            Ok(None)
+        });
+    jni.register("Landroid/view/View;", "setSystemUiVisibility", "(I)V", |env, args| {
+        let view = receiver(args)?;
+        env.set_object_field(view, "mSystemUiVisibility", Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
+        Ok(None)
+    });
+    jni.register("Landroid/view/View;", "getSystemUiVisibility", "()I", |env, args| {
+        let view = receiver(args)?;
+        Ok(Some(env.get_object_field(view, "mSystemUiVisibility")?))
+    });
     jni.register("Landroid/view/View;", "requestLayout", "()V", |env, args| {
         let id = receiver(args)?;
         env.set_object_field(id, "mNeedsLayout", Value::Int(1))?;
