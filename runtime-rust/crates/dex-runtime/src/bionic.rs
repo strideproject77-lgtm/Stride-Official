@@ -299,6 +299,7 @@ pub struct PlannedNativeRelocation {
 }
 
 /// A loaded Android shared library module.
+#[derive(Debug)]
 pub struct LoadedNativeModule {
     pub name: String,
     pub architecture: ElfArchitecture,
@@ -685,6 +686,14 @@ mod tests {
         let resolved = linker.find_jni_binding("Lcom/example/app/NativeLib;", "stringFromJNI");
         assert!(matches!(resolved, Some(ResolvedSymbol::NativeFunction { soname: "libnative-lib.so", address: 0x1000 })));
     }
+    #[test]
+    fn jni_mangles_overloaded_parameter_descriptors() {
+        assert_eq!(
+            jni_mangle_component("I[Ljava/lang/String;"),
+            "I_3Ljava_lang_String_2"
+        );
+    }
+
     #[test]
     fn rejects_truncated_native_library_without_registering_a_module() {
         let mut linker = NativeLinker::new();
