@@ -32,7 +32,7 @@ final class APKLibraryStore: ObservableObject {
         do {
             let report = try inspector.inspect(prepared.baseAPKURL, including: prepared.splitAPKURLs)
             let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
-                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
+                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, components: prepared.components, inspection: report)
             packages.removeAll { $0.packageDirectoryURL == prepared.packageDirectoryURL }
             packages.insert(item, at: 0)
             StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
@@ -54,7 +54,7 @@ final class APKLibraryStore: ObservableObject {
                 try archiveInspector.inspect(prepared.baseAPKURL, including: prepared.splitAPKURLs)
             }.value
             let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
-                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
+                packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, components: prepared.components, inspection: report)
             packages.removeAll { $0.packageDirectoryURL == prepared.packageDirectoryURL }
             packages.insert(item, at: 0)
             StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_COMPLETE",
@@ -108,6 +108,9 @@ final class APKLibraryStore: ObservableObject {
                 return found.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
             }()
             guard let report = try? inspector.inspect(base, including: splits) else { continue }
+            let componentIndexURL = child.appendingPathComponent("components.json")
+            let storedComponents = (try? Data(contentsOf: componentIndexURL))
+                .flatMap { try? JSONDecoder().decode([AndroidPackageComponent].self, from: $0) } ?? []
             let format: AndroidPackageFormat = {
                 guard isDirectory,
                       let source = (try? fileManager.contentsOfDirectory(at: child, includingPropertiesForKeys: nil))?
@@ -116,7 +119,7 @@ final class APKLibraryStore: ObservableObject {
                 return value
             }()
             restored.append(ImportedAPK(fileURL: base, packageDirectoryURL: isDirectory ? child : base,
-                packageFormat: format, splitAPKURLs: splits, inspection: report))
+                packageFormat: format, splitAPKURLs: splits, components: storedComponents, inspection: report))
         }
         packages = restored.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
