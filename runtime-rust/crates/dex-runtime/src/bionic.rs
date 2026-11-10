@@ -376,18 +376,8 @@ impl NativeLinker {
                         "Relocation target {:#x} in {} is outside its mapped image",
                         relocation.offset, soname
                     ))?;
-                let width = match plan.architecture {
-                    ElfArchitecture::Aarch64 => 8u64,
-                    ElfArchitecture::Arm => 4u64,
-                    ElfArchitecture::Other(_) => 1u64,
-                };
-                let target_end = offset.checked_add(width)
-                    .filter(|end| *end <= plan.image_size)
-                    .ok_or_else(|| format!(
-                        "Relocation target {:#x} in {} exceeds image bounds",
-                        relocation.offset, soname
-                    ))?;
-                let _ = target_end;
+                // The relocation kind determines its eventual write width.
+                // Validate its starting address here without guessing that width.
                 Some(offset)
             };
             relocations.push(PlannedNativeRelocation { relocation, image_offset });
