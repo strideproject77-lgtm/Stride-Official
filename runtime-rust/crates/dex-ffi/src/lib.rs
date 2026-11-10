@@ -168,9 +168,9 @@ pub unsafe extern "C" fn stride_runtime_load_so(
 /// Finalizes the current native-library batch and records dependencies
 /// that remain unresolved after all package splits have been loaded.
 #[no_mangle]
-pub unsafe extern "C" fn stride_runtime_finish_native_loading(runtime: *const AndroidRuntime) -> u32 {
+pub unsafe extern "C" fn stride_runtime_finish_native_loading(runtime: *mut AndroidRuntime) -> u32 {
     if runtime.is_null() { return u32::MAX; }
-    match catch_unwind(AssertUnwindSafe(|| unsafe { (&*runtime).finish_native_loading() })) {
+    match catch_unwind(AssertUnwindSafe(|| unsafe { (&mut *runtime).finish_native_loading() })) {
         Ok(count) => count.min(u32::MAX as usize) as u32,
         Err(_) => u32::MAX - 1,
     }
