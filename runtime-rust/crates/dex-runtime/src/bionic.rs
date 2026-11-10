@@ -302,6 +302,15 @@ impl BionicEnvironment {
 
 /// A loaded Android shared library module.
 #[derive(Debug, Clone)]
+#[derive(Debug, Clone)]
+pub struct PlannedNativeRelocation {
+    pub relocation: Relocation,
+    /// Offset of r_offset inside the materialized image. None is reserved for
+    /// architecture-specific NONE relocations, which do not write memory.
+    pub image_offset: Option<u64>,
+}
+
+/// A loaded Android shared library module.
 pub struct LoadedNativeModule {
     pub name: String,
     pub architecture: ElfArchitecture,
@@ -309,10 +318,11 @@ pub struct LoadedNativeModule {
     /// Zero-filled guest image with PT_LOAD file bytes copied into place.
     /// This is not executable host memory and is not invoked directly.
     pub mapped_image: Arc<[u8]>,
-    pub relocations: Vec<Relocation>,
+    pub relocations: Vec<PlannedNativeRelocation>,
     pub exported_symbols: HashMap<String, u64>,
     pub needed_libraries: Vec<String>,
     pub has_jni_onload: bool,
+    pub jni_onload_address: Option<u64>,
 }
 
 /// Native shared library linker coordinating ELF loading and symbol resolution.
@@ -349,17 +359,45 @@ impl NativeLinker {
 
         let mut exported_symbols = HashMap::new();
         let mut has_jni_onload = false;
+        let mut jni_onload_address = None;
 
         let dynamic_info = inspect_elf_dynamic(elf_bytes, &elf_info)
             .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
 
         let needed_libraries = dynamic_info.needed_libraries;
-        let relocations = dynamic_info.relocations;
+        let mut relocations = Vec::with_capacity(dynamic_info.relocations.len());
+        for relocation in dynamic_info.relocations {
+            let image_offset = if relocation.relocation_type == 0 {
+                None
+            } else {
+                let offset = relocation.offset.checked_sub(plan.image_virtual_start)
+                    .filter(|value| *value < plan.image_size)
+                    .ok_or_else(|| format!(
+                        "Relocation target {:#x} in {} is outside its mapped image",
+                        relocation.offset, soname
+                    ))?;
+                let width = match plan.architecture {
+                    ElfArchitecture::Aarch64 => 8u64,
+                    ElfArchitecture::Arm => 4u64,
+                    ElfArchitecture::Other(_) => 1u64,
+                };
+                let target_end = offset.checked_add(width)
+                    .filter(|end| *end <= plan.image_size)
+                    .ok_or_else(|| format!(
+                        "Relocation target {:#x} in {} exceeds image bounds",
+                        relocation.offset, soname
+                    ))?;
+                let _ = target_end;
+                Some(offset)
+            };
+            relocations.push(PlannedNativeRelocation { relocation, image_offset });
+        }
 
         for symbol in dynamic_info.symbols {
             if !symbol.name.is_empty() && symbol.section_index != 0 {
                 if symbol.name == "JNI_OnLoad" {
                     has_jni_onload = true;
+                    jni_onload_address = Some(symbol.value);
                 }
                 exported_symbols.insert(symbol.name, symbol.value);
             }
@@ -374,6 +412,7 @@ impl NativeLinker {
             exported_symbols,
             needed_libraries,
             has_jni_onload,
+            jni_onload_address,
         };
 
         self.modules.insert(soname.to_string(), module);
@@ -481,6 +520,7 @@ mod tests {
                 exported_symbols: syms,
                 needed_libraries: Vec::new(),
                 has_jni_onload: true,
+                jni_onload_address: Some(0x1100),
             },
         );
         linker.loaded_order.push("libnative-lib.so".to_string());
