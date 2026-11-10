@@ -178,7 +178,7 @@ Work started on `feat/dex-class-method-loader`. The following guest-framework pi
 - Paint ascent/descent metrics; the existing Paint bridge already handled color, alpha, text size, anti-alias, text alignment/typeface references and approximate `measureText`.
 - Typeface asset-name metadata bridge for `createFromAsset`.
 - Drawable/BitmapDrawable construction, bounds, alpha state and bitmap draw dispatch.
-- Context/Resources access for parsed `resources.arsc` string and color values.
+- Context/Resources access for parsed `resources.arsc` string and color values, plus Context.getAssets() managed-object access.
 - SharedPreferences JNI for Boolean, Int and Long values, editor put/remove/apply/commit, retained across Activity instances in one runtime process.
 - Window decor-view lookup, status/navigation bar color state, View system UI flags and storage of the window-insets listener.
 - Redraw of the guest View after queued input events. The existing MotionEvent getters and View touch-listener dispatch were confirmed present before these changes.
@@ -187,7 +187,7 @@ Work started on `feat/dex-class-method-loader`. The following guest-framework pi
 
 - This is an implementation batch, **not a claim that 2048 is playable**. No Rust test suite has been run yet and no physical-iPhone end-to-end test has been performed.
 - Typeface currently retains the requested asset path; the software text renderer still uses its existing host-font fallback rather than loading ClearSans-Bold.ttf.
-- Paint text alignment and real font metrics are not yet fully reflected by the rasterizer; Drawable alpha is retained but not yet blended into bitmap pixels.
+- Paint.Align LEFT/CENTER/RIGHT is now mapped into Canvas text placement using the current approximate text-width metric. Real font metrics and packaged ClearSans-Bold.ttf rasterization are still not implemented; Drawable alpha is retained but not yet blended into bitmap pixels.
 - Window-insets listener is stored but the listener callback and real safe-area inset values are not yet dispatched.
 - SharedPreferences values currently survive Activity recreation within the same runtime process; durable cold-process persistence is not yet established.
 - Exact Canvas API coverage must still be checked against the complete 2048 DEX call graph. Any missing overloads/opcodes must be implemented from observed call sites.
