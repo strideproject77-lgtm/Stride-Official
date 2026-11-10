@@ -191,6 +191,43 @@ struct APKArchiveInspector: Sendable {
         )
     }
 
+    /// Inspects the base APK and every preserved split. Native libraries such as
+    /// ARM64 libgame.so may live only in config.arm64_v8a, not in the base APK.
+    /// The base manifest remains authoritative; split findings are aggregated for
+    /// preflight visibility without pretending that split resources are merged.
+    func inspect(_ baseURL: URL, including splitURLs: [URL]) throws -> APKInspection {
+        let base = try inspect(baseURL)
+        guard !splitURLs.isEmpty else { return base }
+
+        var splitReports: [APKInspection] = []
+        splitReports.reserveCapacity(splitURLs.count)
+        for splitURL in splitURLs {
+            let report = try inspect(splitURL)
+            splitReports.append(report)
+            StrideDiagnostics.recordAsync(severity: "INFO", stage: "SPLIT", code: "SPLIT_INSPECTED",
+                message: "Inspected split \(splitURL.lastPathComponent): DEX=\(report.dexFileCount), native ABIs=\(report.nativeABIs.joined(separator: ", "))")
+        }
+
+        let all = [base] + splitReports
+        let combined = APKInspection(
+            archiveEntryCount: all.reduce(0) { $0 + $1.archiveEntryCount },
+            hasAndroidManifest: base.hasAndroidManifest,
+            hasDEX: all.contains(where: \.hasDEX),
+            dexFileCount: all.reduce(0) { $0 + $1.dexFileCount },
+            analyzedDexFileCount: all.reduce(0) { $0 + $1.analyzedDexFileCount },
+            skippedDexFileCount: all.reduce(0) { $0 + $1.skippedDexFileCount },
+            dexClassCount: all.reduce(0) { $0 + $1.dexClassCount },
+            dexMethodCount: all.reduce(0) { $0 + $1.dexMethodCount },
+            nativeABIs: Array(Set(all.flatMap(\.nativeABIs))).sorted(),
+            hasResourceTable: all.contains(where: \.hasResourceTable),
+            isValidPackage: base.isValidPackage,
+            iconData: base.iconData ?? splitReports.compactMap(\.iconData).first
+        )
+        StrideDiagnostics.recordAsync(severity: "INFO", stage: "PREFLIGHT", code: "PACKAGE_SPLITS_AGGREGATED",
+            message: "Base plus \(splitReports.count) split(s): total DEX=\(combined.dexFileCount), native ABIs=\(combined.nativeABIs.joined(separator: ", "))")
+        return combined
+    }
+
     static func multidexSequenceGaps(_ paths: [String]) -> [String] {
         let numbers = Set(paths.compactMap { path -> Int? in
             if path == "classes.dex" { return 1 }
