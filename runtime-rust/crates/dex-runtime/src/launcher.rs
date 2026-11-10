@@ -1232,7 +1232,14 @@ impl AndroidRuntime {
                     let mut paint = Paint::new();
                     paint.color = color("Arg3")?;
                     paint.text_size = number("Arg4")?;
-                    canvas.draw_text(&text, number("Arg1")?, number("Arg2")?, &paint);
+                    let measured_width = text.chars().count() as f32 * paint.text_size * 0.5;
+                    let alignment = read("Arg5")?.as_int();
+                    let anchor_x = number("Arg1")? - match alignment {
+                        1 => measured_width * 0.5,
+                        2 => measured_width,
+                        _ => 0.0,
+                    };
+                    canvas.draw_text(&text, anchor_x, number("Arg2")?, &paint);
                 }
                 4 => {
                     let mut paint = Paint::new();
