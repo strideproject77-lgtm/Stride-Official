@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture};
+use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture, ElfClass, ElfByteOrder};
 use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan, IOS_PAGE_SIZE};
 use stride_elf_inspector::Relocation;
 use crate::types::Value;
@@ -346,6 +346,14 @@ impl NativeLinker {
         }
         let elf_info = inspect_elf(elf_bytes)
             .map_err(|e| format!("ELF inspection failed for {}: {:?}", soname, e))?;
+        if elf_info.identity.class != ElfClass::Elf64
+            || elf_info.identity.architecture != ElfArchitecture::Aarch64
+            || elf_info.byte_order != ElfByteOrder::Little {
+            return Err(format!(
+                "{} is not a little-endian ELF64 AArch64 library (found {:?}/{:?}/{:?})",
+                soname, elf_info.identity.class, elf_info.identity.architecture, elf_info.byte_order
+            ));
+        }
 
         let unbased_plan = plan_native_image(&elf_info, 0)
             .map_err(|e| format!("Native image planning failed for {}: {:?}", soname, e))?;
