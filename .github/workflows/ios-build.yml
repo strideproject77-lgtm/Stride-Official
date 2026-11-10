@@ -12,7 +12,7 @@ on:
 permissions:
   contents: read
 
-# Pull requests run Rust checks. The final implementation push or a manual dispatch runs the full Rust tests and unsigned iOS IPA build.
+# Pull requests and development pushes run Rust checks only. IPA packaging is manual-dispatch only and never starts from a routine source push.
 concurrency:
   group: stride-ipa-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,7 +34,7 @@ jobs:
 
   build-ipa:
     name: Build and verify unsigned iOS IPA
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    if: github.event_name == 'workflow_dispatch'
     needs: rust-tests
     runs-on: macos-15
     timeout-minutes: 90
