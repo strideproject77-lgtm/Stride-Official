@@ -6,6 +6,7 @@ struct ImportedAPK: Identifiable, Hashable {
     let packageDirectoryURL: URL
     let packageFormat: AndroidPackageFormat
     let splitAPKURLs: [URL]
+    let components: [AndroidPackageComponent]
     let inspection: APKInspection
 
     var iconData: Data? { inspection.iconData }
@@ -16,12 +17,13 @@ struct ImportedAPK: Identifiable, Hashable {
     }
 
     init(id: UUID = UUID(), fileURL: URL, packageDirectoryURL: URL? = nil,
-         packageFormat: AndroidPackageFormat = .apk, splitAPKURLs: [URL] = [], inspection: APKInspection) {
+         packageFormat: AndroidPackageFormat = .apk, splitAPKURLs: [URL] = [], components: [AndroidPackageComponent] = [], inspection: APKInspection) {
         self.id = id
         self.fileURL = fileURL
         self.packageDirectoryURL = packageDirectoryURL ?? fileURL
         self.packageFormat = packageFormat
         self.splitAPKURLs = splitAPKURLs
+        self.components = components
         self.inspection = inspection
     }
 
