@@ -30,6 +30,7 @@ pub mod service_manager;
 pub mod package;
 pub mod paint;
 pub mod telemetry;
+pub mod unity;
 pub mod view;
 pub mod layout;
 pub mod resources;
@@ -64,6 +65,7 @@ pub use activity_manager::{ActivityManager, ActivityRecord, ActivityTask};
 pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
 pub use package::{XapkBundle, ObbFile};
 pub use telemetry::{PerformanceTelemetry, RuntimeTelemetrySnapshot, AnrWatchdog};
+pub use unity::{UnityPlayerBridge, UnityEngineState, UnityMessage};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{

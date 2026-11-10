@@ -1,4 +1,4 @@
-//! Android Bionic libc and native library dynamic linker emulation.
+﻿//! Android Bionic libc and native library dynamic linker emulation.
 //!
 //! Provides the symbol resolution table, Bionic runtime environment,
 //! and native library relocation resolution for ELF ARM/ARM64 shared libraries.
@@ -92,11 +92,208 @@ impl BionicEnvironment {
             Ok(Value::Double(x.ceil()))
         });
 
-        // --- libc memory & time ---
-        self.register("strlen", |_args| {
-            Ok(Value::Int(0))
+        // --- libc memory ---
+        self.register("malloc", |args| {
+            let size = args.first().map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(if size > 0 { 0x1000 } else { 0 }))
+        });
+        self.register("calloc", |args| {
+            let count = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            let size = args.get(1).map(|v| v.as_int()).unwrap_or(0);
+            let _ = count.saturating_mul(size);
+            Ok(Value::Int(0x1000))
+        });
+        self.register("realloc", |args| {
+            let _ptr = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(0x1000))
+        });
+        self.register("free", |_args| Ok(Value::Int(0)));
+        self.register("memset", |args| {
+            let ptr = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(ptr))
+        });
+        self.register("memcpy", |args| {
+            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(dst))
+        });
+        self.register("memmove", |args| {
+            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(dst))
+        });
+        self.register("memcmp", |_args| Ok(Value::Int(0)));
+
+        // --- libc strings ---
+        self.register("strlen", |_args| Ok(Value::Int(0)));
+        self.register("strcmp", |_args| Ok(Value::Int(0)));
+        self.register("strncmp", |_args| Ok(Value::Int(0)));
+        self.register("strcpy", |args| {
+            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(dst))
+        });
+        self.register("strncpy", |args| {
+            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(dst))
+        });
+        self.register("strcat", |args| {
+            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(dst))
+        });
+        self.register("strchr", |_args| Ok(Value::Int(0)));
+        self.register("strstr", |_args| Ok(Value::Int(0)));
+
+        // --- libc stdio ---
+        self.register("printf", |_args| Ok(Value::Int(0)));
+        self.register("fprintf", |_args| Ok(Value::Int(0)));
+        self.register("sprintf", |_args| Ok(Value::Int(0)));
+        self.register("snprintf", |args| {
+            let n = args.get(1).map(|v| v.as_int()).unwrap_or(0);
+            Ok(Value::Int(n))
+        });
+        self.register("sscanf", |_args| Ok(Value::Int(0)));
+        self.register("fopen", |_args| Ok(Value::Int(0)));
+        self.register("fclose", |_args| Ok(Value::Int(0)));
+        self.register("fread", |_args| Ok(Value::Int(0)));
+        self.register("fwrite", |_args| Ok(Value::Int(0)));
+        self.register("fseek", |_args| Ok(Value::Int(0)));
+        self.register("ftell", |_args| Ok(Value::Int(0)));
+        self.register("fflush", |_args| Ok(Value::Int(0)));
+
+        // --- libm extras ---
+        self.register("fabs", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.abs()))
+        });
+        self.register("fabsf", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.abs()))
+        });
+        self.register("fmod", |args| {
+            let x = args.get(0).map(|v| v.as_double()).unwrap_or(0.0);
+            let y = args.get(1).map(|v| v.as_double()).unwrap_or(1.0);
+            Ok(Value::Double(x % y))
+        });
+        self.register("log", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(1.0);
+            Ok(Value::Double(x.ln()))
+        });
+        self.register("log2", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(1.0);
+            Ok(Value::Double(x.log2()))
+        });
+        self.register("log10", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(1.0);
+            Ok(Value::Double(x.log10()))
+        });
+        self.register("exp", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.exp()))
+        });
+        self.register("asin", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.asin()))
+        });
+        self.register("acos", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.acos()))
+        });
+        self.register("atan", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.atan()))
+        });
+        self.register("round", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.round()))
+        });
+        self.register("roundf", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.round()))
+        });
+        self.register("sinf", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.sin()))
+        });
+        self.register("cosf", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.cos()))
+        });
+        self.register("sqrtf", |args| {
+            let x = args.first().map(|v| v.as_double()).unwrap_or(0.0);
+            Ok(Value::Double(x.sqrt()))
         });
 
+        // --- libc time ---
+        self.register("clock_gettime", |_args| Ok(Value::Int(0)));
+        self.register("gettimeofday", |_args| Ok(Value::Int(0)));
+        self.register("nanosleep", |_args| Ok(Value::Int(0)));
+        self.register("usleep", |_args| Ok(Value::Int(0)));
+        self.register("time", |_args| Ok(Value::Long(0)));
+
+        // --- pthreads ---
+        self.register("pthread_self", |_args| Ok(Value::Long(1)));
+        self.register("pthread_create", |_args| Ok(Value::Int(0)));
+        self.register("pthread_join", |_args| Ok(Value::Int(0)));
+        self.register("pthread_detach", |_args| Ok(Value::Int(0)));
+        self.register("pthread_mutex_init", |_args| Ok(Value::Int(0)));
+        self.register("pthread_mutex_lock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_mutex_unlock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_mutex_destroy", |_args| Ok(Value::Int(0)));
+        self.register("pthread_mutex_trylock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_cond_init", |_args| Ok(Value::Int(0)));
+        self.register("pthread_cond_wait", |_args| Ok(Value::Int(0)));
+        self.register("pthread_cond_signal", |_args| Ok(Value::Int(0)));
+        self.register("pthread_cond_broadcast", |_args| Ok(Value::Int(0)));
+        self.register("pthread_cond_destroy", |_args| Ok(Value::Int(0)));
+        self.register("pthread_key_create", |_args| Ok(Value::Int(0)));
+        self.register("pthread_getspecific", |_args| Ok(Value::Int(0)));
+        self.register("pthread_setspecific", |_args| Ok(Value::Int(0)));
+        self.register("pthread_once", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_init", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_rdlock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_wrlock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_unlock", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_destroy", |_args| Ok(Value::Int(0)));
+
+        // --- libdl ---
+        self.register("dlopen", |_args| Ok(Value::Int(1)));
+        self.register("dlsym", |_args| Ok(Value::Int(0)));
+        self.register("dlclose", |_args| Ok(Value::Int(0)));
+        self.register("dlerror", |_args| Ok(Value::Int(0)));
+
+        // --- libc misc ---
+        self.register("exit", |_args| Err("Native library called exit()".into()));
+        self.register("raise", |_args| Ok(Value::Int(0)));
+        self.register("signal", |_args| Ok(Value::Int(0)));
+        self.register("getpid", |_args| Ok(Value::Int(1234)));
+        self.register("getenv", |_args| Ok(Value::Int(0)));
+        self.register("setenv", |_args| Ok(Value::Int(0)));
+        self.register("rand", |_args| Ok(Value::Int(42)));
+        self.register("srand", |_args| Ok(Value::Int(0)));
+        self.register("atoi", |_args| Ok(Value::Int(0)));
+        self.register("atof", |_args| Ok(Value::Double(0.0)));
+        self.register("strtol", |_args| Ok(Value::Long(0)));
+        self.register("strtod", |_args| Ok(Value::Double(0.0)));
+
+        // --- NDK system properties ---
+        self.register("__system_property_get", |_args| Ok(Value::Int(0)));
+        self.register("__system_property_find", |_args| Ok(Value::Int(0)));
+        self.register("android_get_device_api_level", |_args| Ok(Value::Int(33)));
+
+        // --- NDK AAssetManager ---
+        self.register("AAssetManager_fromJava", |_args| Ok(Value::Int(1)));
+        self.register("AAssetManager_open", |_args| Ok(Value::Int(0)));
+        self.register("AAsset_read", |_args| Ok(Value::Int(0)));
+        self.register("AAsset_seek", |_args| Ok(Value::Long(0)));
+        self.register("AAsset_getLength", |_args| Ok(Value::Int(0)));
+        self.register("AAsset_getLength64", |_args| Ok(Value::Long(0)));
+        self.register("AAsset_close", |_args| Ok(Value::Int(0)));
+        self.register("AAssetDir_open", |_args| Ok(Value::Int(0)));
+        self.register("AAssetDir_getNextFileName", |_args| Ok(Value::Int(0)));
+        self.register("AAssetDir_close", |_args| Ok(Value::Int(0)));
+
+        // --- NDK OpenSL ES audio stubs ---
+        self.register("slCreateEngine", |_args| Ok(Value::Int(0)));
+
+        // --- abort ---
         self.register("abort", |_args| {
             Err("Native library called Bionic abort()".into())
         });
