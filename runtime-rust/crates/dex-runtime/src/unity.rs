@@ -124,7 +124,7 @@ impl UnityPlayerBridge {
     /// Registers all standard `com.unity3d.player.UnityPlayer` native methods into the JNI registry.
     pub fn register_unity_jni(registry: &mut JniNativeRegistry) {
         let ok_unit = |_env: &mut crate::jni::JniEnv, _args: &[Value]| Ok(None);
-        let ok_bool = |_env: &mut crate::jni::JniEnv, _args: &[Value]| Ok(Some(Value::Boolean(true)));
+        let ok_bool = |_env: &mut crate::jni::JniEnv, _args: &[Value]| Ok(Some(Value::Int(1)));
 
         // nativeInit(II)V
         registry.register("Lcom/unity3d/player/UnityPlayer;", "nativeInit", "(II)V", ok_unit);
