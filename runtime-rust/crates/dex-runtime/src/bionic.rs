@@ -409,17 +409,27 @@ impl NativeLinker {
                     _ => None,
                 };
                 if let Some(width) = width {
+                    let write_end = offset.checked_add(width)
+                        .ok_or_else(|| format!("Relocation write overflow in {}", soname))?;
                     let in_segment = plan.segment_copies.iter().any(|segment| {
-                        offset >= segment.image_offset
-                            && offset.checked_add(width).map(|end| end <= segment.image_offset + segment.memory_size).unwrap_or(false)
+                        segment.image_offset.checked_add(segment.memory_size)
+                            .map(|segment_end| offset >= segment.image_offset && write_end <= segment_end)
+                            .unwrap_or(false)
                     });
                     if !in_segment {
                         return Err(format!("Relocation write at {:#x} in {} crosses a PT_LOAD boundary", relocation.offset, soname));
                     }
-                    let page_offset = (offset / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
-                    let writable = plan.pages.iter().any(|page| page.image_offset == page_offset && page.protection.writable);
-                    if !writable {
-                        return Err(format!("Relocation target {:#x} in {} is not on a writable ELF page", relocation.offset, soname));
+                    let first_page = (offset / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
+                    let last_page = ((write_end - 1) / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
+                    let mut page_offset = first_page;
+                    loop {
+                        let writable = plan.pages.iter().any(|page| page.image_offset == page_offset && page.protection.writable);
+                        if !writable {
+                            return Err(format!("Relocation target {:#x} in {} touches a non-writable ELF page", relocation.offset, soname));
+                        }
+                        if page_offset == last_page { break; }
+                        page_offset = page_offset.checked_add(IOS_PAGE_SIZE)
+                            .ok_or_else(|| format!("Relocation page overflow in {}", soname))?;
                     }
                 }
                 Some(offset)
