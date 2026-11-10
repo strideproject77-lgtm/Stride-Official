@@ -30,7 +30,7 @@ final class APKLibraryStore: ObservableObject {
         StrideDiagnostics.shared.record(.info, stage: "IMPORT", code: "IMPORT_START", "Starting Android package import: \(sourceURL.lastPathComponent)")
         let prepared = try preparePackage(from: sourceURL)
         do {
-            let report = try inspector.inspect(prepared.baseAPKURL)
+            let report = try inspector.inspect(prepared.baseAPKURL, including: prepared.splitAPKURLs)
             let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
                 packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
             packages.removeAll { $0.packageDirectoryURL == prepared.packageDirectoryURL }
@@ -51,7 +51,7 @@ final class APKLibraryStore: ObservableObject {
         do {
             let archiveInspector = inspector
             let report = try await Task.detached(priority: .userInitiated) {
-                try archiveInspector.inspect(prepared.baseAPKURL)
+                try archiveInspector.inspect(prepared.baseAPKURL, including: prepared.splitAPKURLs)
             }.value
             let item = ImportedAPK(fileURL: prepared.baseAPKURL, packageDirectoryURL: prepared.packageDirectoryURL,
                 packageFormat: prepared.format, splitAPKURLs: prepared.splitAPKURLs, inspection: report)
@@ -94,11 +94,11 @@ final class APKLibraryStore: ObservableObject {
         for child in children {
             let isDirectory = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             let base = isDirectory ? child.appendingPathComponent("base.apk") : child
-            guard base.pathExtension.lowercased() == "apk", fileManager.fileExists(atPath: base.path),
-                  let report = try? inspector.inspect(base) else { continue }
+            guard base.pathExtension.lowercased() == "apk", fileManager.fileExists(atPath: base.path) else { continue }
             let components = child.appendingPathComponent("components", isDirectory: true)
             let splits = (try? fileManager.contentsOfDirectory(at: components, includingPropertiesForKeys: nil))?
                 .filter { $0.pathExtension.lowercased() == "apk" } ?? []
+            guard let report = try? inspector.inspect(base, including: splits) else { continue }
             let format: AndroidPackageFormat = {
                 guard isDirectory,
                       let source = (try? fileManager.contentsOfDirectory(at: child, includingPropertiesForKeys: nil))?
