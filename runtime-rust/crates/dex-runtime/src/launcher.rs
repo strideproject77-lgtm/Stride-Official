@@ -1,4 +1,4 @@
-//! APK Application Launcher and Runtime Execution Coordinator.
+﻿﻿//! APK Application Launcher and Runtime Execution Coordinator.
 //!
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
@@ -23,6 +23,7 @@ use crate::service_manager::ServiceManager;
 use crate::telemetry::PerformanceTelemetry;
 use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
 use crate::resources::ResourceCatalog;
+use crate::unity::UnityPlayerBridge;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +82,8 @@ pub struct AndroidRuntime {
     pub telemetry: PerformanceTelemetry,
     pub resources: ResourceCatalog,
     pub image_assets: std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,
+    /// Unity engine bridge for Unity IL2CPP applications.
+    pub unity_bridge: UnityPlayerBridge,
 }
 
 impl AndroidRuntime {
@@ -93,6 +96,8 @@ impl AndroidRuntime {
         let shared_preferences_store = Arc::new(Mutex::new(HashMap::new()));
         let shared_resource_catalog = Arc::new(Mutex::new(ResourceCatalog::default()));
         Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone());
+        Self::register_game_jni(&mut jni);
+        UnityPlayerBridge::register_unity_jni(&mut jni);
 
         Self {
             class_loader: AppClassLoader::new(),
@@ -121,10 +126,118 @@ impl AndroidRuntime {
             telemetry: PerformanceTelemetry::default(),
             resources: ResourceCatalog::default(),
             image_assets: std::collections::HashMap::new(),
+            unity_bridge: UnityPlayerBridge::new(),
         }
     }
 
     /// Registers essential Android & Java core native methods.
+    /// Registers JNI bridges for Hill Climb Racing and common game-engine patterns.
+    fn register_game_jni(jni: &mut JniNativeRegistry) {
+        let ok_unit: fn(&mut crate::jni::JniEnv, &[crate::types::Value]) -> Result<Option<crate::types::Value>, String>
+            = |_env, _args| Ok(None);
+        let ok_one: fn(&mut crate::jni::JniEnv, &[crate::types::Value]) -> Result<Option<crate::types::Value>, String>
+            = |_env, _args| Ok(Some(crate::types::Value::Int(1)));
+        let ok_zero: fn(&mut crate::jni::JniEnv, &[crate::types::Value]) -> Result<Option<crate::types::Value>, String>
+            = |_env, _args| Ok(Some(crate::types::Value::Int(0)));
+
+        // --- Fingersoft / Hill Climb Racing native bridge ---
+        for class in &[
+            "Lcom/fingersoft/hillclimb/MainActivity;",
+            "Lcom/fingersoft/game/NativeApp;",
+            "Lcom/fingersoft/hillclimb/NativeBridge;",
+        ] {
+            jni.register(class, "nativeOnCreate",  "(Landroid/app/Activity;)V", ok_unit);
+            jni.register(class, "nativeOnStart",   "()V", ok_unit);
+            jni.register(class, "nativeOnResume",  "()V", ok_unit);
+            jni.register(class, "nativeOnPause",   "()V", ok_unit);
+            jni.register(class, "nativeOnStop",    "()V", ok_unit);
+            jni.register(class, "nativeOnDestroy", "()V", ok_unit);
+            jni.register(class, "nativeRender",    "()V", ok_unit);
+            jni.register(class, "nativeResize",    "(II)V", ok_unit);
+            jni.register(class, "nativeTouch",     "(IFFI)V", ok_unit);
+            jni.register(class, "nativeKeyDown",   "(I)V", ok_unit);
+            jni.register(class, "nativeKeyUp",     "(I)V", ok_unit);
+            jni.register(class, "nativeInit",      "()Z", ok_one);
+            jni.register(class, "isInitialized",   "()Z", ok_one);
+        }
+
+        // --- android.media.SoundPool ---
+        jni.register("Landroid/media/SoundPool;", "<init>",     "(III)V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "load",       "(Landroid/content/Context;II)I", ok_one);
+        jni.register("Landroid/media/SoundPool;", "play",       "(IFFIIF)I", ok_one);
+        jni.register("Landroid/media/SoundPool;", "stop",       "(I)V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "pause",      "(I)V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "resume",     "(I)V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "setVolume",  "(IFF)V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "release",    "()V", ok_unit);
+        jni.register("Landroid/media/SoundPool;", "setOnLoadCompleteListener",
+            "(Landroid/media/SoundPool$OnLoadCompleteListener;)V", ok_unit);
+
+        // --- android.media.AudioManager ---
+        jni.register("Landroid/media/AudioManager;", "getStreamMaxVolume", "(I)I",
+            |_env, _args| Ok(Some(crate::types::Value::Int(15))));
+        jni.register("Landroid/media/AudioManager;", "getStreamVolume", "(I)I",
+            |_env, _args| Ok(Some(crate::types::Value::Int(10))));
+        jni.register("Landroid/media/AudioManager;", "setStreamVolume", "(III)V", ok_unit);
+        jni.register("Landroid/media/AudioManager;", "requestAudioFocus",
+            "(Landroid/media/AudioManager$OnAudioFocusChangeListener;II)I", ok_one);
+        jni.register("Landroid/media/AudioManager;", "abandonAudioFocus",
+            "(Landroid/media/AudioManager$OnAudioFocusChangeListener;)I", ok_one);
+        jni.register("Landroid/media/AudioManager;", "isMusicActive",     "()Z", ok_zero);
+        jni.register("Landroid/media/AudioManager;", "isBluetoothA2dpOn", "()Z", ok_zero);
+        jni.register("Landroid/media/AudioManager;", "isSpeakerphoneOn",  "()Z", ok_zero);
+
+        // --- android.media.MediaPlayer ---
+        jni.register("Landroid/media/MediaPlayer;", "<init>",   "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "start",    "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "stop",     "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "pause",    "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "release",  "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "reset",    "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "setLooping",  "(Z)V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "setVolume",   "(FF)V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "isPlaying",   "()Z", ok_zero);
+        jni.register("Landroid/media/MediaPlayer;", "getDuration", "()I",
+            |_env, _args| Ok(Some(crate::types::Value::Int(0))));
+        jni.register("Landroid/media/MediaPlayer;", "getCurrentPosition", "()I",
+            |_env, _args| Ok(Some(crate::types::Value::Int(0))));
+        jni.register("Landroid/media/MediaPlayer;", "prepare",    "()V", ok_unit);
+        jni.register("Landroid/media/MediaPlayer;", "prepareAsync", "()V", ok_unit);
+
+        // --- android.os.Vibrator ---
+        jni.register("Landroid/os/Vibrator;", "vibrate",     "(J)V", ok_unit);
+        jni.register("Landroid/os/Vibrator;", "hasVibrator", "()Z",  ok_one);
+        jni.register("Landroid/os/Vibrator;", "cancel",      "()V",  ok_unit);
+
+        // --- android.os.Handler/Looper ---
+        jni.register("Landroid/os/Handler;", "<init>",          "()V", ok_unit);
+        jni.register("Landroid/os/Handler;", "post",            "(Ljava/lang/Runnable;)Z", ok_one);
+        jni.register("Landroid/os/Handler;", "postDelayed",     "(Ljava/lang/Runnable;J)Z", ok_one);
+        jni.register("Landroid/os/Handler;", "removeCallbacks", "(Ljava/lang/Runnable;)V", ok_unit);
+        jni.register("Landroid/os/Handler;", "sendMessage",     "(Landroid/os/Message;)Z", ok_one);
+        jni.register("Landroid/os/Looper;",  "getMainLooper",   "()Landroid/os/Looper;",
+            |_env, _args| Ok(Some(crate::types::Value::Int(1))));
+        jni.register("Landroid/os/Looper;",  "myLooper",        "()Landroid/os/Looper;",
+            |_env, _args| Ok(Some(crate::types::Value::Int(1))));
+        jni.register("Landroid/os/Looper;",  "loop",            "()V", ok_unit);
+        jni.register("Landroid/os/Looper;",  "quit",            "()V", ok_unit);
+
+        // --- Google Play Services stubs ---
+        jni.register("Lcom/google/android/gms/common/GoogleApiAvailability;",
+            "isGooglePlayServicesAvailable", "(Landroid/content/Context;)I", ok_zero);
+        jni.register("Lcom/google/android/gms/ads/MobileAds;", "initialize",
+            "(Landroid/content/Context;Lcom/google/android/gms/ads/initialization/OnInitializationCompleteListener;)V",
+            ok_unit);
+
+        // --- Billing stubs ---
+        jni.register("Lcom/android/billingclient/api/BillingClient;", "isReady", "()Z", ok_zero);
+        jni.register("Lcom/android/billingclient/api/BillingClient;", "startConnection",
+            "(Lcom/android/billingclient/api/BillingClientStateListener;)V", ok_unit);
+        jni.register("Lcom/android/billingclient/api/BillingClient;", "endConnection", "()V", ok_unit);
+
+        let _ = ok_unit; let _ = ok_one; let _ = ok_zero;
+    }
+
     fn register_core_jni(jni: &mut JniNativeRegistry, shared_preferences_store: crate::shared_prefs::PreferenceStore, shared_resource_catalog: crate::resource_jni::SharedResourceCatalog) {
         // Activity lifecycle methods are framework-owned and therefore do not
         // have app DEX MethodCode entries. The launcher owns lifecycle state
