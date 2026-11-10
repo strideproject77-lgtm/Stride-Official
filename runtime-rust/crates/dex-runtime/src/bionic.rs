@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, ElfArchitecture};
-use stride_native_loader::{plan_native_image, NativeImagePlan};
+use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan};
+use stride_elf_inspector::Relocation;
 use crate::types::Value;
 use crate::jni::JniEnv;
 
@@ -305,6 +306,10 @@ pub struct LoadedNativeModule {
     pub name: String,
     pub architecture: ElfArchitecture,
     pub plan: NativeImagePlan,
+    /// Zero-filled guest image with PT_LOAD file bytes copied into place.
+    /// This is not executable host memory and is not invoked directly.
+    pub mapped_image: Arc<[u8]>,
+    pub relocations: Vec<Relocation>,
     pub exported_symbols: HashMap<String, u64>,
     pub needed_libraries: Vec<String>,
     pub has_jni_onload: bool,
@@ -339,6 +344,8 @@ impl NativeLinker {
 
         let plan = plan_native_image(&elf_info, 0)
             .map_err(|e| format!("Native image planning failed for {}: {:?}", soname, e))?;
+        let mapped_image = materialize_native_image(elf_bytes, &plan)
+            .map_err(|e| format!("Native image materialization failed for {}: {:?}", soname, e))?;
 
         let mut exported_symbols = HashMap::new();
         let mut has_jni_onload = false;
@@ -347,6 +354,7 @@ impl NativeLinker {
             .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
 
         let needed_libraries = dynamic_info.needed_libraries;
+        let relocations = dynamic_info.relocations;
 
         for symbol in dynamic_info.symbols {
             if !symbol.name.is_empty() && symbol.section_index != 0 {
@@ -361,6 +369,8 @@ impl NativeLinker {
             name: soname.to_string(),
             architecture: plan.architecture,
             plan,
+            mapped_image: mapped_image.into(),
+            relocations,
             exported_symbols,
             needed_libraries,
             has_jni_onload,
@@ -453,6 +463,8 @@ mod tests {
                 name: "libnative-lib.so".to_string(),
                 architecture: ElfArchitecture::Aarch64,
                 plan: mod_plan,
+                mapped_image: Vec::new().into(),
+                relocations: Vec::new(),
                 exported_symbols: syms,
                 needed_libraries: Vec::new(),
                 has_jni_onload: true,
