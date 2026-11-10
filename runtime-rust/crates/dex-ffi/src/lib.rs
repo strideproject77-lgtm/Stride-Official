@@ -145,7 +145,7 @@ pub unsafe extern "C" fn stride_runtime_load_so(
     data: *const u8,
     len: usize,
 ) -> i32 {
-    if runtime.is_null() || data.is_null() || len == 0 {
+    if runtime.is_null() || data.is_null() || len == 0 || len > isize::MAX as usize {
         return 1;
     }
     let name = if !soname.is_null() {
@@ -157,9 +157,10 @@ pub unsafe extern "C" fn stride_runtime_load_so(
     let rt = unsafe { &mut *runtime };
     let bytes = unsafe { slice::from_raw_parts(data, len) };
 
-    match rt.load_native_library(name, bytes) {
-        Ok(_) => 0,
-        Err(_) => 2,
+    match catch_unwind(AssertUnwindSafe(|| rt.load_native_library(name, bytes))) {
+        Ok(Ok(())) => 0,
+        Ok(Err(_)) => 2,
+        Err(_) => 3,
     }
 }
 
