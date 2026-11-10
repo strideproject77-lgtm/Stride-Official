@@ -4,7 +4,7 @@
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use stride_axml::parse_manifest;
 use crate::loader::AppClassLoader;
 use crate::hierarchy::ClassHierarchy;
@@ -54,6 +54,8 @@ pub struct AndroidRuntime {
     pub monitors: MonitorTable,
     /// App-owned static field storage shared by every interpreter invocation in this session.
     pub static_fields: HashMap<(String, String), crate::types::Value>,
+    /// Preference values shared by Activity instances for this guest process.
+    pub shared_preferences_store: crate::shared_prefs::PreferenceStore,
     pub jni: JniNativeRegistry,
     pub environment: AndroidEnvironment,
     pub surface: Surface,
@@ -86,7 +88,8 @@ impl AndroidRuntime {
     /// Creates a new Android runtime environment.
     pub fn new(package_name: &str) -> Self {
         let mut jni = JniNativeRegistry::new();
-        Self::register_core_jni(&mut jni);
+        let shared_preferences_store = Arc::new(Mutex::new(HashMap::new()));
+        Self::register_core_jni(&mut jni, shared_preferences_store.clone());
 
         Self {
             class_loader: AppClassLoader::new(),
@@ -94,6 +97,7 @@ impl AndroidRuntime {
             hierarchy: ClassHierarchy::new(),
             monitors: MonitorTable::new(),
             static_fields: HashMap::new(),
+            shared_preferences_store,
             jni,
             environment: AndroidEnvironment::new(package_name),
             surface: Surface::new(1080, 1920),
@@ -117,7 +121,7 @@ impl AndroidRuntime {
     }
 
     /// Registers essential Android & Java core native methods.
-    fn register_core_jni(jni: &mut JniNativeRegistry) {
+    fn register_core_jni(jni: &mut JniNativeRegistry, shared_preferences_store: crate::shared_prefs::PreferenceStore) {
         // Activity lifecycle methods are framework-owned and therefore do not
         // have app DEX MethodCode entries. The launcher owns lifecycle state
         // transitions; this bridge safely accepts the Activity's super call.
@@ -322,6 +326,7 @@ impl AndroidRuntime {
         crate::bitmap::register_core_bitmap_methods(jni);
         crate::typeface::register_core_typeface_methods(jni);
         crate::drawable::register_core_drawable_methods(jni);
+        crate::shared_prefs::register_shared_preferences(jni, shared_preferences_store);
     }
 
     /// Loads one or more DEX binaries into the runtime.
