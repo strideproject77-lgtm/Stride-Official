@@ -492,7 +492,7 @@ pub unsafe extern "C" fn stride_runtime_unity_send_message(
     let go  = unsafe { CStr::from_ptr(game_object) }.to_string_lossy().into_owned();
     let mn  = unsafe { CStr::from_ptr(method_name) }.to_string_lossy().into_owned();
     let msg = unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned();
-    rt.unity_bridge.send_message(go, mn, msg);
+    rt.unity_bridge.send_message(&go, &mn, &msg);
     0
 }
 
