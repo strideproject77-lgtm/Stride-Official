@@ -86,11 +86,24 @@ struct AndroidPackageImporter: @unchecked Sendable {
                 throw APKLibraryImportError.packageArchiveTooLarge
             }
             total += size
-            let name = URL(fileURLWithPath: entry.path).lastPathComponent
-            guard !name.isEmpty, name != ".", name != ".." else { throw APKLibraryImportError.invalidPackageArchive }
-            let destination = componentFolder.appendingPathComponent(name)
+            // Preserve the archive-relative component path. XAPK/APKS bundles
+            // may legally contain equal APK basenames under different directories;
+            // flattening them loses split identity and can reject valid packages.
+            let pathParts = entry.path.split(separator: "/", omittingEmptySubsequences: false)
+            guard !pathParts.isEmpty,
+                  pathParts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
+                  !entry.path.hasPrefix("/"),
+                  !entry.path.contains("\\\\") else {
+                throw APKLibraryImportError.invalidPackageArchive
+            }
+            let relativePath = pathParts.map(String.init).joined(separator: "/")
+            let destination = pathParts.reduce(componentFolder) { partial, part in
+                partial.appendingPathComponent(String(part), isDirectory: true)
+            }
+            let parent = destination.deletingLastPathComponent()
+            try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
             guard !fileManager.fileExists(atPath: destination.path) else {
-                throw APKLibraryImportError.duplicatePackageEntry(name)
+                throw APKLibraryImportError.duplicatePackageEntry(relativePath)
             }
             var data = Data()
             data.reserveCapacity(Int(size))
