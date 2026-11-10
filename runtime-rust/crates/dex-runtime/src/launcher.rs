@@ -96,6 +96,47 @@ pub struct AndroidRuntime {
 }
 
 impl AndroidRuntime {
+    /// Adds one package-backed native library to the process linker. ELF segments
+    /// are materialized and dependency/relocation metadata is retained, but guest
+    /// instructions and JNI_OnLoad are not invoked until the CPU/JNI execution
+    /// bridge is available.
+    pub fn load_native_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<(), String> {
+        let (architecture, image_size, relocation_count, has_jni_onload, jni_onload_address, dependency_count) = {
+            let module = self.native_linker.load_library(soname, elf_bytes)?;
+            (
+                format!("{:?}", module.architecture),
+                module.mapped_image.len(),
+                module.relocations.len(),
+                module.has_jni_onload,
+                module.jni_onload_address,
+                module.needed_libraries.len(),
+            )
+        };
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Info,
+            "NativeLinker",
+            "NATIVE_IMAGE_MATERIALIZED",
+            &format!(
+                "Materialized {} ({}, {} bytes, {} relocations, {} dependencies)",
+                soname, architecture, image_size, relocation_count, dependency_count
+            ),
+            Some(&format!("JNI_OnLoad present: {}; address: {:?}", has_jni_onload, jni_onload_address)),
+            Some("Resolve every reported dependency and apply supported relocations before native entry-point execution"),
+        );
+        let unresolved = self.native_linker.unresolved_dependencies(soname)?;
+        if !unresolved.is_empty() {
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::MissingApi,
+                "NativeLinker",
+                "NATIVE_DEPENDENCIES_MISSING",
+                &format!("{} has {} unloaded DT_NEEDED dependency/dependencies", soname, unresolved.len()),
+                Some(&unresolved.join(", ")),
+                Some("Load the matching ABI libraries or provide ABI-compatible system-library implementations"),
+            );
+        }
+        Ok(())
+    }
+
     pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_| "Resource catalog lock poisoned")?=catalog;Ok(())}
     pub fn set_resource_image(&mut self,id:u32,width:u32,height:u32,pixels:&[u32])->Result<(),String>{let count=(width as usize).checked_mul(height as usize).ok_or("image dimensions overflow")?;if width==0||height==0||count>16_777_216||pixels.len()!=count{return Err("invalid decoded image dimensions".into());}self.image_assets.insert(id,(width,height,pixels.to_vec()));Ok(())}
 
