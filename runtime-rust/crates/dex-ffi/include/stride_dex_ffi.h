@@ -1,4 +1,4 @@
-#ifndef STRIDE_DEX_FFI_H
+﻿#ifndef STRIDE_DEX_FFI_H
 #define STRIDE_DEX_FFI_H
 
 #include <stddef.h>
@@ -164,6 +164,12 @@ int32_t stride_runtime_load_resource_table(AndroidRuntime *runtime, const uint8_
 size_t stride_runtime_resource_file_count(const AndroidRuntime *runtime);
 size_t stride_runtime_resource_file_entry(const AndroidRuntime *runtime, size_t index, uint32_t *out_id, uint8_t *out_path, size_t capacity);
 int32_t stride_runtime_set_resource_image(AndroidRuntime *runtime, uint32_t id, uint32_t width, uint32_t height, const uint32_t *pixels, size_t count);
+
+/* Unity game bridge */
+int32_t stride_runtime_unity_step_frame(AndroidRuntime *runtime);
+int32_t stride_runtime_unity_send_message(AndroidRuntime *runtime, const char *game_object, const char *method_name, const char *message);
+int32_t stride_runtime_unity_resume(AndroidRuntime *runtime);
+int32_t stride_runtime_unity_pause(AndroidRuntime *runtime);
 
 #ifdef __cplusplus
 }

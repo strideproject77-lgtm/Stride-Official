@@ -1,4 +1,4 @@
-//! C ABI for passing DEX inventory summaries and ART runtime execution to Swift.
+﻿//! C ABI for passing DEX inventory summaries and ART runtime execution to Swift.
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -461,6 +461,56 @@ pub unsafe extern "C" fn stride_runtime_destroy(runtime: *mut AndroidRuntime) {
     }
 }
 
+/// Steps one Unity game loop frame. Returns 0 on success, 1 if runtime is null, 2 if not running.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_unity_step_frame(
+    runtime: *mut AndroidRuntime,
+) -> i32 {
+    if runtime.is_null() {
+        return 1;
+    }
+    let rt = &mut *runtime;
+    if rt.unity_bridge.step_frame(&mut rt.gl_engine, &mut rt.surface) {
+        0
+    } else {
+        2
+    }
+}
+
+/// Sends a Unity message (UnitySendMessage). Returns 0 on success, 1 if runtime is null.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_unity_send_message(
+    runtime: *mut AndroidRuntime,
+    game_object: *const c_char,
+    method_name: *const c_char,
+    message: *const c_char,
+) -> i32 {
+    if runtime.is_null() || game_object.is_null() || method_name.is_null() || message.is_null() {
+        return 1;
+    }
+    let rt = &mut *runtime;
+    let go  = unsafe { CStr::from_ptr(game_object) }.to_string_lossy().into_owned();
+    let mn  = unsafe { CStr::from_ptr(method_name) }.to_string_lossy().into_owned();
+    let msg = unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned();
+    rt.unity_bridge.send_message(go, mn, msg);
+    0
+}
+
+/// Resumes the Unity player (call after app foreground).
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_unity_resume(runtime: *mut AndroidRuntime) -> i32 {
+    if runtime.is_null() { return 1; }
+    (*runtime).unity_bridge.resume();
+    0
+}
+
+/// Pauses the Unity player (call when app goes to background).
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_unity_pause(runtime: *mut AndroidRuntime) -> i32 {
+    if runtime.is_null() { return 1; }
+    (*runtime).unity_bridge.pause();
+    0
+}
 #[cfg(test)]
 mod tests {
     use super::*;
