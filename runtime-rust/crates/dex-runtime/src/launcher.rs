@@ -1806,6 +1806,32 @@ mod framework_bridge_tests {
     }
 
     #[test]
+    fn offscreen_canvas_draw_color_flushes_into_bitmap_pixels() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let bitmap = runtime.heap.allocate_instance("Landroid/graphics/Bitmap;").unwrap();
+        let pixels = runtime.heap.allocate_array("[I", 4).unwrap();
+        runtime.heap.set_instance_field(bitmap, "mStrideWidth", Value::Int(2)).unwrap();
+        runtime.heap.set_instance_field(bitmap, "mStrideHeight", Value::Int(2)).unwrap();
+        runtime.heap.set_instance_field(bitmap, "mStridePixels", Value::Object(pixels)).unwrap();
+
+        let canvas = runtime.heap.allocate_instance("Landroid/graphics/Canvas;").unwrap();
+        let ctor = runtime.jni.find("Landroid/graphics/Canvas;", "<init>",
+            "(Landroid/graphics/Bitmap;)V").unwrap().clone();
+        ctor(&mut crate::jni::JniEnv::new(&mut runtime.heap),
+            &[Value::Object(canvas), Value::Object(bitmap)]).unwrap();
+        let draw = runtime.jni.find("Landroid/graphics/Canvas;", "drawColor", "(I)V").unwrap().clone();
+        draw(&mut crate::jni::JniEnv::new(&mut runtime.heap),
+            &[Value::Object(canvas), Value::Int(0xffabcdefu32 as i32)]).unwrap();
+
+        runtime.flush_guest_bitmap_canvases().unwrap();
+        for index in 0..4 {
+            assert_eq!(runtime.heap.get_array_element(pixels, index).unwrap(),
+                Value::Int(0xffabcdefu32 as i32));
+        }
+        assert_eq!(runtime.heap.get_instance_field(canvas, "mStrideCommandCount").unwrap(), Value::Int(0));
+    }
+
+    #[test]
     fn managed_text_view_renders_initial_display_pixels_on_black_surface() {
         let mut runtime = AndroidRuntime::new("com.stride.test");
         let activity = runtime.heap.allocate_instance("Ltest/MainActivity;").unwrap();
