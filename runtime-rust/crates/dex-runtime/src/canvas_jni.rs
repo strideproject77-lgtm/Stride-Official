@@ -68,8 +68,17 @@ fn register(registry: &mut JniNativeRegistry) {
         let paint = args.get(4).and_then(Value::as_object).ok_or("Canvas.drawText Paint is null")?;
         let color = env.get_object_field(paint, "mColor")?;
         let size = env.get_object_field(paint, "mTextSize")?;
+        let align = env.get_object_field(paint, "mTextAlignObject")?.as_object()
+            .and_then(|id| env.get_object_field(id, "name").ok().and_then(Value::as_object))
+            .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned))
+            .or_else(|| env.get_object_field(paint, "mTextAlignObject").ok()
+                .and_then(Value::as_object)
+                .and_then(|id| env.get_object_field(id, "mName").ok().and_then(Value::as_object))
+                .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned)))
+            .unwrap_or_else(|| "LEFT".to_owned());
+        let align_code = match align.as_str() { "CENTER" => 1, "RIGHT" => 2, _ => 0 };
         append(env, canvas, 3, &[
-            text, Value::Float(float(args, 2)), Value::Float(float(args, 3)), color, size,
+            text, Value::Float(float(args, 2)), Value::Float(float(args, 3)), color, size, Value::Int(align_code),
         ])?;
         Ok(None)
     });
