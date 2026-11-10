@@ -1264,6 +1264,28 @@ impl AndroidRuntime {
                     7 => { canvas.restore(); }
                     8 => { canvas.translate(number("Arg0")?, number("Arg1")?); }
                     9 => { canvas.scale(number("Arg0")?, number("Arg1")?); }
+                    10 => {
+                        let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawBitmap received null bitmap")?;
+                        let width = self.heap.get_instance_field(bitmap_id, "mStrideWidth")
+                            .map_err(|error| format!("Bitmap width lookup failed: {:?}", error))?.as_int();
+                        let height = self.heap.get_instance_field(bitmap_id, "mStrideHeight")
+                            .map_err(|error| format!("Bitmap height lookup failed: {:?}", error))?.as_int();
+                        let pixels_id = self.heap.get_instance_field(bitmap_id, "mStridePixels")
+                            .map_err(|error| format!("Bitmap pixel buffer lookup failed: {:?}", error))?.as_object()
+                            .ok_or("Guest Bitmap pixel buffer is null")?;
+                        if width <= 0 || height <= 0 || (width as i64) * (height as i64) > 16_777_216 {
+                            return Err("Guest Bitmap dimensions are invalid".into());
+                        }
+                        let pixel_count = (width * height) as usize;
+                        let pixels = match self.heap.get(pixels_id)
+                            .map_err(|error| format!("Bitmap pixel array lookup failed: {:?}", error))? {
+                            crate::heap::HeapObject::Array(array) if array.elements.len() == pixel_count =>
+                                array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
+                            _ => return Err("Guest Bitmap pixel array has an invalid shape".into()),
+                        };
+                        canvas.draw_image_argb(&pixels, width as u32, height as u32,
+                            number("Arg1")? as i32, number("Arg2")? as i32);
+                    }
                     unknown => return Err(format!("Unsupported guest Canvas command type {}", unknown)),
                 }
             }
