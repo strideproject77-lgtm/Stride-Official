@@ -10,10 +10,13 @@ fn int(args: &[Value], index: usize, default: i32) -> i32 {
     args.get(index).map(Value::as_int).unwrap_or(default)
 }
 fn dimensions(heap: &crate::heap::ManagedHeap, bitmap: u32) -> Result<(i32, i32, u32), String> {
-    let width = heap.get_instance_field(bitmap, "mStrideWidth")?.as_int();
-    let height = heap.get_instance_field(bitmap, "mStrideHeight")?.as_int();
-    let pixels = heap.get_instance_field(bitmap, "mStridePixels")?.as_object()
-        .ok_or("Bitmap pixel buffer is missing")?;
+    let width = heap.get_instance_field(bitmap, "mStrideWidth")
+        .map_err(|error| format!("Bitmap width lookup failed: {error:?}"))?.as_int();
+    let height = heap.get_instance_field(bitmap, "mStrideHeight")
+        .map_err(|error| format!("Bitmap height lookup failed: {error:?}"))?.as_int();
+    let pixels = heap.get_instance_field(bitmap, "mStridePixels")
+        .map_err(|error| format!("Bitmap pixel buffer lookup failed: {error:?}"))?.as_object()
+        .ok_or_else(|| "Bitmap pixel buffer is missing".to_owned())?;
     Ok((width, height, pixels))
 }
 fn register(jni: &mut JniNativeRegistry) {
