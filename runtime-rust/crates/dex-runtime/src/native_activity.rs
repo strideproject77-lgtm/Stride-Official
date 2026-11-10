@@ -4,7 +4,7 @@
 //! entry point (ANativeActivity_onCreate) and coordinating with the Unity player bridge
 //! and OpenGL ES rendering engine.
 
-use crate::unity::{UnityPlayerBridge, UnityEngineState};
+use crate::unity::UnityPlayerBridge;
 
 /// EGL display configuration for the guest application surface.
 #[derive(Debug, Clone)]
@@ -97,26 +97,27 @@ impl NativeActivityLauncher {
         self.native_library_name = native_library.map(|s| s.to_string());
     }
 
-    /// Launches as a Unity NativeActivity application.
+    /// Refuses to report a Unity launch until a native linker, JNI_OnLoad,
+    /// Unity initialization and a real render callback are connected.
     ///
-    /// For Unity IL2CPP apps (like Hill Climb Racing), the actual game logic lives
-    /// in `libunity.so` + `libil2cpp.so`. This method initializes the Unity player
-    /// bridge and transitions it to the Running state through the proper lifecycle.
+    /// A state transition in UnityPlayerBridge is not evidence that libunity.so
+    /// or libil2cpp.so has been loaded or that the game is executing.
     pub fn launch_unity(
         &mut self,
-        unity_bridge: &mut UnityPlayerBridge,
+        _unity_bridge: &mut UnityPlayerBridge,
     ) -> NativeActivityLaunchResult {
         let lib_name = self.native_library_name.clone()
             .unwrap_or_else(|| "libunity.so".to_string());
+        let status = NativeActivityStatus::RuntimeError(format!(
+            "Unity launch is not executable: {} has not been loaded and invoked by the native linker; JNI_OnLoad, Unity initialization and guest rendering are not connected",
+            lib_name
+        ));
 
-        // Initialize the Unity engine through its lifecycle
-        unity_bridge.initialize();
-        unity_bridge.resume();
-
-        self.status = Some(NativeActivityStatus::Running);
+        self.status = Some(status.clone());
+        self.frames_rendered = 0;
 
         NativeActivityLaunchResult {
-            status: NativeActivityStatus::Running,
+            status,
             egl_config: self.egl_config.clone(),
             activity_class: self.activity_class.clone(),
             native_library: Some(lib_name),
@@ -124,17 +125,22 @@ impl NativeActivityLauncher {
         }
     }
 
-    /// Launches as a generic C++ NativeActivity (non-Unity).
+    /// Refuses to report a generic NativeActivity launch based only on a symbol name.
+    /// The entry point must be resolved from a loaded ELF image and actually invoked.
     pub fn launch_native_cpp(&mut self, entry_point: &str) -> NativeActivityLaunchResult {
         let status = if entry_point.is_empty() {
             NativeActivityStatus::MissingEntryPoint(
-                "ANativeActivity_onCreate not found".to_string()
+                "ANativeActivity_onCreate was not resolved from a loaded native library".to_string()
             )
         } else {
-            NativeActivityStatus::Running
+            NativeActivityStatus::RuntimeError(format!(
+                "NativeActivity launch is not executable: entry point '{}' was named but no loaded ELF function was invoked",
+                entry_point
+            ))
         };
 
         self.status = Some(status.clone());
+        self.frames_rendered = 0;
 
         NativeActivityLaunchResult {
             status,
@@ -171,7 +177,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unity_launch_transitions_to_running() {
+    fn unity_launch_fails_closed_until_native_execution_is_connected() {
         let mut launcher = NativeActivityLauncher::new();
         launcher.configure_activity(
             "com.unity3d.player.UnityPlayerActivity",
@@ -180,9 +186,10 @@ mod tests {
         launcher.configure_surface(1080, 1920, 3);
         let mut bridge = UnityPlayerBridge::new();
         let result = launcher.launch_unity(&mut bridge);
-        assert_eq!(result.status, NativeActivityStatus::Running);
-        assert_eq!(bridge.state, UnityEngineState::Running);
-        assert!(launcher.is_running());
+        assert!(matches!(result.status, NativeActivityStatus::RuntimeError(_)));
+        assert_eq!(bridge.state, crate::unity::UnityEngineState::Uninitialized);
+        assert!(!launcher.is_running());
+        assert_eq!(result.frames_rendered, 0);
     }
 
     #[test]
@@ -195,11 +202,13 @@ mod tests {
     }
 
     #[test]
-    fn native_cpp_launch_with_entry_point_succeeds() {
+    fn native_cpp_launch_does_not_treat_symbol_name_as_execution() {
         let mut launcher = NativeActivityLauncher::new();
         launcher.configure_activity("com.example.NativeActivity", Some("libnative.so"));
         let result = launcher.launch_native_cpp("ANativeActivity_onCreate");
-        assert_eq!(result.status, NativeActivityStatus::Running);
+        assert!(matches!(result.status, NativeActivityStatus::RuntimeError(_)));
+        assert!(!launcher.is_running());
+        assert_eq!(result.frames_rendered, 0);
     }
 
     #[test]
