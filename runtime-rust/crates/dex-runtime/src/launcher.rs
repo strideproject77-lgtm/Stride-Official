@@ -123,18 +123,38 @@ impl AndroidRuntime {
             Some(&format!("JNI_OnLoad present: {}; address: {:?}", has_jni_onload, jni_onload_address)),
             Some("Resolve every reported dependency and apply supported relocations before native entry-point execution"),
         );
-        let unresolved = self.native_linker.unresolved_dependencies(soname)?;
-        if !unresolved.is_empty() {
-            self.diagnostics.record_detailed(
-                DiagnosticSeverity::MissingApi,
-                "NativeLinker",
-                "NATIVE_DEPENDENCIES_MISSING",
-                &format!("{} has {} unloaded DT_NEEDED dependency/dependencies", soname, unresolved.len()),
-                Some(&unresolved.join(", ")),
-                Some("Load the matching ABI libraries or provide ABI-compatible system-library implementations"),
-            );
-        }
         Ok(())
+    }
+
+    /// Call once after every package .so has been offered to the linker, so
+    /// dependencies loaded later in archive order are not reported as missing.
+    pub fn finish_native_loading(&self) -> usize {
+        let mut unresolved_modules = 0usize;
+        for soname in &self.native_linker.loaded_order {
+            let unresolved = match self.native_linker.unresolved_dependencies(soname) {
+                Ok(items) => items,
+                Err(error) => {
+                    self.diagnostics.record_detailed(
+                        DiagnosticSeverity::RuntimeError, "NativeLinker",
+                        "NATIVE_DEPENDENCY_SCAN_FAILED", "Could not inspect native dependencies",
+                        Some(&error), None,
+                    );
+                    continue;
+                }
+            };
+            if !unresolved.is_empty() {
+                unresolved_modules += 1;
+                self.diagnostics.record_detailed(
+                    DiagnosticSeverity::MissingApi,
+                    "NativeLinker",
+                    "NATIVE_DEPENDENCIES_MISSING",
+                    &format!("{} has {} unloaded DT_NEEDED dependency/dependencies", soname, unresolved.len()),
+                    Some(&unresolved.join(", ")),
+                    Some("Load the matching ABI libraries or provide ABI-compatible system-library implementations"),
+                );
+            }
+        }
+        unresolved_modules
     }
 
     pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_| "Resource catalog lock poisoned")?=catalog;Ok(())}
