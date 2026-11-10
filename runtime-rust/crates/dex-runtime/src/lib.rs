@@ -62,7 +62,7 @@ pub use layout::{inflate_layout_tree, measure_and_layout, render_layout_backgrou
 pub use launcher::{AndroidRuntime, LaunchReport, LaunchStatus};
 pub use stride_axml::{parse_manifest, parse_layout_tree, XmlNode};
 pub use diagnostics::{RuntimeDiagnostics, DiagnosticSeverity, DiagnosticRecord};
-pub use bionic::{NativeLinker, BionicEnvironment, LoadedNativeModule, ResolvedSymbol};
+pub use bionic::{NativeLinker, BionicEnvironment, LoadedNativeModule, PlannedNativeRelocation, ResolvedSymbol};
 pub use gl::{OpenGlEsEngine, EglContext, EglWindowSurface, GlesState, GL_COLOR_BUFFER_BIT, GL_DEPTH_BUFFER_BIT, GL_STENCIL_BUFFER_BIT, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN, GL_LINES, GL_POINTS, EGL_SUCCESS, EGL_NOT_INITIALIZED};
 pub use activity_manager::{ActivityManager, ActivityRecord, ActivityTask};
 pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
