@@ -59,6 +59,12 @@ fn register(j:&mut JniNativeRegistry){
   j.register("Landroid/graphics/Paint;",get,ret,move|e,a|Ok(Some(e.get_object_field(id(a)?,field)?)));
  }
  j.register("Landroid/graphics/Paint;","measureText","(Ljava/lang/String;)F",|e,a|{let p=id(a)?;let text=a.get(1).and_then(Value::as_object).ok_or("measureText text is null")?;let s=e.get_string_utf(text)?;let size=e.get_object_field(p,"mTextSize")?.as_float();Ok(Some(Value::Float(s.chars().count() as f32*size*0.5)))});
+ for (name, factor) in [("ascent", -0.8f32), ("descent", 0.2f32)] {
+  j.register("Landroid/graphics/Paint;", name, "()F", move |e,a| {
+   let size=e.get_object_field(id(a)?,"mTextSize")?.as_float();
+   Ok(Some(Value::Float(size.max(0.0)*factor)))
+  });
+ }
 }
 #[cfg(test)] mod tests{
  use super::*;use crate::heap::ManagedHeap;use crate::jni::JniEnv;
