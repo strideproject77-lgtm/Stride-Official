@@ -115,40 +115,28 @@ impl BionicEnvironment {
         }
 
         // --- libc strings ---
-        self.register("strlen", |_args| Ok(Value::Int(0)));
-        self.register("strcmp", |_args| Ok(Value::Int(0)));
-        self.register("strncmp", |_args| Ok(Value::Int(0)));
-        self.register("strcpy", |args| {
-            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(dst))
-        });
-        self.register("strncpy", |args| {
-            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(dst))
-        });
-        self.register("strcat", |args| {
-            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(dst))
-        });
-        self.register("strchr", |_args| Ok(Value::Int(0)));
-        self.register("strstr", |_args| Ok(Value::Int(0)));
+        self.register("strlen", unsupported_symbol("strlen"));
+        self.register("strcmp", unsupported_symbol("strcmp"));
+        self.register("strncmp", unsupported_symbol("strncmp"));
+        self.register("strcpy", unsupported_symbol("strcpy"));
+        self.register("strncpy", unsupported_symbol("strncpy"));
+        self.register("strcat", unsupported_symbol("strcat"));
+        self.register("strchr", unsupported_symbol("strchr"));
+        self.register("strstr", unsupported_symbol("strstr"));
 
         // --- libc stdio ---
-        self.register("printf", |_args| Ok(Value::Int(0)));
-        self.register("fprintf", |_args| Ok(Value::Int(0)));
-        self.register("sprintf", |_args| Ok(Value::Int(0)));
-        self.register("snprintf", |args| {
-            let n = args.get(1).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(n))
-        });
-        self.register("sscanf", |_args| Ok(Value::Int(0)));
-        self.register("fopen", |_args| Ok(Value::Int(0)));
-        self.register("fclose", |_args| Ok(Value::Int(0)));
-        self.register("fread", |_args| Ok(Value::Int(0)));
-        self.register("fwrite", |_args| Ok(Value::Int(0)));
-        self.register("fseek", |_args| Ok(Value::Int(0)));
-        self.register("ftell", |_args| Ok(Value::Int(0)));
-        self.register("fflush", |_args| Ok(Value::Int(0)));
+        self.register("printf", unsupported_symbol("printf"));
+        self.register("fprintf", unsupported_symbol("fprintf"));
+        self.register("sprintf", unsupported_symbol("sprintf"));
+        self.register("snprintf", unsupported_symbol("snprintf"));
+        self.register("sscanf", unsupported_symbol("sscanf"));
+        self.register("fopen", unsupported_symbol("fopen"));
+        self.register("fclose", unsupported_symbol("fclose"));
+        self.register("fread", unsupported_symbol("fread"));
+        self.register("fwrite", unsupported_symbol("fwrite"));
+        self.register("fseek", unsupported_symbol("fseek"));
+        self.register("ftell", unsupported_symbol("ftell"));
+        self.register("fflush", unsupported_symbol("fflush"));
 
         // --- libm extras ---
         self.register("fabs", |args| {
@@ -214,11 +202,11 @@ impl BionicEnvironment {
         });
 
         // --- libc time ---
-        self.register("clock_gettime", |_args| Ok(Value::Int(0)));
-        self.register("gettimeofday", |_args| Ok(Value::Int(0)));
-        self.register("nanosleep", |_args| Ok(Value::Int(0)));
-        self.register("usleep", |_args| Ok(Value::Int(0)));
-        self.register("time", |_args| Ok(Value::Long(0)));
+        self.register("clock_gettime", unsupported_symbol("clock_gettime"));
+        self.register("gettimeofday", unsupported_symbol("gettimeofday"));
+        self.register("nanosleep", unsupported_symbol("nanosleep"));
+        self.register("usleep", unsupported_symbol("usleep"));
+        self.register("time", unsupported_symbol("time"));
 
         // --- pthreads ---
         // Threading and synchronization require a guest-thread scheduler and
@@ -244,31 +232,31 @@ impl BionicEnvironment {
                 "pthread_setspecific" => "pthread_setspecific", _ => "pthread_once",
             }));
         }
-        self.register("pthread_rwlock_init", |_args| Ok(Value::Int(0)));
-        self.register("pthread_rwlock_rdlock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_rwlock_wrlock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_rwlock_unlock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_rwlock_destroy", |_args| Ok(Value::Int(0)));
+        self.register("pthread_rwlock_init", unsupported_symbol("pthread_rwlock_init"));
+        self.register("pthread_rwlock_rdlock", unsupported_symbol("pthread_rwlock_rdlock"));
+        self.register("pthread_rwlock_wrlock", unsupported_symbol("pthread_rwlock_wrlock"));
+        self.register("pthread_rwlock_unlock", unsupported_symbol("pthread_rwlock_unlock"));
+        self.register("pthread_rwlock_destroy", unsupported_symbol("pthread_rwlock_destroy"));
 
         // --- libdl ---
-        self.register("dlopen", |_args| Ok(Value::Int(1)));
-        self.register("dlsym", |_args| Ok(Value::Int(0)));
-        self.register("dlclose", |_args| Ok(Value::Int(0)));
-        self.register("dlerror", |_args| Ok(Value::Int(0)));
+        self.register("dlopen", unsupported_symbol("dlopen"));
+        self.register("dlsym", unsupported_symbol("dlsym"));
+        self.register("dlclose", unsupported_symbol("dlclose"));
+        self.register("dlerror", unsupported_symbol("dlerror"));
 
         // --- libc misc ---
         self.register("exit", |_args| Err("Native library called exit()".into()));
-        self.register("raise", |_args| Ok(Value::Int(0)));
-        self.register("signal", |_args| Ok(Value::Int(0)));
-        self.register("getpid", |_args| Ok(Value::Int(1234)));
-        self.register("getenv", |_args| Ok(Value::Int(0)));
-        self.register("setenv", |_args| Ok(Value::Int(0)));
-        self.register("rand", |_args| Ok(Value::Int(42)));
-        self.register("srand", |_args| Ok(Value::Int(0)));
-        self.register("atoi", |_args| Ok(Value::Int(0)));
-        self.register("atof", |_args| Ok(Value::Double(0.0)));
-        self.register("strtol", |_args| Ok(Value::Long(0)));
-        self.register("strtod", |_args| Ok(Value::Double(0.0)));
+        self.register("raise", unsupported_symbol("raise"));
+        self.register("signal", unsupported_symbol("signal"));
+        self.register("getpid", unsupported_symbol("getpid"));
+        self.register("getenv", unsupported_symbol("getenv"));
+        self.register("setenv", unsupported_symbol("setenv"));
+        self.register("rand", unsupported_symbol("rand"));
+        self.register("srand", unsupported_symbol("srand"));
+        self.register("atoi", unsupported_symbol("atoi"));
+        self.register("atof", unsupported_symbol("atof"));
+        self.register("strtol", unsupported_symbol("strtol"));
+        self.register("strtod", unsupported_symbol("strtod"));
 
         // --- NDK system properties ---
         // System-property and asset APIs need real guest buffers and package-backed
