@@ -1,11 +1,11 @@
-﻿//! Android Bionic libc and native library dynamic linker emulation.
+//! Android Bionic libc and native library dynamic linker emulation.
 //!
 //! Provides the symbol resolution table, Bionic runtime environment,
 //! and native library relocation resolution for ELF ARM/ARM64 shared libraries.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, ElfArchitecture};
+use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture};
 use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan};
 use stride_elf_inspector::Relocation;
 use crate::types::Value;
@@ -305,8 +305,10 @@ pub struct LoadedNativeModule {
     pub plan: NativeImagePlan,
     /// Zero-filled guest image with PT_LOAD file bytes copied into place.
     /// This is not executable host memory and is not invoked directly.
-    pub mapped_image: Arc<[u8]>,
+    pub mapped_image: Vec<u8>,
     pub relocations: Vec<PlannedNativeRelocation>,
+    pub dynamic_symbols: Vec<DynamicSymbol>,
+    pub load_bias: u64,
     pub exported_symbols: HashMap<String, u64>,
     pub needed_libraries: Vec<String>,
     pub has_jni_onload: bool,
@@ -318,6 +320,7 @@ pub struct NativeLinker {
     pub bionic: BionicEnvironment,
     pub modules: HashMap<String, LoadedNativeModule>,
     pub loaded_order: Vec<String>,
+    next_guest_base: u64,
 }
 
 impl Default for NativeLinker {
@@ -332,6 +335,7 @@ impl NativeLinker {
             bionic: BionicEnvironment::new(),
             modules: HashMap::new(),
             loaded_order: Vec::new(),
+            next_guest_base: 0x0000_7000_0000_0000,
         }
     }
 
@@ -340,10 +344,20 @@ impl NativeLinker {
         let elf_info = inspect_elf(elf_bytes)
             .map_err(|e| format!("ELF inspection failed for {}: {:?}", soname, e))?;
 
-        let plan = plan_native_image(&elf_info, 0)
+        let unbased_plan = plan_native_image(&elf_info, 0)
+            .map_err(|e| format!("Native image planning failed for {}: {:?}", soname, e))?;
+        let guest_base = self.next_guest_base;
+        let load_bias = guest_base.checked_sub(unbased_plan.image_virtual_start)
+            .ok_or_else(|| format!("Cannot allocate guest address range for {}", soname))?;
+        let plan = plan_native_image(&elf_info, load_bias)
             .map_err(|e| format!("Native image planning failed for {}: {:?}", soname, e))?;
         let mapped_image = materialize_native_image(elf_bytes, &plan)
             .map_err(|e| format!("Native image materialization failed for {}: {:?}", soname, e))?;
+        let next_base = guest_base.checked_add(plan.image_size)
+            .and_then(|v| v.checked_add(0x1_0000))
+            .and_then(|v| v.checked_add(0xffff).map(|sum| sum & !0xffff))
+            .ok_or_else(|| format!("Guest address space exhausted while loading {}", soname))?;
+        self.next_guest_base = next_base;
 
         let mut exported_symbols = HashMap::new();
         let mut has_jni_onload = false;
@@ -353,6 +367,7 @@ impl NativeLinker {
             .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
 
         let needed_libraries = dynamic_info.needed_libraries;
+        let dynamic_symbols = dynamic_info.symbols.clone();
         let mut relocations = Vec::with_capacity(dynamic_info.relocations.len());
         for relocation in dynamic_info.relocations {
             let image_offset = if relocation.relocation_type == 0 {
@@ -396,8 +411,10 @@ impl NativeLinker {
             name: soname.to_string(),
             architecture: plan.architecture,
             plan,
-            mapped_image: mapped_image.into(),
+            mapped_image,
             relocations,
+            dynamic_symbols,
+            load_bias,
             exported_symbols,
             needed_libraries,
             has_jni_onload,
@@ -410,6 +427,85 @@ impl NativeLinker {
         }
 
         Ok(self.modules.get(soname).unwrap())
+    }
+
+    /// Applies supported ARM/AArch64 dynamic relocations to guest image buffers.
+    /// Unsupported kinds and unresolved external symbols are returned as diagnostics.
+    pub fn apply_relocations(&mut self) -> Vec<String> {
+        let mut issues = Vec::new();
+        let order = self.loaded_order.clone();
+        for soname in order {
+            let Some(snapshot) = self.modules.get(&soname) else { continue };
+            let architecture = snapshot.architecture;
+            let base = snapshot.load_bias;
+            let relocations = snapshot.relocations.clone();
+            let symbols = snapshot.dynamic_symbols.clone();
+            for planned in relocations {
+                let Some(offset) = planned.image_offset else { continue };
+                let kind = planned.relocation.relocation_type;
+                let (width, relative) = match architecture {
+                    ElfArchitecture::Aarch64 => match kind {
+                        1027 => (8usize, true),
+                        257 | 1025 | 1026 => (8, false),
+                        _ => { issues.push(format!("{}: unsupported AArch64 relocation {}", soname, kind)); continue; }
+                    },
+                    ElfArchitecture::Arm => match kind {
+                        23 => (4usize, true),
+                        2 | 21 | 22 => (4, false),
+                        _ => { issues.push(format!("{}: unsupported ARM relocation {}", soname, kind)); continue; }
+                    },
+                    other => { issues.push(format!("{}: unsupported ELF architecture {:?}", soname, other)); continue; }
+                };
+                let Ok(start) = usize::try_from(offset) else {
+                    issues.push(format!("{}: relocation offset conversion overflow", soname)); continue;
+                };
+                if self.modules.get(&soname).and_then(|m| start.checked_add(width).map(|end| end <= m.mapped_image.len())) != Some(true) {
+                    issues.push(format!("{}: relocation target {:#x} is outside image", soname, offset)); continue;
+                }
+                let addend = if let Some(explicit) = planned.relocation.addend { explicit } else {
+                    let image = &self.modules.get(&soname).unwrap().mapped_image;
+                    if width == 8 {
+                        i64::from_le_bytes(image[start..start+8].try_into().unwrap())
+                    } else {
+                        i32::from_le_bytes(image[start..start+4].try_into().unwrap()) as i64
+                    }
+                };
+                let symbol_address = if relative { Some(0u64) } else {
+                    let Some(symbol) = symbols.get(planned.relocation.symbol_index as usize) else {
+                        issues.push(format!("{}: missing relocation symbol index {}", soname, planned.relocation.symbol_index)); continue;
+                    };
+                    if symbol.section_index != 0 {
+                        base.checked_add(symbol.value)
+                    } else if symbol.binding == 2 {
+                        Some(0)
+                    } else {
+                        let mut found = None;
+                        for candidate_name in &self.loaded_order {
+                            if let Some(candidate) = self.modules.get(candidate_name) {
+                                if let Some(address) = candidate.exported_symbols.get(&symbol.name) {
+                                    found = candidate.load_bias.checked_add(*address);
+                                    if found.is_some() { break; }
+                                }
+                            }
+                        }
+                        found
+                    }
+                };
+                let Some(symbol_address) = symbol_address else {
+                    issues.push(format!("{}: unresolved relocation symbol {}", soname,
+                        symbols.get(planned.relocation.symbol_index as usize).map(|s| s.name.as_str()).unwrap_or("<invalid>")));
+                    continue;
+                };
+                let value = if relative { base as i128 + addend as i128 } else { symbol_address as i128 + addend as i128 };
+                if value < 0 || (width == 4 && value > u32::MAX as i128) || value > u64::MAX as i128 {
+                    issues.push(format!("{}: relocation result overflow for type {}", soname, kind)); continue;
+                }
+                let Some(module) = self.modules.get_mut(&soname) else { continue };
+                if width == 8 { module.mapped_image[start..start+8].copy_from_slice(&(value as u64).to_le_bytes()); }
+                else { module.mapped_image[start..start+4].copy_from_slice(&(value as u32).to_le_bytes()); }
+            }
+        }
+        issues
     }
 
     /// Returns DT_NEEDED libraries that have not yet been loaded into this
@@ -504,8 +600,10 @@ mod tests {
                 name: "libnative-lib.so".to_string(),
                 architecture: ElfArchitecture::Aarch64,
                 plan: mod_plan,
-                mapped_image: Vec::new().into(),
+                mapped_image: Vec::new(),
                 relocations: Vec::new(),
+                dynamic_symbols: Vec::new(),
+                load_bias: 0,
                 exported_symbols: syms,
                 needed_libraries: Vec::new(),
                 has_jni_onload: true,
