@@ -69,11 +69,11 @@ fn register(registry: &mut JniNativeRegistry) {
         let color = env.get_object_field(paint, "mColor")?;
         let size = env.get_object_field(paint, "mTextSize")?;
         let align = env.get_object_field(paint, "mTextAlignObject")?.as_object()
-            .and_then(|id| env.get_object_field(id, "name").ok().and_then(Value::as_object))
+            .and_then(|id| env.get_object_field(id, "name").ok().and_then(|value| value.as_object()))
             .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned))
             .or_else(|| env.get_object_field(paint, "mTextAlignObject").ok()
-                .and_then(Value::as_object)
-                .and_then(|id| env.get_object_field(id, "mName").ok().and_then(Value::as_object))
+                .and_then(|value| value.as_object())
+                .and_then(|id| env.get_object_field(id, "mName").ok().and_then(|value| value.as_object()))
                 .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned)))
             .unwrap_or_else(|| "LEFT".to_owned());
         let align_code = match align.as_str() { "CENTER" => 1, "RIGHT" => 2, _ => 0 };
