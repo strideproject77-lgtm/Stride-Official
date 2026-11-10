@@ -1181,6 +1181,57 @@ impl AndroidRuntime {
             let Some(method_id) = self.class_loader.find_method(
                 &class_descriptor, "onDraw", "(Landroid/graphics/Canvas;)V"
             ) else { continue };
+            // Deliver the first real size callback before drawing. This is where
+            // custom Views commonly allocate their offscreen Bitmap/Canvas buffers.
+            let width = self.surface.width as i32;
+            let height = self.surface.height as i32;
+            for (field, value) in [
+                ("mWidth", Value::Int(width)), ("mHeight", Value::Int(height)),
+                ("mRight", Value::Int(width)), ("mBottom", Value::Int(height)),
+            ] {
+                self.heap.set_instance_field(view_id, field, value)
+                    .map_err(|error| format!("Custom View size state update failed: {:?}", error))?;
+            }
+            let size_delivered = self.heap.get_instance_field(view_id, "mStrideSizeChanged")
+                .map(|value| value.as_int() != 0).unwrap_or(false);
+            if !size_delivered {
+                if let Some(size_method) = self.class_loader.find_method(
+                    &class_descriptor, "onSizeChanged", "(IIII)V"
+                ) {
+                    let size_method = u16::try_from(size_method)
+                        .map_err(|_| "Custom View onSizeChanged method ID exceeds interpreter limit".to_owned())?;
+                    let method_map = self.class_loader.export_method_codes();
+                    let metadata = self.class_loader.dex_inventories.first().cloned();
+                    let strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+                    let mut vm = ArtVm::new(
+                        &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                        &mut self.jni, &method_map, strings,
+                    );
+                    vm.attach_diagnostics(&self.diagnostics);
+                    vm.attach_static_fields(&mut self.static_fields);
+                    vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+                    if let Some(inventory) = metadata.as_ref() {
+                        vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                        vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                    }
+                    let size_args = [
+                        Value::Object(view_id), Value::Int(width), Value::Int(height),
+                        Value::Int(0), Value::Int(0),
+                    ];
+                    let size_report = vm.execute_method(size_method, &size_args, 250_000)
+                        .map_err(|error| format!("Guest onSizeChanged interpreter error in {}: {}", class_descriptor, error))?;
+                    match size_report.stop_reason {
+                        ExecutionStopReason::UncaughtException(exception) =>
+                            return Err(format!("Guest {}.onSizeChanged threw {}: {:?}", class_descriptor, exception.class_descriptor, exception.message)),
+                        ExecutionStopReason::StepLimitExceeded =>
+                            return Err(format!("Guest {}.onSizeChanged exceeded its instruction budget", class_descriptor)),
+                        _ => {}
+                    }
+                    self.heap.set_instance_field(view_id, "mStrideSizeChanged", Value::Int(1))
+                        .map_err(|error| format!("Custom View size state update failed: {:?}", error))?;
+                }
+            }
+
             let method_id = u16::try_from(method_id)
                 .map_err(|_| "Custom View onDraw method ID exceeds interpreter limit".to_owned())?;
             let canvas_id = self.heap.allocate_instance("Landroid/graphics/Canvas;")
