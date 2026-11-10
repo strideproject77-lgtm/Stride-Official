@@ -166,3 +166,32 @@ Therefore the next implementation milestone is not merely adding more Canvas ras
 ### Current compatibility status
 
 **Not playable / not verified.** The package import pipeline now normalizes APK, XAPK, APKS and APKM containers and preserves split APKs. The execution backend scans preserved split APKs for DEX/native entries and searches split archives for referenced resource images. Split resource tables are not merged, APKS `toc.pb` device-specific selection is not implemented, and guest custom Canvas execution is still a blocking runtime gap. Do not label 2048 as supported until its own board is rendered by guest `MainView.onDraw`, swipe moves work, and state survives relaunch on a physical iPhone.
+
+## Implementation progress — 2026-11-10
+
+Work started on `feat/dex-class-method-loader`. The following guest-framework pieces were previously missing and have now been added to the runtime source:
+
+- Guest `View.onDraw(Canvas)` invocation for app-owned custom Views, with an initial `onSizeChanged(IIII)` callback and current View dimensions.
+- Guest Canvas command recording/replay for `drawColor`, `drawRect`, `drawText`, `drawLine`, `drawCircle`, `save/restore`, `translate/scale`, and `drawBitmap(Bitmap,FF,Paint)`.
+- Offscreen `Canvas(Bitmap)` command flushing into managed Bitmap pixel arrays before screen composition.
+- Managed Bitmap creation, dimensions, pixel access, erase-color and alpha-state methods.
+- Paint ascent/descent metrics; the existing Paint bridge already handled color, alpha, text size, anti-alias, text alignment/typeface references and approximate `measureText`.
+- Typeface asset-name metadata bridge for `createFromAsset`.
+- Drawable/BitmapDrawable construction, bounds, alpha state and bitmap draw dispatch.
+- Context/Resources access for parsed `resources.arsc` string and color values.
+- SharedPreferences JNI for Boolean, Int and Long values, editor put/remove/apply/commit, retained across Activity instances in one runtime process.
+- Window decor-view lookup, status/navigation bar color state, View system UI flags and storage of the window-insets listener.
+- Redraw of the guest View after queued input events. The existing MotionEvent getters and View touch-listener dispatch were confirmed present before these changes.
+
+### Still incomplete / not yet verified
+
+- This is an implementation batch, **not a claim that 2048 is playable**. No Rust test suite has been run yet and no physical-iPhone end-to-end test has been performed.
+- Typeface currently retains the requested asset path; the software text renderer still uses its existing host-font fallback rather than loading ClearSans-Bold.ttf.
+- Paint text alignment and real font metrics are not yet fully reflected by the rasterizer; Drawable alpha is retained but not yet blended into bitmap pixels.
+- Window-insets listener is stored but the listener callback and real safe-area inset values are not yet dispatched.
+- SharedPreferences values currently survive Activity recreation within the same runtime process; durable cold-process persistence is not yet established.
+- Exact Canvas API coverage must still be checked against the complete 2048 DEX call graph. Any missing overloads/opcodes must be implemented from observed call sites.
+- XAPK/APK/APKS/APKM import support already exists, but split resource-table merging and APKS `toc.pb` device-specific split selection remain incomplete.
+- 2048 remains **Not playable / Not verified** until the real board, swipes, merge/undo/new-game flow and saved state pass end-to-end tests on a physical iPhone.
+
+The repository's iOS workflow was adjusted so intermediate implementation commits do not each queue duplicate IPA builds. The intended final validation is one manually initiated full Rust-test + unsigned-IPA workflow after the implementation batch is ready.
