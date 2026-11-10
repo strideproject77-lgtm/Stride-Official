@@ -290,7 +290,6 @@ impl BionicEnvironment {
 
 /// A loaded Android shared library module.
 #[derive(Debug, Clone)]
-#[derive(Debug, Clone)]
 pub struct PlannedNativeRelocation {
     pub relocation: Relocation,
     /// Offset of r_offset inside the materialized image. None is reserved for
