@@ -392,14 +392,43 @@ impl<'a> Canvas<'a> {
         }cursor
     }
     pub fn draw_image_argb(&mut self,pixels:&[u32],width:u32,height:u32,left:i32,top:i32){
-        if(width as usize).checked_mul(height as usize)!=Some(pixels.len()){return;}
-        for sy in 0..height{let dy=top+sy as i32;if dy<0||dy>=self.surface.height as i32{continue;}
-            for sx in 0..width{let dx=left+sx as i32;if dx<0||dx>=self.surface.width as i32{continue;}
-                let src=pixels[(sy*width+sx)as usize];let a=(src>>24)&255;
-                if a==255{self.surface.set_pixel(dx as u32,dy as u32,src);}else if a>0{
-                    let dst=self.surface.get_pixel(dx as u32,dy as u32).unwrap_or(0xff000000);let inv=255-a;
-                    let blend=|shift:u32|((((src>>shift)&255)*a+((dst>>shift)&255)*inv)/255)&255;
-                    self.surface.set_pixel(dx as u32,dy as u32,0xff000000|(blend(16)<<16)|(blend(8)<<8)|blend(0));
+        self.draw_image_argb_scaled_alpha(pixels, width, height, left, top,
+            left.saturating_add(width as i32), top.saturating_add(height as i32), 255);
+    }
+
+    /// Draw an ARGB bitmap into destination bounds using nearest-neighbour
+    /// sampling and Android-style drawable alpha modulation.
+    pub fn draw_image_argb_scaled_alpha(
+        &mut self, pixels:&[u32], width:u32, height:u32,
+        left:i32, top:i32, right:i32, bottom:i32, alpha:u8,
+    ) {
+        if width == 0 || height == 0 || right <= left || bottom <= top
+            || (width as usize).checked_mul(height as usize) != Some(pixels.len()) || alpha == 0 {
+            return;
+        }
+        let dst_width = (right as i64 - left as i64) as u64;
+        let dst_height = (bottom as i64 - top as i64) as u64;
+        let min_x = left.max(0);
+        let max_x = right.min(self.surface.width as i32);
+        let min_y = top.max(0);
+        let max_y = bottom.min(self.surface.height as i32);
+        for dy in min_y..max_y {
+            let sy = (((dy as i64 - top as i64) as u64 * height as u64) / dst_height)
+                .min(height as u64 - 1) as u32;
+            for dx in min_x..max_x {
+                let sx = (((dx as i64 - left as i64) as u64 * width as u64) / dst_width)
+                    .min(width as u64 - 1) as u32;
+                let src = pixels[(sy * width + sx) as usize];
+                let a = (((src >> 24) & 255) * alpha as u32 + 127) / 255;
+                if a == 255 {
+                    self.surface.set_pixel(dx as u32, dy as u32, 0xff000000 | (src & 0x00ffffff));
+                } else if a > 0 {
+                    let dst = self.surface.get_pixel(dx as u32, dy as u32).unwrap_or(0xff000000);
+                    let inv = 255 - a;
+                    let blend = |shift:u32| ((((src >> shift) & 255) * a
+                        + ((dst >> shift) & 255) * inv + 127) / 255) & 255;
+                    self.surface.set_pixel(dx as u32, dy as u32,
+                        0xff000000 | (blend(16) << 16) | (blend(8) << 8) | blend(0));
                 }
             }
         }
