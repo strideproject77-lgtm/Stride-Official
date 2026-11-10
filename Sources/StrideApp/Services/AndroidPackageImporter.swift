@@ -2,11 +2,28 @@ import Foundation
 import ZIPFoundation
 
 enum AndroidPackageFormat: String, CaseIterable, Sendable, Hashable { case apk, xapk, apks, apkm }
+
+/// Stable mapping between an archive component and its extracted package path.
+/// Optional split metadata is retained verbatim when supplied by the container.
+struct AndroidPackageComponent: Codable, Sendable, Hashable {
+    let archivePath: String
+    let localPath: String
+    let splitID: String?
+    let componentType: String?
+    let configForSplit: String?
+    let dependencies: [String]
+    let abi: String?
+    let density: String?
+    let language: String?
+    let isBase: Bool
+}
+
 struct PreparedAndroidPackage: Sendable {
     let baseAPKURL: URL
     let packageDirectoryURL: URL
     let format: AndroidPackageFormat
     let splitAPKURLs: [URL]
+    let components: [AndroidPackageComponent]
 }
 
 /// Normalizes Android distribution containers into a bounded, persistent package directory.
@@ -32,21 +49,31 @@ struct AndroidPackageImporter: @unchecked Sendable {
             if format == .apk {
                 let base = directory.appendingPathComponent("base.apk")
                 try fileManager.copyItem(at: sourceURL, to: base)
-                return PreparedAndroidPackage(baseAPKURL: base, packageDirectoryURL: directory, format: format, splitAPKURLs: [])
+                let components = [AndroidPackageComponent(
+                    archivePath: sourceURL.lastPathComponent, localPath: "base.apk",
+                    splitID: nil, componentType: "base", configForSplit: nil,
+                    dependencies: [], abi: nil, density: nil, language: nil, isBase: true
+                )]
+                try writeComponentIndex(components, in: directory)
+                return PreparedAndroidPackage(baseAPKURL: base, packageDirectoryURL: directory,
+                    format: format, splitAPKURLs: [], components: components)
             }
             let parts = try extractAPKComponents(from: sourceURL, into: directory)
-            return PreparedAndroidPackage(baseAPKURL: parts.base, packageDirectoryURL: directory, format: format, splitAPKURLs: parts.splits)
+            try writeComponentIndex(parts.components, in: directory)
+            return PreparedAndroidPackage(baseAPKURL: parts.base, packageDirectoryURL: directory,
+                format: format, splitAPKURLs: parts.splits, components: parts.components)
         } catch {
             try? fileManager.removeItem(at: directory)
             throw error
         }
     }
 
-    private func extractAPKComponents(from sourceURL: URL, into directory: URL) throws -> (base: URL, splits: [URL]) {
+    private func extractAPKComponents(from sourceURL: URL, into directory: URL) throws -> (base: URL, splits: [URL], components: [AndroidPackageComponent]) {
         guard let archive = Archive(url: sourceURL, accessMode: .read) else { throw APKLibraryImportError.invalidPackageArchive }
         let entries = archive.filter { $0.path.lowercased().hasSuffix(".apk") }
         guard !entries.isEmpty else { throw APKLibraryImportError.missingBaseAPK }
         var manifestBase: String?
+        var manifestComponents: [String: [String: Any]] = [:]
         if let manifest = archive.first(where: {
             let name = URL(fileURLWithPath: $0.path).lastPathComponent.lowercased()
             return name == "manifest.json" || name == "info.json"
@@ -58,14 +85,18 @@ struct AndroidPackageImporter: @unchecked Sendable {
             if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 for key in ["split_apks", "splits", "files"] {
                     guard let items = object[key] as? [[String: Any]] else { continue }
+                    for item in items {
+                        guard let file = (item["file"] as? String) ?? (item["path"] as? String) else { continue }
+                        manifestComponents[file] = item
+                    }
                     if let base = items.first(where: {
-                        let id = ($0["id"] as? String ?? "").lowercased()
+                        let id = (($0["id"] as? String) ?? ($0["split_id"] as? String) ?? "").lowercased()
                         let type = ($0["type"] as? String ?? "").lowercased()
                         return id == "base" || type == "base"
-                    }), let file = base["file"] as? String {
+                    }), let file = (base["file"] as? String) ?? (base["path"] as? String) {
                         manifestBase = file
-                        break
                     }
+                    if !manifestComponents.isEmpty { break }
                 }
             }
         }
@@ -126,7 +157,32 @@ struct AndroidPackageImporter: @unchecked Sendable {
         let base = directory.appendingPathComponent("base.apk")
         try fileManager.copyItem(at: sourceBase, to: base)
         let splits = entries.filter { $0.path != baseEntry.path }.compactMap { extracted[$0.path] }
-        return (base, splits)
+        let components = entries.compactMap { entry -> AndroidPackageComponent? in
+            guard extracted[entry.path] != nil else { return nil }
+            let metadata = manifestComponents[entry.path] ?? [:]
+            let splitID = (metadata["id"] as? String) ?? (metadata["split_id"] as? String)
+            let componentType = metadata["type"] as? String
+            let dependencies = (metadata["dependencies"] as? [String]) ?? []
+            let localPath = entry.path == baseEntry.path ? "base.apk" : "components/\(entry.path)"
+            return AndroidPackageComponent(
+                archivePath: entry.path, localPath: localPath,
+                splitID: splitID, componentType: componentType,
+                configForSplit: (metadata["configForSplit"] as? String) ?? (metadata["config_for_split"] as? String),
+                dependencies: dependencies,
+                abi: metadata["abi"] as? String,
+                density: metadata["density"] as? String,
+                language: metadata["language"] as? String,
+                isBase: entry.path == baseEntry.path
+            )
+        }
+        return (base, splits, components)
+    }
+
+    private func writeComponentIndex(_ components: [AndroidPackageComponent], in directory: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(components)
+        try data.write(to: directory.appendingPathComponent("components.json"), options: .atomic)
     }
 
     private func uniquePackageDirectory(for sourceURL: URL, in folder: URL) -> URL {
