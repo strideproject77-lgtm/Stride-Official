@@ -384,6 +384,19 @@ impl NativeLinker {
         Ok(self.modules.get(soname).unwrap())
     }
 
+    /// Returns DT_NEEDED libraries that have not yet been loaded into this
+    /// process. System libraries are intentionally not hidden by name: until a
+    /// real Bionic module or ABI-compatible provider is registered, they remain
+    /// visible as unresolved dependencies.
+    pub fn unresolved_dependencies(&self, soname: &str) -> Result<Vec<String>, String> {
+        let module = self.modules.get(soname)
+            .ok_or_else(|| format!("Native module {} is not loaded", soname))?;
+        Ok(module.needed_libraries.iter()
+            .filter(|dependency| !self.modules.contains_key(dependency.as_str()))
+            .cloned()
+            .collect())
+    }
+
     /// Resolves a symbol across all loaded native modules and Bionic environment.
     pub fn resolve_symbol(&self, name: &str) -> Option<ResolvedSymbol<'_>> {
         for soname in self.loaded_order.iter().rev() {
