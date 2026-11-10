@@ -154,6 +154,12 @@ mod tests {
     }
 }
 
+pub(crate) fn record_bitmap_draw(
+    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32, x: f32, y: f32,
+) -> Result<(), String> {
+    append(env, canvas, 10, &[Value::Object(bitmap), Value::Float(x), Value::Float(y)])
+}
+
 pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
     register(registry);
 }
