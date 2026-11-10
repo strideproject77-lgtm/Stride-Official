@@ -175,7 +175,7 @@ enum RuntimeExecutionError: LocalizedError {
 struct StrideArtExecutionBackend: AndroidExecutionBackend {
     let capabilityReport = RuntimeCapabilityReport(
         availability: .available(version: "ART-Compat-2.0"),
-        supportedABIs: ["arm64-v8a", "armeabi-v7a"],
+        supportedABIs: ["arm64-v8a"],
         supportedAndroidAPIs: 21...34
     )
 
@@ -237,11 +237,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     var dex = Data()
                     _ = try packageArchive.extract(entry) { chunk in dex.append(chunk) }
                     dexDataList.append(dex)
-                } else if (entry.path.hasPrefix("lib/arm64-v8a/") || entry.path.hasPrefix("lib/armeabi-v7a/")) && entry.path.hasSuffix(".so") {
+                } else if entry.path.hasPrefix("lib/arm64-v8a/") && entry.path.hasSuffix(".so") {
                     var so = Data()
                     _ = try packageArchive.extract(entry) { chunk in so.append(chunk) }
                     let name = URL(fileURLWithPath: entry.path).lastPathComponent
                     soDataList.append((name, so))
+                } else if entry.path.hasPrefix("lib/") && entry.path.hasSuffix(".so") {
+                    onLog("[WARN] Skipping native library for non-selected ABI: \(entry.path)")
                 }
             }
         }
