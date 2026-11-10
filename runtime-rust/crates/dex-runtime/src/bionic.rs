@@ -358,6 +358,17 @@ impl NativeLinker {
             let image_offset = if relocation.relocation_type == 0 {
                 None
             } else {
+                let belongs_to_load_segment = elf_info.segments.iter().any(|segment| {
+                    segment.virtual_address.checked_add(segment.memory_size)
+                        .map(|end| relocation.offset >= segment.virtual_address && relocation.offset < end)
+                        .unwrap_or(false)
+                });
+                if !belongs_to_load_segment {
+                    return Err(format!(
+                        "Relocation target {:#x} in {} is outside every PT_LOAD segment",
+                        relocation.offset, soname
+                    ));
+                }
                 let offset = relocation.offset.checked_sub(plan.image_virtual_start)
                     .filter(|value| *value < plan.image_size)
                     .ok_or_else(|| format!(
