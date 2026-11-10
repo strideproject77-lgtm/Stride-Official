@@ -319,6 +319,7 @@ impl AndroidRuntime {
         crate::view::register_core_view_methods(jni);
         crate::paint::register_core_paint_methods(jni);
         crate::canvas_jni::register_core_canvas_methods(jni);
+        crate::bitmap::register_core_bitmap_methods(jni);
     }
 
     /// Loads one or more DEX binaries into the runtime.
