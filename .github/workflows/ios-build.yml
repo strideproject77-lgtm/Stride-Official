@@ -4,15 +4,12 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - feat/dex-class-method-loader
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# PRs run the fast Rust checks. A manual run always performs the complete iOS IPA build.
+# Pull requests run Rust checks. A manual dispatch runs the complete Rust checks and iOS IPA build; intermediate branch commits do not queue duplicate IPA builds.
 concurrency:
   group: stride-ipa-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
