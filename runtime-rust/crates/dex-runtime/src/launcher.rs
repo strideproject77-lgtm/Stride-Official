@@ -1594,9 +1594,11 @@ impl AndroidRuntime {
         let dex_strings = dex_metadata.as_ref()
             .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
         let mut delivered = 0usize;
+        let mut had_events = false;
 
         while delivered < max_events {
             let Some(event) = self.input_queue.poll_motion() else { break };
+            had_events = true;
             let pointer = event.pointers.first();
             let x = pointer.map(|p| p.x).unwrap_or(0.0);
             let y = pointer.map(|p| p.y).unwrap_or(0.0);
@@ -1677,6 +1679,10 @@ impl AndroidRuntime {
             if callback_method_id.is_some() {
                 delivered += 1;
             }
+        }
+        if had_events {
+            self.render_active_activity_surface()
+                .map_err(|error| format!("Guest redraw after input failed: {error}"))?;
         }
         Ok(delivered)
     }
