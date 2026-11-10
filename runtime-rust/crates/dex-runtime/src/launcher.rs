@@ -56,6 +56,8 @@ pub struct AndroidRuntime {
     pub static_fields: HashMap<(String, String), crate::types::Value>,
     /// Preference values shared by Activity instances for this guest process.
     pub shared_preferences_store: crate::shared_prefs::PreferenceStore,
+    /// Shared parsed resource catalog visible to guest Resources JNI calls.
+    pub shared_resource_catalog: crate::resource_jni::SharedResourceCatalog,
     pub jni: JniNativeRegistry,
     pub environment: AndroidEnvironment,
     pub surface: Surface,
@@ -82,14 +84,15 @@ pub struct AndroidRuntime {
 }
 
 impl AndroidRuntime {
-    pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{self.resources=ResourceCatalog::parse(data)?;Ok(())}
+    pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_|\"Resource catalog lock poisoned\")?=catalog;Ok(())}
     pub fn set_resource_image(&mut self,id:u32,width:u32,height:u32,pixels:&[u32])->Result<(),String>{let count=(width as usize).checked_mul(height as usize).ok_or("image dimensions overflow")?;if width==0||height==0||count>16_777_216||pixels.len()!=count{return Err("invalid decoded image dimensions".into());}self.image_assets.insert(id,(width,height,pixels.to_vec()));Ok(())}
 
     /// Creates a new Android runtime environment.
     pub fn new(package_name: &str) -> Self {
         let mut jni = JniNativeRegistry::new();
         let shared_preferences_store = Arc::new(Mutex::new(HashMap::new()));
-        Self::register_core_jni(&mut jni, shared_preferences_store.clone());
+        let shared_resource_catalog = Arc::new(Mutex::new(ResourceCatalog::default()));
+        Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone());
 
         Self {
             class_loader: AppClassLoader::new(),
@@ -98,6 +101,7 @@ impl AndroidRuntime {
             monitors: MonitorTable::new(),
             static_fields: HashMap::new(),
             shared_preferences_store,
+            shared_resource_catalog,
             jni,
             environment: AndroidEnvironment::new(package_name),
             surface: Surface::new(1080, 1920),
@@ -121,7 +125,7 @@ impl AndroidRuntime {
     }
 
     /// Registers essential Android & Java core native methods.
-    fn register_core_jni(jni: &mut JniNativeRegistry, shared_preferences_store: crate::shared_prefs::PreferenceStore) {
+    fn register_core_jni(jni: &mut JniNativeRegistry, shared_preferences_store: crate::shared_prefs::PreferenceStore, shared_resource_catalog: crate::resource_jni::SharedResourceCatalog) {
         // Activity lifecycle methods are framework-owned and therefore do not
         // have app DEX MethodCode entries. The launcher owns lifecycle state
         // transitions; this bridge safely accepts the Activity's super call.
@@ -355,6 +359,7 @@ impl AndroidRuntime {
         crate::typeface::register_core_typeface_methods(jni);
         crate::drawable::register_core_drawable_methods(jni);
         crate::shared_prefs::register_shared_preferences(jni, shared_preferences_store);
+        crate::resource_jni::register_resource_methods(jni, shared_resource_catalog);
     }
 
     /// Loads one or more DEX binaries into the runtime.
