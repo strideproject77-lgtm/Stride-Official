@@ -341,11 +341,12 @@ impl NativeLinker {
             .map_err(|e| format!("Native image planning failed for {}: {:?}", soname, e))?;
 
         let mut exported_symbols = HashMap::new();
-        let mut needed_libraries = Vec::new();
         let mut has_jni_onload = false;
 
         let dynamic_info = inspect_elf_dynamic(elf_bytes, &elf_info)
             .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
+
+        let needed_libraries = dynamic_info.needed_libraries;
 
         for symbol in dynamic_info.symbols {
             if !symbol.name.is_empty() && symbol.section_index != 0 {
@@ -353,13 +354,6 @@ impl NativeLinker {
                     has_jni_onload = true;
                 }
                 exported_symbols.insert(symbol.name, symbol.value);
-            }
-        }
-
-        for (tag, value) in dynamic_info.dynamic_tags {
-            if tag == 1 { // DT_NEEDED
-                // The inspector currently exposes the string-table offset, not the decoded SONAME.
-                needed_libraries.push(format!("DT_NEEDED string-table offset {}", value));
             }
         }
 
