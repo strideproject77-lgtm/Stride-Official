@@ -96,8 +96,17 @@ final class APKLibraryStore: ObservableObject {
             let base = isDirectory ? child.appendingPathComponent("base.apk") : child
             guard base.pathExtension.lowercased() == "apk", fileManager.fileExists(atPath: base.path) else { continue }
             let components = child.appendingPathComponent("components", isDirectory: true)
-            let splits = (try? fileManager.contentsOfDirectory(at: components, includingPropertiesForKeys: nil))?
-                .filter { $0.pathExtension.lowercased() == "apk" } ?? []
+            let splits: [URL] = {
+                guard let enumerator = fileManager.enumerator(at: components,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]) else { return [] }
+                var found: [URL] = []
+                for case let url as URL in enumerator where url.pathExtension.lowercased() == "apk" {
+                    let isFile = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+                    if isFile { found.append(url) }
+                }
+                return found.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+            }()
             guard let report = try? inspector.inspect(base, including: splits) else { continue }
             let format: AndroidPackageFormat = {
                 guard isDirectory,
