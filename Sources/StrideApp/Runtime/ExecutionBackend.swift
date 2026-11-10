@@ -196,9 +196,23 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         // <package>/components/*.apk. Read the base first, then each retained split.
         var packageArchives: [Archive] = [archive]
         let componentsURL = url.deletingLastPathComponent().appendingPathComponent("components", isDirectory: true)
-        let splitURLs = (try? FileManager.default.contentsOfDirectory(
-            at: componentsURL, includingPropertiesForKeys: nil
-        ))?.filter { $0.pathExtension.lowercased() == "apk" } ?? []
+        let splitURLs: [URL] = {
+            guard let enumerator = FileManager.default.enumerator(
+                at: componentsURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { return [] }
+            var found: [URL] = []
+            for case let candidate as URL in enumerator where candidate.pathExtension.lowercased() == "apk" {
+                let isRegularFile = (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+                if isRegularFile { found.append(candidate) }
+            }
+            return found.sorted {
+                let left = $0.path.replacingOccurrences(of: componentsURL.path + "/", with: "")
+                let right = $1.path.replacingOccurrences(of: componentsURL.path + "/", with: "")
+                return left.localizedStandardCompare(right) == .orderedAscending
+            }
+        }()
         for splitURL in splitURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
