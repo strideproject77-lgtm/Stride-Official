@@ -12,6 +12,15 @@ use crate::jni::JniEnv;
 
 pub type BionicFn = Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>;
 
+/// Builds an explicit failure for symbols whose guest ABI implementation is not
+/// available. Returning a plausible pointer/status here would corrupt guest state.
+fn unsupported_symbol(name: &'static str) -> impl Fn(&[Value]) -> Result<Value, String> + Send + Sync + 'static {
+    move |_args| Err(format!(
+        "Bionic symbol {} is not implemented; refusing placeholder success",
+        name
+    ))
+}
+
 /// Bionic libc/libm/liblog/libdl symbol emulation environment.
 #[derive(Default, Clone)]
 pub struct BionicEnvironment {
@@ -93,34 +102,16 @@ impl BionicEnvironment {
         });
 
         // --- libc memory ---
-        self.register("malloc", |args| {
-            let size = args.first().map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(if size > 0 { 0x1000 } else { 0 }))
-        });
-        self.register("calloc", |args| {
-            let count = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            let size = args.get(1).map(|v| v.as_int()).unwrap_or(0);
-            let _ = count.saturating_mul(size);
-            Ok(Value::Int(0x1000))
-        });
-        self.register("realloc", |args| {
-            let _ptr = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(0x1000))
-        });
-        self.register("free", |_args| Ok(Value::Int(0)));
-        self.register("memset", |args| {
-            let ptr = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(ptr))
-        });
-        self.register("memcpy", |args| {
-            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(dst))
-        });
-        self.register("memmove", |args| {
-            let dst = args.get(0).map(|v| v.as_int()).unwrap_or(0);
-            Ok(Value::Int(dst))
-        });
-        self.register("memcmp", |_args| Ok(Value::Int(0)));
+        // Guest pointers are 64-bit addresses, but this compatibility table does
+        // not yet own a guest virtual-memory allocator or mapped-memory view.
+        // Fail explicitly instead of handing native code a fabricated address.
+        for name in ["malloc", "calloc", "realloc", "free", "memset", "memcpy", "memmove", "memcmp"] {
+            self.register(name, unsupported_symbol(match name {
+                "malloc" => "malloc", "calloc" => "calloc", "realloc" => "realloc",
+                "free" => "free", "memset" => "memset", "memcpy" => "memcpy",
+                "memmove" => "memmove", _ => "memcmp",
+            }));
+        }
 
         // --- libc strings ---
         self.register("strlen", |_args| Ok(Value::Int(0)));
@@ -229,24 +220,29 @@ impl BionicEnvironment {
         self.register("time", |_args| Ok(Value::Long(0)));
 
         // --- pthreads ---
-        self.register("pthread_self", |_args| Ok(Value::Long(1)));
-        self.register("pthread_create", |_args| Ok(Value::Int(0)));
-        self.register("pthread_join", |_args| Ok(Value::Int(0)));
-        self.register("pthread_detach", |_args| Ok(Value::Int(0)));
-        self.register("pthread_mutex_init", |_args| Ok(Value::Int(0)));
-        self.register("pthread_mutex_lock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_mutex_unlock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_mutex_destroy", |_args| Ok(Value::Int(0)));
-        self.register("pthread_mutex_trylock", |_args| Ok(Value::Int(0)));
-        self.register("pthread_cond_init", |_args| Ok(Value::Int(0)));
-        self.register("pthread_cond_wait", |_args| Ok(Value::Int(0)));
-        self.register("pthread_cond_signal", |_args| Ok(Value::Int(0)));
-        self.register("pthread_cond_broadcast", |_args| Ok(Value::Int(0)));
-        self.register("pthread_cond_destroy", |_args| Ok(Value::Int(0)));
-        self.register("pthread_key_create", |_args| Ok(Value::Int(0)));
-        self.register("pthread_getspecific", |_args| Ok(Value::Int(0)));
-        self.register("pthread_setspecific", |_args| Ok(Value::Int(0)));
-        self.register("pthread_once", |_args| Ok(Value::Int(0)));
+        // Threading and synchronization require a guest-thread scheduler and
+        // per-thread state. Returning success without creating/synchronizing a
+        // thread can deadlock or corrupt native game state.
+        for name in [
+            "pthread_self", "pthread_create", "pthread_join", "pthread_detach",
+            "pthread_mutex_init", "pthread_mutex_lock", "pthread_mutex_unlock",
+            "pthread_mutex_destroy", "pthread_mutex_trylock", "pthread_cond_init",
+            "pthread_cond_wait", "pthread_cond_signal", "pthread_cond_broadcast",
+            "pthread_cond_destroy", "pthread_key_create", "pthread_getspecific",
+            "pthread_setspecific", "pthread_once",
+        ] {
+            self.register(name, unsupported_symbol(match name {
+                "pthread_self" => "pthread_self", "pthread_create" => "pthread_create",
+                "pthread_join" => "pthread_join", "pthread_detach" => "pthread_detach",
+                "pthread_mutex_init" => "pthread_mutex_init", "pthread_mutex_lock" => "pthread_mutex_lock",
+                "pthread_mutex_unlock" => "pthread_mutex_unlock", "pthread_mutex_destroy" => "pthread_mutex_destroy",
+                "pthread_mutex_trylock" => "pthread_mutex_trylock", "pthread_cond_init" => "pthread_cond_init",
+                "pthread_cond_wait" => "pthread_cond_wait", "pthread_cond_signal" => "pthread_cond_signal",
+                "pthread_cond_broadcast" => "pthread_cond_broadcast", "pthread_cond_destroy" => "pthread_cond_destroy",
+                "pthread_key_create" => "pthread_key_create", "pthread_getspecific" => "pthread_getspecific",
+                "pthread_setspecific" => "pthread_setspecific", _ => "pthread_once",
+            }));
+        }
         self.register("pthread_rwlock_init", |_args| Ok(Value::Int(0)));
         self.register("pthread_rwlock_rdlock", |_args| Ok(Value::Int(0)));
         self.register("pthread_rwlock_wrlock", |_args| Ok(Value::Int(0)));
@@ -274,24 +270,27 @@ impl BionicEnvironment {
         self.register("strtod", |_args| Ok(Value::Double(0.0)));
 
         // --- NDK system properties ---
-        self.register("__system_property_get", |_args| Ok(Value::Int(0)));
-        self.register("__system_property_find", |_args| Ok(Value::Int(0)));
+        // System-property and asset APIs need real guest buffers and package-backed
+        // asset handles. Do not return fabricated handles or success values.
+        for name in [
+            "__system_property_get", "__system_property_find", "AAssetManager_fromJava",
+            "AAssetManager_open", "AAsset_read", "AAsset_seek", "AAsset_getLength",
+            "AAsset_getLength64", "AAsset_close", "AAssetDir_open",
+            "AAssetDir_getNextFileName", "AAssetDir_close", "slCreateEngine",
+        ] {
+            self.register(name, unsupported_symbol(match name {
+                "__system_property_get" => "__system_property_get",
+                "__system_property_find" => "__system_property_find",
+                "AAssetManager_fromJava" => "AAssetManager_fromJava",
+                "AAssetManager_open" => "AAssetManager_open", "AAsset_read" => "AAsset_read",
+                "AAsset_seek" => "AAsset_seek", "AAsset_getLength" => "AAsset_getLength",
+                "AAsset_getLength64" => "AAsset_getLength64", "AAsset_close" => "AAsset_close",
+                "AAssetDir_open" => "AAssetDir_open",
+                "AAssetDir_getNextFileName" => "AAssetDir_getNextFileName",
+                "AAssetDir_close" => "AAssetDir_close", _ => "slCreateEngine",
+            }));
+        }
         self.register("android_get_device_api_level", |_args| Ok(Value::Int(33)));
-
-        // --- NDK AAssetManager ---
-        self.register("AAssetManager_fromJava", |_args| Ok(Value::Int(1)));
-        self.register("AAssetManager_open", |_args| Ok(Value::Int(0)));
-        self.register("AAsset_read", |_args| Ok(Value::Int(0)));
-        self.register("AAsset_seek", |_args| Ok(Value::Long(0)));
-        self.register("AAsset_getLength", |_args| Ok(Value::Int(0)));
-        self.register("AAsset_getLength64", |_args| Ok(Value::Long(0)));
-        self.register("AAsset_close", |_args| Ok(Value::Int(0)));
-        self.register("AAssetDir_open", |_args| Ok(Value::Int(0)));
-        self.register("AAssetDir_getNextFileName", |_args| Ok(Value::Int(0)));
-        self.register("AAssetDir_close", |_args| Ok(Value::Int(0)));
-
-        // --- NDK OpenSL ES audio stubs ---
-        self.register("slCreateEngine", |_args| Ok(Value::Int(0)));
 
         // --- abort ---
         self.register("abort", |_args| {
@@ -428,6 +427,15 @@ mod tests {
         let log_fn = bionic.resolve_symbol("__android_log_print").unwrap();
         let log_res = log_fn(&[Value::Int(3)]).unwrap();
         assert_eq!(log_res, Value::Int(3));
+    }
+
+    #[test]
+    fn unsupported_native_memory_and_thread_symbols_fail_explicitly() {
+        let bionic = BionicEnvironment::new();
+        for name in ["malloc", "calloc", "pthread_create", "pthread_mutex_lock", "AAssetManager_open"] {
+            let result = bionic.resolve_symbol(name).expect("symbol should be discoverable")(&[]);
+            assert!(result.unwrap_err().contains(name));
+        }
     }
 
     #[test]
