@@ -47,9 +47,18 @@ fn register(jni: &mut JniNativeRegistry) {
             let canvas = args.get(1).and_then(Value::as_object).ok_or("Drawable.draw Canvas is null")?;
             let bitmap = env.get_object_field(drawable, "mStrideBitmap")?.as_object()
                 .ok_or("BitmapDrawable has no Bitmap")?;
-            let left = env.get_object_field(drawable, "mStrideLeft")?.as_int() as f32;
-            let top = env.get_object_field(drawable, "mStrideTop")?.as_int() as f32;
-            crate::canvas_jni::record_bitmap_draw(env, canvas, bitmap, left, top)?;
+            let left = env.get_object_field(drawable, "mStrideLeft")?.as_int();
+            let top = env.get_object_field(drawable, "mStrideTop")?.as_int();
+            let right = env.get_object_field(drawable, "mStrideRight")?.as_int();
+            let bottom = env.get_object_field(drawable, "mStrideBottom")?.as_int();
+            let alpha = env.get_object_field(drawable, "mStrideAlpha")?.as_int().clamp(0, 255);
+            let width = env.get_object_field(bitmap, "mStrideWidth")?.as_int();
+            let height = env.get_object_field(bitmap, "mStrideHeight")?.as_int();
+            let right = if right > left { right } else { left.saturating_add(width) };
+            let bottom = if bottom > top { bottom } else { top.saturating_add(height) };
+            crate::canvas_jni::record_bitmap_draw_bounds(
+                env, canvas, bitmap, left, top, right, bottom, alpha,
+            )?;
             Ok(None)
         });
     }
