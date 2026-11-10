@@ -63,6 +63,14 @@ fn register(registry: &mut JniNativeRegistry) {
         ])?;
         Ok(None)
     });
+    registry.register("Landroid/graphics/Canvas;", "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V", |env, args| {
+        let canvas = receiver(args)?;
+        let bitmap = args.get(1).and_then(Value::as_object).ok_or("Canvas.drawBitmap Bitmap is null")?;
+        append(env, canvas, 10, &[
+            Value::Object(bitmap), Value::Float(float(args, 2)), Value::Float(float(args, 3)),
+        ])?;
+        Ok(None)
+    });
     registry.register("Landroid/graphics/Canvas;", "drawLine", "(FFFFLandroid/graphics/Paint;)V", |env, args| {
         let canvas = receiver(args)?;
         let paint = args.get(5).and_then(Value::as_object).ok_or("Canvas.drawLine Paint is null")?;
