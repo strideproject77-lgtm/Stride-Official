@@ -4,7 +4,7 @@ import SwiftUI
 
 enum APKLibraryImportError: LocalizedError {
     case unsupportedFile, unreadableSource, invalidPackageArchive, missingBaseAPK
-    case packageArchiveTooLarge, duplicatePackageEntry(String)
+    case packageArchiveTooLarge, packageArchiveTooManyComponents, duplicatePackageEntry(String)
     var errorDescription: String? {
         switch self {
         case .unsupportedFile: return "Supported Android packages are APK, XAPK, APKS and APKM."
@@ -12,6 +12,7 @@ enum APKLibraryImportError: LocalizedError {
         case .invalidPackageArchive: return "The Android package archive is damaged or contains an invalid APK entry."
         case .missingBaseAPK: return "No base APK was found. A configuration split cannot be imported by itself."
         case .packageArchiveTooLarge: return "The package exceeds Stride's safe extraction limits."
+        case .packageArchiveTooManyComponents: return "The package contains too many APK split components."
         case .duplicatePackageEntry(let name): return "The package contains duplicate APK filenames: \(name)."
         }
     }
