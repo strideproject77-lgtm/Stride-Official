@@ -401,9 +401,9 @@ impl NativeLinker {
             if !symbol.name.is_empty() && symbol.section_index != 0 {
                 if symbol.name == "JNI_OnLoad" {
                     has_jni_onload = true;
-                    jni_onload_address = Some(symbol.value);
+                    jni_onload_address = load_bias.checked_add(symbol.value);
                 }
-                exported_symbols.insert(symbol.name, symbol.value);
+                if let Some(address) = load_bias.checked_add(symbol.value) { exported_symbols.insert(symbol.name, address); }
             }
         }
 
@@ -483,7 +483,7 @@ impl NativeLinker {
                         for candidate_name in &self.loaded_order {
                             if let Some(candidate) = self.modules.get(candidate_name) {
                                 if let Some(address) = candidate.exported_symbols.get(&symbol.name) {
-                                    found = candidate.load_bias.checked_add(*address);
+                                    found = Some(*address);
                                     if found.is_some() { break; }
                                 }
                             }
