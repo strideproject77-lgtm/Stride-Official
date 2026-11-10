@@ -32,6 +32,7 @@ struct AndroidPackageImporter: @unchecked Sendable {
     private let maxAPKBytes: UInt64 = 512 * 1_024 * 1_024
     private let maxTotalAPKBytes: UInt64 = 1_024 * 1_024 * 1_024
     private let maxManifestBytes: UInt64 = 4 * 1_024 * 1_024
+    private let maxAPKComponentCount = 256
 
     func prepare(_ sourceURL: URL, in libraryFolder: URL) throws -> PreparedAndroidPackage {
         guard let format = AndroidPackageFormat(rawValue: sourceURL.pathExtension.lowercased()) else {
@@ -72,6 +73,7 @@ struct AndroidPackageImporter: @unchecked Sendable {
         guard let archive = Archive(url: sourceURL, accessMode: .read) else { throw APKLibraryImportError.invalidPackageArchive }
         let entries = archive.filter { $0.path.lowercased().hasSuffix(".apk") }
         guard !entries.isEmpty else { throw APKLibraryImportError.missingBaseAPK }
+        guard entries.count <= maxAPKComponentCount else { throw APKLibraryImportError.packageArchiveTooManyComponents }
         var manifestBase: String?
         var manifestComponents: [String: [String: Any]] = [:]
         if let manifest = archive.first(where: {
@@ -111,6 +113,7 @@ struct AndroidPackageImporter: @unchecked Sendable {
         try fileManager.createDirectory(at: componentFolder, withIntermediateDirectories: true)
         var total: UInt64 = 0
         var extracted: [String: URL] = [:]
+        var normalizedPaths = Set<String>()
         for entry in entries {
             let size = UInt64(entry.uncompressedSize)
             guard size <= maxAPKBytes, total <= maxTotalAPKBytes, size <= maxTotalAPKBytes - total else {
@@ -132,6 +135,10 @@ struct AndroidPackageImporter: @unchecked Sendable {
                 throw APKLibraryImportError.invalidPackageArchive
             }
             let relativePath = pathParts.map(String.init).joined(separator: "/")
+            let collisionKey = relativePath.lowercased()
+            guard normalizedPaths.insert(collisionKey).inserted else {
+                throw APKLibraryImportError.duplicatePackageEntry(relativePath)
+            }
             let destination = pathParts.reduce(componentFolder) { partial, part in
                 partial.appendingPathComponent(String(part), isDirectory: true)
             }
