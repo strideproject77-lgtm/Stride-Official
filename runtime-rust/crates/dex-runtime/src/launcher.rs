@@ -216,7 +216,7 @@ impl AndroidRuntime {
             });
         }
         for name in ["setStatusBarColor", "setNavigationBarColor"] {
-            jni.register("Landroid/view/Window;", name, "(I)V", |env, args| {
+            jni.register("Landroid/view/Window;", name, "(I)V", move |env, args| {
                 let window = args.first().and_then(|value| value.as_object())
                     .ok_or_else(|| "Window receiver is null".to_string())?;
                 let color = args.get(1).map(Value::as_int).unwrap_or(0);
