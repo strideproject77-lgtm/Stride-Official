@@ -1,4 +1,4 @@
-﻿﻿﻿//! APK Application Launcher and Runtime Execution Coordinator.
+//! APK Application Launcher and Runtime Execution Coordinator.
 //!
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
