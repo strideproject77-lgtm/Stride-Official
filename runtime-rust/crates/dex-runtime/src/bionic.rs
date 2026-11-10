@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture, ElfClass, ElfByteOrder};
 use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan, IOS_PAGE_SIZE};
-use stride_elf_inspector::Relocation;
+use stride_elf_inspector::{Relocation, RelocationKind};
 use crate::types::Value;
 use crate::jni::JniEnv;
 
@@ -686,6 +686,48 @@ mod tests {
         let resolved = linker.find_jni_binding("Lcom/example/app/NativeLib;", "stringFromJNI");
         assert!(matches!(resolved, Some(ResolvedSymbol::NativeFunction { soname: "libnative-lib.so", address: 0x1000 })));
     }
+    #[test]
+    fn applies_aarch64_relative_relocation_to_guest_image() {
+        let mut linker = NativeLinker::new();
+        let load_bias = 0x0000_7000_0000_0000u64;
+        linker.modules.insert(
+            "libfixture.so".to_string(),
+            LoadedNativeModule {
+                name: "libfixture.so".to_string(),
+                architecture: ElfArchitecture::Aarch64,
+                plan: NativeImagePlan {
+                    load_bias,
+                    image_virtual_start: 0x1000,
+                    image_size: 16,
+                    pages: Vec::new(),
+                    segment_copies: Vec::new(),
+                    architecture: ElfArchitecture::Aarch64,
+                },
+                mapped_image: vec![0; 16],
+                relocations: vec![PlannedNativeRelocation {
+                    relocation: Relocation {
+                        kind: RelocationKind::Rela,
+                        offset: 0x1000,
+                        symbol_index: 0,
+                        relocation_type: 1027,
+                        addend: Some(0x20),
+                    },
+                    image_offset: Some(0),
+                }],
+                dynamic_symbols: Vec::new(),
+                load_bias,
+                exported_symbols: HashMap::new(),
+                needed_libraries: Vec::new(),
+                has_jni_onload: false,
+                jni_onload_address: None,
+            },
+        );
+        linker.loaded_order.push("libfixture.so".to_string());
+        assert!(linker.apply_relocations().is_empty());
+        let image = &linker.modules["libfixture.so"].mapped_image;
+        assert_eq!(u64::from_le_bytes(image[0..8].try_into().unwrap()), load_bias + 0x20);
+    }
+
     #[test]
     fn jni_mangles_overloaded_parameter_descriptors() {
         assert_eq!(
