@@ -164,6 +164,22 @@ impl AndroidRuntime {
             },
         );
 
+        jni.register("Landroid/view/Window;", "getDecorView", "()Landroid/view/View;", |env, args| {
+            let window = args.first().and_then(|value| value.as_object())
+                .ok_or_else(|| "Window.getDecorView receiver is null".to_string())?;
+            if let Some(existing) = env.heap.get_instance_field(window, "mDecorView")
+                .map_err(|error| format!("Window decor lookup failed: {:?}", error))?.as_object() {
+                return Ok(Some(Value::Object(existing)));
+            }
+            let decor = env.heap.get_instance_field(window, "mContentView")
+                .ok().and_then(|value| value.as_object())
+                .or_else(|| env.heap.allocate_instance("Landroid/view/View;").ok());
+            let decor = decor.ok_or("Window decor View allocation failed")?;
+            env.heap.set_instance_field(window, "mDecorView", Value::Object(decor))
+                .map_err(|error| format!("Window decor store failed: {:?}", error))?;
+            Ok(Some(Value::Object(decor)))
+        });
+
         // Window flag APIs used during app startup. Flags are retained on the
         // Window object; visual system-bar effects remain host-renderer work.
         for (name, prototype, operation) in [
@@ -192,7 +208,15 @@ impl AndroidRuntime {
             });
         }
         for name in ["setStatusBarColor", "setNavigationBarColor"] {
-            jni.register("Landroid/view/Window;", name, "(I)V", |_env, _args| Ok(None));
+            jni.register("Landroid/view/Window;", name, "(I)V", |env, args| {
+                let window = args.first().and_then(|value| value.as_object())
+                    .ok_or_else(|| "Window receiver is null".to_string())?;
+                let color = args.get(1).map(Value::as_int).unwrap_or(0);
+                let field = if name == "setStatusBarColor" { "mStatusBarColor" } else { "mNavigationBarColor" };
+                env.heap.set_instance_field(window, field, Value::Int(color))
+                    .map_err(|error| format!("Window system bar color update failed: {:?}", error))?;
+                Ok(None)
+            });
         }
 
         // App Activities commonly call these superclass implementations from
