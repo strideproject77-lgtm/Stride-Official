@@ -11,8 +11,9 @@ fn register(jni: &mut JniNativeRegistry) {
             let path = env.get_string_utf(path_id)?.to_owned();
             let face = env.heap.allocate_instance("Landroid/graphics/Typeface;")
                 .map_err(|error| format!("Typeface allocation failed: {error:?}"))?;
-            env.set_object_field(face, "mStrideAssetPath", Value::Object(env.heap.allocate_string(&path)
-                .map_err(|error| format!("Typeface path allocation failed: {error:?}"))?))?;
+            let stored_path = env.heap.allocate_string(&path)
+                .map_err(|error| format!("Typeface path allocation failed: {error:?}"))?;
+            env.set_object_field(face, "mStrideAssetPath", Value::Object(stored_path))?;
             env.set_object_field(face, "mStrideAssetManager", Value::Object(name_id))?;
             env.set_object_field(face, "mStrideStyle", Value::Int(0))?;
             Ok(Some(Value::Object(face)))
