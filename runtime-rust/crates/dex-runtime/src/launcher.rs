@@ -157,6 +157,8 @@ impl AndroidRuntime {
                             .map_err(|error| format!("Window allocation failed: {:?}", error))?;
                         env.heap.set_instance_field(activity, "mWindow", Value::Object(id))
                             .map_err(|error| format!("Activity window store failed: {:?}", error))?;
+                        env.heap.set_instance_field(id, "mActivity", Value::Object(activity))
+                            .map_err(|error| format!("Window Activity link failed: {:?}", error))?;
                         id
                     }
                 };
@@ -171,9 +173,11 @@ impl AndroidRuntime {
                 .map_err(|error| format!("Window decor lookup failed: {:?}", error))?.as_object() {
                 return Ok(Some(Value::Object(existing)));
             }
-            let decor = env.heap.get_instance_field(window, "mContentView")
-                .ok().and_then(|value| value.as_object())
-                .or_else(|| env.heap.allocate_instance("Landroid/view/View;").ok());
+            let activity = env.heap.get_instance_field(window, "mActivity")
+                .ok().and_then(|value| value.as_object());
+            let content = activity.and_then(|id| env.heap.get_instance_field(id, "mContentView")
+                .ok().and_then(|value| value.as_object()));
+            let decor = content.or_else(|| env.heap.allocate_instance("Landroid/view/View;").ok());
             let decor = decor.ok_or("Window decor View allocation failed")?;
             env.heap.set_instance_field(window, "mDecorView", Value::Object(decor))
                 .map_err(|error| format!("Window decor store failed: {:?}", error))?;
