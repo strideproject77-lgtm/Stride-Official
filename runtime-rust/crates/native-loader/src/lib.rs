@@ -54,6 +54,38 @@ pub fn plan_native_image(info:&ElfProgramInfo,load_bias:u64)->Result<NativeImage
  let pages=page_map.into_iter().map(|(address,protection)|PlannedPage{image_offset:address-image_start,protection}).collect();
  Ok(NativeImagePlan{load_bias,image_virtual_start:image_start,image_size,pages,segment_copies:copies,architecture:info.identity.architecture})
 }
+
+/// Upper bound for a single materialized guest image. The limit prevents a
+/// malformed ELF with huge sparse virtual ranges from exhausting host memory.
+pub const MAX_NATIVE_IMAGE_BYTES:u64=512*1024*1024;
+
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum LoadImageError{ImageTooLarge,AllocationFailed,InvalidSegment,SegmentOutOfBounds}
+
+/// Materializes PT_LOAD file bytes into a zero-initialized guest image buffer.
+/// BSS is therefore represented by the zero-filled memory tail. This is data
+/// preparation only: it does not map executable pages or invoke guest code.
+pub fn materialize_native_image(bytes:&[u8],plan:&NativeImagePlan)->Result<Vec<u8>,LoadImageError>{
+ if plan.image_size>MAX_NATIVE_IMAGE_BYTES{return Err(LoadImageError::ImageTooLarge);}
+ let image_len=usize::try_from(plan.image_size).map_err(|_|LoadImageError::ImageTooLarge)?;
+ let mut image=Vec::new();
+ image.try_reserve_exact(image_len).map_err(|_|LoadImageError::AllocationFailed)?;
+ image.resize(image_len,0);
+ for segment in &plan.segment_copies{
+  if segment.file_size>segment.memory_size{return Err(LoadImageError::InvalidSegment);}
+  let src_start=usize::try_from(segment.file_offset).map_err(|_|LoadImageError::SegmentOutOfBounds)?;
+  let src_len=usize::try_from(segment.file_size).map_err(|_|LoadImageError::SegmentOutOfBounds)?;
+  let dst_start=usize::try_from(segment.image_offset).map_err(|_|LoadImageError::SegmentOutOfBounds)?;
+  let dst_len=usize::try_from(segment.memory_size).map_err(|_|LoadImageError::SegmentOutOfBounds)?;
+  let src_end=src_start.checked_add(src_len).filter(|end|*end<=bytes.len()).ok_or(LoadImageError::SegmentOutOfBounds)?;
+  let dst_end=dst_start.checked_add(dst_len).filter(|end|*end<=image.len()).ok_or(LoadImageError::SegmentOutOfBounds)?;
+  image[dst_start..dst_start+src_len].copy_from_slice(&bytes[src_start..src_end]);
+  // Keep the full memory extent validated; the remaining bytes stay zero for BSS.
+  let _=dst_end;
+ }
+ Ok(image)
+}
+
 #[cfg(test)]mod tests{
  use super::*;use stride_elf_inspector::{ElfByteOrder,ElfClass,ElfIdentity,LoadSegment};
  fn image(segments:Vec<LoadSegment>)->ElfProgramInfo{ElfProgramInfo{identity:ElfIdentity{class:ElfClass::Elf64,architecture:ElfArchitecture::Aarch64},byte_order:ElfByteOrder::Little,entry:0x1000,segments,dynamic_segment:None}}
