@@ -84,7 +84,7 @@ pub struct AndroidRuntime {
 }
 
 impl AndroidRuntime {
-    pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_|\"Resource catalog lock poisoned\")?=catalog;Ok(())}
+    pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_| "Resource catalog lock poisoned")?=catalog;Ok(())}
     pub fn set_resource_image(&mut self,id:u32,width:u32,height:u32,pixels:&[u32])->Result<(),String>{let count=(width as usize).checked_mul(height as usize).ok_or("image dimensions overflow")?;if width==0||height==0||count>16_777_216||pixels.len()!=count{return Err("invalid decoded image dimensions".into());}self.image_assets.insert(id,(width,height,pixels.to_vec()));Ok(())}
 
     /// Creates a new Android runtime environment.
