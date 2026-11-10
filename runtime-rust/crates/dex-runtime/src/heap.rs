@@ -106,6 +106,14 @@ impl ManagedHeap {
         self.objects.len()
     }
 
+    /// Returns handles for managed instances so framework subsystems can
+    /// drain pending Canvas/Drawable work without exposing heap internals.
+    pub fn instance_ids(&self) -> Vec<u32> {
+        self.objects.iter().filter_map(|(id, object)| {
+            matches!(object, HeapObject::Instance(_)).then_some(*id)
+        }).collect()
+    }
+
     pub fn allocated_bytes(&self) -> usize {
         self.allocated_bytes
     }
