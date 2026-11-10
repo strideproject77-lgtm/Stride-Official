@@ -21,6 +21,7 @@ pub mod canvas_jni;
 pub mod bitmap;
 pub mod typeface;
 pub mod drawable;
+pub mod shared_prefs;
 pub mod bionic;
 pub mod gl;
 pub mod activity_manager;
