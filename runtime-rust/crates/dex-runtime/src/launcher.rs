@@ -141,7 +141,16 @@ impl AndroidRuntime {
 
     /// Call once after every package .so has been offered to the linker, so
     /// dependencies loaded later in archive order are not reported as missing.
-    pub fn finish_native_loading(&self) -> usize {
+    pub fn finish_native_loading(&mut self) -> usize {
+        let relocation_issues = self.native_linker.apply_relocations();
+        if !relocation_issues.is_empty() {
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::MissingApi, "NativeLinker", "NATIVE_RELOCATIONS_INCOMPLETE",
+                &format!("{} native relocation(s) could not be applied", relocation_issues.len()),
+                Some(&relocation_issues.join("\n")),
+                Some("Implement the missing relocation kinds or load the required dependency libraries before native execution"),
+            );
+        }
         let mut unresolved_modules = 0usize;
         for soname in &self.native_linker.loaded_order {
             let unresolved = match self.native_linker.unresolved_dependencies(soname) {
