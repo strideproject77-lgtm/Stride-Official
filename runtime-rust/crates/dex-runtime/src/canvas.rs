@@ -538,6 +538,20 @@ mod tests {
     }
 
     #[test]
+    fn scaled_bitmap_draw_honors_destination_bounds_and_global_alpha() {
+        let mut surface = Surface::new(4, 4);
+        surface.clear(0xff0000ff);
+        let mut canvas = Canvas::new(&mut surface);
+        canvas.draw_image_argb_scaled_alpha(
+            &[0xffff0000], 1, 1, 1, 1, 3, 3, 128,
+        );
+        assert_eq!(canvas.surface.get_pixel(0, 0), Some(0xff0000ff));
+        assert_eq!(canvas.surface.get_pixel(1, 1), Some(0xff80007f));
+        assert_eq!(canvas.surface.get_pixel(2, 2), Some(0xff80007f));
+        assert_eq!(canvas.surface.get_pixel(3, 3), Some(0xff0000ff));
+    }
+
+    #[test]
     fn calculator_key_glyphs_are_present_and_not_question_mark_fallbacks() {
         for symbol in ['A', 'C', '0', '9', '+', '-', '−', '×', '÷', '%', '=', '⌫'] {
             let glyph = glyph5x7(symbol);
