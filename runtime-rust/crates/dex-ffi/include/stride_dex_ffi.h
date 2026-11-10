@@ -1,4 +1,4 @@
-﻿#ifndef STRIDE_DEX_FFI_H
+#ifndef STRIDE_DEX_FFI_H
 #define STRIDE_DEX_FFI_H
 
 #include <stddef.h>
@@ -57,6 +57,13 @@ int32_t stride_runtime_load_so(
     const uint8_t *data,
     size_t len
 );
+
+/*
+ * Apply supported native relocations after all package .so files are loaded.
+ * Returns the number of modules with unresolved DT_NEEDED dependencies;
+ * UINT32_MAX indicates invalid runtime or a panic.
+ */
+uint32_t stride_runtime_finish_native_loading(AndroidRuntime *runtime);
 
 /*
  * Read the launch Activity's AndroidManifest.xml screenOrientation enum.
