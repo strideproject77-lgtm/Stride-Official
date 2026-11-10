@@ -17,6 +17,7 @@ pub mod graphics;
 pub mod launcher;
 pub mod diagnostics;
 pub mod canvas;
+pub mod canvas_jni;
 pub mod bionic;
 pub mod gl;
 pub mod activity_manager;
