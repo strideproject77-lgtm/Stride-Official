@@ -179,6 +179,16 @@ pub(crate) fn record_bitmap_draw(
     append(env, canvas, 10, &[Value::Object(bitmap), Value::Float(x), Value::Float(y)])
 }
 
+pub(crate) fn record_bitmap_draw_bounds(
+    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32,
+    left: i32, top: i32, right: i32, bottom: i32, alpha: i32,
+) -> Result<(), String> {
+    append(env, canvas, 11, &[
+        Value::Object(bitmap), Value::Int(left), Value::Int(top),
+        Value::Int(right), Value::Int(bottom), Value::Int(alpha.clamp(0, 255)),
+    ])
+}
+
 pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
     register(registry);
 }
