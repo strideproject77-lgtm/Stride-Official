@@ -1174,6 +1174,124 @@ impl AndroidRuntime {
         Ok(true)
     }
 
+    fn replay_guest_canvas_commands(
+        heap: &ManagedHeap, canvas_id: u32, surface: &mut Surface,
+    ) -> Result<usize, String> {
+        let command_count = crate::canvas_jni::recorded_command_count(heap, canvas_id)?;
+        let mut canvas = Canvas::new(surface);
+        for index in 0..command_count {
+            let prefix = format!("mStrideCommand{}", index);
+            let read = |suffix: &str| heap.get_instance_field(canvas_id, &format!("{prefix}{suffix}"))
+                .map_err(|error| format!("Guest Canvas command {}{} unavailable: {:?}", index, suffix, error));
+            let number = |suffix: &str| -> Result<f32, String> { Ok(read(suffix)?.as_float()) };
+            let color = |suffix: &str| -> Result<u32, String> { Ok(read(suffix)?.as_int() as u32) };
+            match read("Type")?.as_int() {
+                1 => canvas.draw_color(color("Arg0")?),
+                2 => {
+                    let mut paint = Paint::new();
+                    paint.color = color("Arg4")?;
+                    canvas.draw_rect(RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?), &paint);
+                }
+                3 => {
+                    let text_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawText received null text")?;
+                    let text = heap.get_string(text_id)
+                        .map_err(|error| format!("Guest Canvas text lookup failed: {:?}", error))?.to_owned();
+                    let mut paint = Paint::new();
+                    paint.color = color("Arg3")?;
+                    paint.text_size = number("Arg4")?;
+                    canvas.draw_text(&text, number("Arg1")?, number("Arg2")?, &paint);
+                }
+                4 => {
+                    let mut paint = Paint::new();
+                    paint.color = color("Arg4")?;
+                    canvas.draw_line(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?, &paint);
+                }
+                5 => {
+                    let mut paint = Paint::new();
+                    paint.color = color("Arg3")?;
+                    canvas.draw_circle(number("Arg0")?, number("Arg1")?, number("Arg2")?, &paint);
+                }
+                6 => { canvas.save(); }
+                7 => { canvas.restore(); }
+                8 => { canvas.translate(number("Arg0")?, number("Arg1")?); }
+                9 => { canvas.scale(number("Arg0")?, number("Arg1")?); }
+                10 => {
+                    let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawBitmap received null bitmap")?;
+                    let width = heap.get_instance_field(bitmap_id, "mStrideWidth")
+                        .map_err(|error| format!("Bitmap width lookup failed: {:?}", error))?.as_int();
+                    let height = heap.get_instance_field(bitmap_id, "mStrideHeight")
+                        .map_err(|error| format!("Bitmap height lookup failed: {:?}", error))?.as_int();
+                    let pixels_id = heap.get_instance_field(bitmap_id, "mStridePixels")
+                        .map_err(|error| format!("Bitmap pixel buffer lookup failed: {:?}", error))?.as_object()
+                        .ok_or("Guest Bitmap pixel buffer is null")?;
+                    if width <= 0 || height <= 0 || (width as i64) * (height as i64) > 16_777_216 {
+                        return Err("Guest Bitmap dimensions are invalid".into());
+                    }
+                    let pixel_count = (width * height) as usize;
+                    let pixels = match heap.get(pixels_id)
+                        .map_err(|error| format!("Bitmap pixel array lookup failed: {:?}", error))? {
+                        crate::heap::HeapObject::Array(array) if array.elements.len() == pixel_count =>
+                            array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
+                        _ => return Err("Guest Bitmap pixel array has an invalid shape".into()),
+                    };
+                    canvas.draw_image_argb(&pixels, width as u32, height as u32,
+                        number("Arg1")? as i32, number("Arg2")? as i32);
+                }
+                unknown => return Err(format!("Unsupported guest Canvas command type {}", unknown)),
+            }
+        }
+        Ok(command_count)
+    }
+
+    /// Flushes offscreen Canvas(Bitmap) command queues into their managed pixel
+    /// arrays before the screen Canvas consumes those bitmaps via drawBitmap().
+    fn flush_guest_bitmap_canvases(&mut self) -> Result<(), String> {
+        let mut ids = self.heap.instance_ids();
+        ids.sort_unstable();
+        for canvas_id in ids {
+            let class = self.heap.get(canvas_id)
+                .map_err(|error| format!("Canvas object lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/graphics/Canvas;" { continue; }
+            let target = self.heap.get_instance_field(canvas_id, "mStrideBitmap")
+                .ok().and_then(|value| value.as_object());
+            let Some(bitmap_id) = target else { continue };
+            let width = self.heap.get_instance_field(bitmap_id, "mStrideWidth")
+                .map_err(|error| format!("Offscreen Bitmap width lookup failed: {:?}", error))?.as_int();
+            let height = self.heap.get_instance_field(bitmap_id, "mStrideHeight")
+                .map_err(|error| format!("Offscreen Bitmap height lookup failed: {:?}", error))?.as_int();
+            let pixels_id = self.heap.get_instance_field(bitmap_id, "mStridePixels")
+                .map_err(|error| format!("Offscreen Bitmap pixel buffer lookup failed: {:?}", error))?.as_object()
+                .ok_or("Offscreen Bitmap pixel buffer is null")?;
+            if width <= 0 || height <= 0 || (width as i64) * (height as i64) > 16_777_216 {
+                return Err("Offscreen Bitmap dimensions are invalid".into());
+            }
+            let pixel_count = (width * height) as usize;
+            let initial = match self.heap.get(pixels_id)
+                .map_err(|error| format!("Offscreen Bitmap pixel array lookup failed: {:?}", error))? {
+                crate::heap::HeapObject::Array(array) if array.elements.len() == pixel_count =>
+                    array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
+                _ => return Err("Offscreen Bitmap pixel array has an invalid shape".into()),
+            };
+            let mut surface = Surface::new(width as u32, height as u32);
+            surface.pixels.copy_from_slice(&initial);
+            let commands = Self::replay_guest_canvas_commands(&self.heap, canvas_id, &mut surface)?;
+            for (index, pixel) in surface.pixels.into_iter().enumerate() {
+                self.heap.set_array_element(pixels_id, index as i32, Value::Int(pixel as i32))
+                    .map_err(|error| format!("Offscreen Bitmap pixel write failed: {:?}", error))?;
+            }
+            self.heap.set_instance_field(canvas_id, "mStrideCommandCount", Value::Int(0))
+                .map_err(|error| format!("Offscreen Canvas queue reset failed: {:?}", error))?;
+            if commands > 0 {
+                self.diagnostics.record(
+                    DiagnosticSeverity::Info, "Graphics", "OFFSCREEN_BITMAP_CANVAS_FLUSHED",
+                    Some(&format!("bitmap={}x{} commands={}", width, height, commands)),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Executes app-owned custom View.onDraw(Canvas) and replays the guest Canvas
     /// command stream onto the iOS-backed Surface. Standard framework Views keep
     /// using the hierarchy renderer above; only classes declaring a real DEX
@@ -1283,70 +1401,11 @@ impl AndroidRuntime {
                 _ => {}
             }
 
+            self.flush_guest_bitmap_canvases()?;
             let command_count = crate::canvas_jni::recorded_command_count(&self.heap, canvas_id)?;
-            let mut canvas = Canvas::new(&mut self.surface);
-            for index in 0..command_count {
-                let prefix = format!("mStrideCommand{}", index);
-                let read = |suffix: &str| self.heap.get_instance_field(canvas_id, &format!("{prefix}{suffix}"))
-                    .map_err(|error| format!("Guest Canvas command {}{} unavailable: {:?}", index, suffix, error));
-                let kind = read("Type")?.as_int();
-                let number = |suffix: &str| -> Result<f32, String> { Ok(read(suffix)?.as_float()) };
-                let color = |suffix: &str| -> Result<u32, String> { Ok(read(suffix)?.as_int() as u32) };
-                match kind {
-                    1 => canvas.draw_color(color("Arg0")?),
-                    2 => {
-                        let mut paint = Paint::new();
-                        paint.color = color("Arg4")?;
-                        canvas.draw_rect(RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?), &paint);
-                    }
-                    3 => {
-                        let text_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawText received null text")?;
-                        let text = self.heap.get_string(text_id)
-                            .map_err(|error| format!("Guest Canvas text lookup failed: {:?}", error))?.to_owned();
-                        let mut paint = Paint::new();
-                        paint.color = color("Arg3")?;
-                        paint.text_size = number("Arg4")?;
-                        canvas.draw_text(&text, number("Arg1")?, number("Arg2")?, &paint);
-                    }
-                    4 => {
-                        let mut paint = Paint::new();
-                        paint.color = color("Arg4")?;
-                        canvas.draw_line(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?, &paint);
-                    }
-                    5 => {
-                        let mut paint = Paint::new();
-                        paint.color = color("Arg3")?;
-                        canvas.draw_circle(number("Arg0")?, number("Arg1")?, number("Arg2")?, &paint);
-                    }
-                    6 => { canvas.save(); }
-                    7 => { canvas.restore(); }
-                    8 => { canvas.translate(number("Arg0")?, number("Arg1")?); }
-                    9 => { canvas.scale(number("Arg0")?, number("Arg1")?); }
-                    10 => {
-                        let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawBitmap received null bitmap")?;
-                        let width = self.heap.get_instance_field(bitmap_id, "mStrideWidth")
-                            .map_err(|error| format!("Bitmap width lookup failed: {:?}", error))?.as_int();
-                        let height = self.heap.get_instance_field(bitmap_id, "mStrideHeight")
-                            .map_err(|error| format!("Bitmap height lookup failed: {:?}", error))?.as_int();
-                        let pixels_id = self.heap.get_instance_field(bitmap_id, "mStridePixels")
-                            .map_err(|error| format!("Bitmap pixel buffer lookup failed: {:?}", error))?.as_object()
-                            .ok_or("Guest Bitmap pixel buffer is null")?;
-                        if width <= 0 || height <= 0 || (width as i64) * (height as i64) > 16_777_216 {
-                            return Err("Guest Bitmap dimensions are invalid".into());
-                        }
-                        let pixel_count = (width * height) as usize;
-                        let pixels = match self.heap.get(pixels_id)
-                            .map_err(|error| format!("Bitmap pixel array lookup failed: {:?}", error))? {
-                            crate::heap::HeapObject::Array(array) if array.elements.len() == pixel_count =>
-                                array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
-                            _ => return Err("Guest Bitmap pixel array has an invalid shape".into()),
-                        };
-                        canvas.draw_image_argb(&pixels, width as u32, height as u32,
-                            number("Arg1")? as i32, number("Arg2")? as i32);
-                    }
-                    unknown => return Err(format!("Unsupported guest Canvas command type {}", unknown)),
-                }
-            }
+            Self::replay_guest_canvas_commands(&self.heap, canvas_id, &mut self.surface)?;
+            self.heap.set_instance_field(canvas_id, "mStrideCommandCount", Value::Int(0))
+                .map_err(|error| format!("Guest Canvas queue reset failed: {:?}", error))?;
             self.diagnostics.record_detailed(
                 DiagnosticSeverity::Info, "Graphics", "GUEST_CUSTOM_VIEW_ONDRAW_EXECUTED",
                 "App-owned custom View.onDraw(Canvas) executed and its drawing commands were replayed",
