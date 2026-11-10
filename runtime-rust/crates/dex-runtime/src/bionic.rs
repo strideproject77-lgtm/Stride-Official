@@ -576,7 +576,9 @@ impl NativeLinker {
     ) -> Option<ResolvedSymbol<'_>> {
         if let Some(symbol) = self.find_jni_binding(class_descriptor, method_name) { return Some(symbol); }
         let close = prototype.find(')')?;
-        let parameters = &prototype[..close];
+        let parameter_start = if prototype.starts_with('(') { 1 } else { 0 };
+        if parameter_start > close { return None; }
+        let parameters = &prototype[parameter_start..close];
         let class = jni_mangle_component(class_descriptor.trim_start_matches('L').trim_end_matches(';'));
         let method = jni_mangle_component(method_name);
         let signature = jni_mangle_component(parameters);
