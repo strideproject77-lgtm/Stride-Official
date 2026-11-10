@@ -596,36 +596,6 @@ impl AndroidRuntime {
     }
 
     /// Loads and links an ELF shared library (.so) into the native environment.
-    pub fn load_native_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<(), String> {
-        self.diagnostics.record(
-            DiagnosticSeverity::Info, "NativeLinker",
-            &format!("Native library load started: {} ({} bytes)", soname, elf_bytes.len()), None,
-        );
-        let module = match self.native_linker.load_library(soname, elf_bytes) {
-            Ok(module) => module,
-            Err(error) => {
-                self.diagnostics.record_detailed(
-                    DiagnosticSeverity::RuntimeError, "NativeLinker", "ELF_LOAD_FAILED",
-                    "Native library inspection or load planning failed", Some(&error),
-                    Some("Verify ELF class, machine ABI, program headers, dynamic table and dependencies"),
-                );
-                return Err(error);
-            }
-        };
-        let count = module.exported_symbols.len();
-        let details = format!(
-            "architecture={:?}; exports={}; JNI_OnLoad_present={}; DT_NEEDED_entries={:?}",
-            module.architecture, count, module.has_jni_onload, module.needed_libraries
-        );
-        self.diagnostics.record_detailed(
-            DiagnosticSeverity::Warning, "NativeLinker", "ELF_PLAN_ONLY",
-            "ELF was inspected and a memory plan was generated; native code was not mapped, relocated or executed",
-            Some(&details),
-            Some("Do not treat this as native execution support; memory mapping, relocations, symbol binding and JNI_OnLoad dispatch are still required"),
-        );
-        Ok(())
-    }
-
     /// Launches an Android application package by reading its manifest and executing its main activity.
     pub fn launch_application(
         &mut self,
