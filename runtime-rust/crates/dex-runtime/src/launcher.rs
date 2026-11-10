@@ -1,4 +1,4 @@
-﻿﻿//! APK Application Launcher and Runtime Execution Coordinator.
+﻿﻿﻿//! APK Application Launcher and Runtime Execution Coordinator.
 //!
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
@@ -24,6 +24,9 @@ use crate::telemetry::PerformanceTelemetry;
 use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
 use crate::resources::ResourceCatalog;
 use crate::unity::UnityPlayerBridge;
+use crate::audio::AudioSession;
+use crate::handler::LooperCoordinator;
+use crate::native_activity::NativeActivityLauncher;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -84,6 +87,12 @@ pub struct AndroidRuntime {
     pub image_assets: std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,
     /// Unity engine bridge for Unity IL2CPP applications.
     pub unity_bridge: UnityPlayerBridge,
+    /// Audio session coordinating SoundPool and MediaPlayer subsystems.
+    pub audio_session: AudioSession,
+    /// Android Handler/Looper/MessageQueue scheduler.
+    pub looper_coordinator: LooperCoordinator,
+    /// NativeActivity launch pipeline for Unity and C++ apps.
+    pub native_activity_launcher: NativeActivityLauncher,
 }
 
 impl AndroidRuntime {
@@ -127,6 +136,9 @@ impl AndroidRuntime {
             resources: ResourceCatalog::default(),
             image_assets: std::collections::HashMap::new(),
             unity_bridge: UnityPlayerBridge::new(),
+            audio_session: AudioSession::new(),
+            looper_coordinator: LooperCoordinator::new(),
+            native_activity_launcher: NativeActivityLauncher::new(),
         }
     }
 

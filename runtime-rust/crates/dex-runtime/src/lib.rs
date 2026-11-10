@@ -1,4 +1,4 @@
-//! A deliberately small, bounds-checked Dalvik integer interpreter.
+﻿//! A deliberately small, bounds-checked Dalvik integer interpreter.
 //!
 //! This is an execution primitive, not ART. It supports a limited integer opcode
 //! subset and a metadata-only class/method registry. It does not provide Android
@@ -31,6 +31,9 @@ pub mod package;
 pub mod paint;
 pub mod telemetry;
 pub mod unity;
+pub mod audio;
+pub mod handler;
+pub mod native_activity;
 pub mod view;
 pub mod layout;
 pub mod resources;
@@ -66,6 +69,9 @@ pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
 pub use package::{XapkBundle, ObbFile};
 pub use telemetry::{PerformanceTelemetry, RuntimeTelemetrySnapshot, AnrWatchdog};
 pub use unity::{UnityPlayerBridge, UnityEngineState, UnityMessage};
+pub use audio::AudioSession;
+pub use handler::LooperCoordinator;
+pub use native_activity::NativeActivityLauncher;
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
