@@ -213,7 +213,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 return left.localizedStandardCompare(right) == .orderedAscending
             }
         }()
-        for splitURL in splitURLs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        for splitURL in splitURLs {
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
             } else {
