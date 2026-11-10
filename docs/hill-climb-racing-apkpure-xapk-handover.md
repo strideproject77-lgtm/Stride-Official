@@ -88,9 +88,16 @@ Important limitations:
 
 - Import success does not mean split-aware execution is complete.
 - The current runtime receives the normalized base APK URL; split-aware class/native/resource lookup is still needed.
-- The importer currently flattens component paths to filenames. This is safe against traversal but can reject archives with same-named entries in different subdirectories.
+- Component extraction now preserves validated archive-relative paths, so equal APK basenames in separate split directories remain distinct; traversal, absolute paths and backslash path tricks are rejected.
+- Library restoration recursively discovers nested split APKs, and preflight inspects the base plus every preserved split. This is inventory only: split-aware class/resource/native lookup during execution is still not implemented.
 - APKS device-targeted toc.pb selection is not implemented.
 - The exact HCR XAPK's manifest and component list remain unknown until its archive is inspected.
+
+## Progress added in the current source-only batch
+
+- Added a base-plus-split inspection path so native ABI folders and DEX inventories from configuration APKs are included in package preflight.
+- Updated import and library restoration to retain and rediscover nested split paths without flattening collisions.
+- This does not yet select a device-compatible split set, merge Android resources, or make native libraries executable.
 
 ## Priority implementation sequence for HCR
 
