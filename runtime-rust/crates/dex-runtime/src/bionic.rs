@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture};
-use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan};
+use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan, IOS_PAGE_SIZE};
 use stride_elf_inspector::Relocation;
 use crate::types::Value;
 use crate::jni::JniEnv;
@@ -390,8 +390,27 @@ impl NativeLinker {
                         "Relocation target {:#x} in {} is outside its mapped image",
                         relocation.offset, soname
                     ))?;
-                // The relocation kind determines its eventual write width.
-                // Validate its starting address here without guessing that width.
+                let width = match (plan.architecture, relocation.relocation_type) {
+                    (ElfArchitecture::Aarch64, 1027) => Some(8u64),
+                    (ElfArchitecture::Aarch64, 257 | 1025 | 1026) => Some(8),
+                    (ElfArchitecture::Arm, 23) => Some(4),
+                    (ElfArchitecture::Arm, 2 | 21 | 22) => Some(4),
+                    _ => None,
+                };
+                if let Some(width) = width {
+                    let in_segment = plan.segment_copies.iter().any(|segment| {
+                        offset >= segment.image_offset
+                            && offset.checked_add(width).map(|end| end <= segment.image_offset + segment.memory_size).unwrap_or(false)
+                    });
+                    if !in_segment {
+                        return Err(format!("Relocation write at {:#x} in {} crosses a PT_LOAD boundary", relocation.offset, soname));
+                    }
+                    let page_offset = (offset / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
+                    let writable = plan.pages.iter().any(|page| page.image_offset == page_offset && page.protection.writable);
+                    if !writable {
+                        return Err(format!("Relocation target {:#x} in {} is not on a writable ELF page", relocation.offset, soname));
+                    }
+                }
                 Some(offset)
             };
             relocations.push(PlannedNativeRelocation { relocation, image_offset });
