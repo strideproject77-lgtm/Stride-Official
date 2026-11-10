@@ -378,6 +378,14 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             onLog("[INFO] Native library \(soName) loaded successfully")
         }
+        let unresolvedNativeModules = stride_runtime_finish_native_loading(runtime)
+        if unresolvedNativeModules == UInt32.max {
+            onLog("[ERROR] Native dependency finalization failed")
+        } else if unresolvedNativeModules > 0 {
+            onLog("[WARN] Native dependency scan found \(unresolvedNativeModules) module(s) with unloaded DT_NEEDED libraries")
+        } else {
+            onLog("[INFO] All declared native-library dependencies are present in the loaded package set")
+        }
 
         var screenOrientation: Int32 = -1
         let orientationStatus = manifestData.withUnsafeBytes { rawBuffer -> Int32 in
