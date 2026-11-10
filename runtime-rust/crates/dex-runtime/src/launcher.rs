@@ -102,7 +102,20 @@ impl AndroidRuntime {
     /// bridge is available.
     pub fn load_native_library(&mut self, soname: &str, elf_bytes: &[u8]) -> Result<(), String> {
         let (architecture, image_size, relocation_count, has_jni_onload, jni_onload_address, dependency_count) = {
-            let module = self.native_linker.load_library(soname, elf_bytes)?;
+            let module = match self.native_linker.load_library(soname, elf_bytes) {
+                Ok(module) => module,
+                Err(error) => {
+                    self.diagnostics.record_detailed(
+                        DiagnosticSeverity::RuntimeError,
+                        "NativeLinker",
+                        "NATIVE_LIBRARY_LOAD_FAILED",
+                        "Native shared library could not be materialized",
+                        Some(&format!("{}: {}", soname, error)),
+                        Some("Check ELF class, ABI, PT_LOAD bounds, dynamic tables and native image size"),
+                    );
+                    return Err(error);
+                }
+            };
             (
                 format!("{:?}", module.architecture),
                 module.mapped_image.len(),
