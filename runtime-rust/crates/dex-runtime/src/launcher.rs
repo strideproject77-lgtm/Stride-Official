@@ -1277,6 +1277,34 @@ impl AndroidRuntime {
                     canvas.draw_image_argb(&pixels, width as u32, height as u32,
                         number("Arg1")? as i32, number("Arg2")? as i32);
                 }
+                11 => {
+                    let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Drawable draw received null bitmap")?;
+                    let width = heap.get_instance_field(bitmap_id, "mStrideWidth")
+                        .map_err(|error| format!("Drawable bitmap width lookup failed: {:?}", error))?.as_int();
+                    let height = heap.get_instance_field(bitmap_id, "mStrideHeight")
+                        .map_err(|error| format!("Drawable bitmap height lookup failed: {:?}", error))?.as_int();
+                    let pixels_id = heap.get_instance_field(bitmap_id, "mStridePixels")
+                        .map_err(|error| format!("Drawable bitmap pixels lookup failed: {:?}", error))?.as_object()
+                        .ok_or("Guest Drawable bitmap pixel buffer is null")?;
+                    if width <= 0 || height <= 0 || (width as i64) * (height as i64) > 16_777_216 {
+                        return Err("Guest Drawable bitmap dimensions are invalid".into());
+                    }
+                    let pixel_count = (width * height) as usize;
+                    let pixels = match heap.get(pixels_id)
+                        .map_err(|error| format!("Drawable bitmap pixel array lookup failed: {:?}", error))? {
+                        crate::heap::HeapObject::Array(array) if array.elements.len() == pixel_count =>
+                            array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
+                        _ => return Err("Guest Drawable bitmap pixel array has an invalid shape".into()),
+                    };
+                    let int_arg = |suffix: &str| -> Result<i32, String> {
+                        Ok(read(suffix)?.as_int())
+                    };
+                    let alpha = int_arg("Arg5")?.clamp(0, 255) as u8;
+                    canvas.draw_image_argb_scaled_alpha(
+                        &pixels, width as u32, height as u32,
+                        int_arg("Arg1")?, int_arg("Arg2")?, int_arg("Arg3")?, int_arg("Arg4")?, alpha,
+                    );
+                }
                 unknown => return Err(format!("Unsupported guest Canvas command type {}", unknown)),
             }
         }
