@@ -33,7 +33,17 @@ fn register(registry: &mut JniNativeRegistry) {
         registry.register("Landroid/graphics/Canvas;", "<init>", prototype, |env, args| {
             let canvas = receiver(args)?;
             env.set_object_field(canvas, "mStrideCommandCount", Value::Int(0))?;
-            env.set_object_field(canvas, "mStrideBitmap", args.get(1).copied().unwrap_or(Value::Null))?;
+            let bitmap_value = args.get(1).copied().unwrap_or(Value::Null);
+            let (width, height) = if let Some(bitmap) = bitmap_value.as_object() {
+                (
+                    env.get_object_field(bitmap, "mStrideWidth")?.as_int(),
+                    env.get_object_field(bitmap, "mStrideHeight")?.as_int(),
+                )
+            } else { (0, 0) };
+            env.set_object_field(canvas, "mStrideBitmap", bitmap_value)?;
+            env.set_object_field(canvas, "mStrideWidth", Value::Int(width))?;
+            env.set_object_field(canvas, "mStrideHeight", Value::Int(height))?;
+            env.set_object_field(canvas, "mStrideSaveDepth", Value::Int(0))?;
             Ok(None)
         });
     }
