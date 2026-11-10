@@ -1143,6 +1143,8 @@ impl AndroidRuntime {
         )?;
         drop(canvas);
         self.rendered_view_bounds = rendered_view_bounds;
+        self.render_guest_custom_view_drawing()?;
+
 
         if !self.initial_render_summary_recorded {
             self.diagnostics.record(
