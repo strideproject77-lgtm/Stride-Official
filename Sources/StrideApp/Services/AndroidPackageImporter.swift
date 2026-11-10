@@ -171,8 +171,10 @@ struct AndroidPackageImporter: @unchecked Sendable {
             let componentType = metadata["type"] as? String
             let dependencies = (metadata["dependencies"] as? [String]) ?? []
             let localPath = entry.path == baseEntry.path ? "base.apk" : "components/\(entry.path)"
-            let splitIdentity = "\((splitID ?? "") + " " + entry.path)".lowercased().replacingOccurrences(of: "_", with: "-")
-            let inferredABI = ["arm64-v8a", "armeabi-v7a", "x86-64", "x86"].first {
+            let splitIdentity = ("\((splitID ?? "") + " " + entry.path)".lowercased())
+                .replacingOccurrences(of: "arm64_v8a", with: "arm64-v8a")
+                .replacingOccurrences(of: "armeabi_v7a", with: "armeabi-v7a")
+            let inferredABI = ["arm64-v8a", "armeabi-v7a", "x86_64", "x86"].first {
                 splitIdentity.contains($0)
             }
             let inferredDensity = ["xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi", "ldpi", "tvdpi", "nodpi"].first {
