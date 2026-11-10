@@ -6,15 +6,15 @@ use crate::types::Value;
 fn register(jni: &mut JniNativeRegistry) {
     jni.register("Landroid/graphics/Typeface;", "createFromAsset",
         "(Landroid/content/res/AssetManager;Ljava/lang/String;)Landroid/graphics/Typeface;", |env, args| {
-            let name_id = args.get(1).and_then(Value::as_object).ok_or("Typeface asset manager is null")?;
-            let path_id = args.get(2).and_then(Value::as_object).ok_or("Typeface asset path is null")?;
+            let manager_id = args.get(0).and_then(Value::as_object).ok_or("Typeface asset manager is null")?;
+            let path_id = args.get(1).and_then(Value::as_object).ok_or("Typeface asset path is null")?;
             let path = env.get_string_utf(path_id)?.to_owned();
             let face = env.heap.allocate_instance("Landroid/graphics/Typeface;")
                 .map_err(|error| format!("Typeface allocation failed: {error:?}"))?;
             let stored_path = env.heap.allocate_string(&path)
                 .map_err(|error| format!("Typeface path allocation failed: {error:?}"))?;
             env.set_object_field(face, "mStrideAssetPath", Value::Object(stored_path))?;
-            env.set_object_field(face, "mStrideAssetManager", Value::Object(name_id))?;
+            env.set_object_field(face, "mStrideAssetManager", Value::Object(manager_id))?;
             env.set_object_field(face, "mStrideStyle", Value::Int(0))?;
             Ok(Some(Value::Object(face)))
         });
