@@ -93,7 +93,11 @@ struct AndroidPackageImporter: @unchecked Sendable {
             guard !pathParts.isEmpty,
                   pathParts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }),
                   !entry.path.hasPrefix("/"),
-                  !entry.path.contains("\\\\") else {
+                  !entry.path.contains("\\"),
+                  !entry.path.contains(":"),
+                  !entry.path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }),
+                  pathParts.count <= 64,
+                  pathParts.allSatisfy({ $0.utf8.count <= 255 }) else {
                 throw APKLibraryImportError.invalidPackageArchive
             }
             let relativePath = pathParts.map(String.init).joined(separator: "/")
