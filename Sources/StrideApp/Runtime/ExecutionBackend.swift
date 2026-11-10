@@ -217,10 +217,10 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
             } else {
-                onLog("[WARN] Could not open preserved split APK: \\(splitURL.lastPathComponent)")
+                onLog("[WARN] Could not open preserved split APK: \(splitURL.lastPathComponent)")
             }
         }
-        onLog("[INFO] Package components discovered: \\(packageArchives.count) APK(s), \\(splitURLs.count) split(s)")
+        onLog("[INFO] Package components discovered: \(packageArchives.count) APK(s), \(splitURLs.count) split(s)")
 
         for (archiveIndex, packageArchive) in packageArchives.enumerated() {
             for entry in packageArchive {
@@ -233,7 +233,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     if archiveIndex == 0 && manifestData.isEmpty {
                         _ = try packageArchive.extract(entry) { chunk in manifestData.append(chunk) }
                     }
-                } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\\.dex$"#, options: .regularExpression) != nil {
+                } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
                     var dex = Data()
                     _ = try packageArchive.extract(entry) { chunk in dex.append(chunk) }
                     dexDataList.append(dex)
@@ -248,7 +248,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
-        onLog("[INFO] Archive scan complete: manifest=\\(!manifestData.isEmpty), manifest_bytes=\\(manifestData.count), DEX=\\(dexDataList.count), native libraries=\\(soDataList.count), APK components=\\(packageArchives.count)")
+        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count), APK components=\(packageArchives.count)")
         guard !manifestData.isEmpty else {
             onLog("[ERROR] AndroidManifest.xml is absent or empty")
             throw RuntimeExecutionError.missingManifest
