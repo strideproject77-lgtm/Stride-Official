@@ -1166,6 +1166,116 @@ impl AndroidRuntime {
         Ok(true)
     }
 
+    /// Executes app-owned custom View.onDraw(Canvas) and replays the guest Canvas
+    /// command stream onto the iOS-backed Surface. Standard framework Views keep
+    /// using the hierarchy renderer above; only classes declaring a real DEX
+    /// onDraw implementation are invoked here.
+    fn render_guest_custom_view_drawing(&mut self) -> Result<(), String> {
+        let candidates = self.rendered_view_bounds.clone();
+        for (view_id, _bounds) in candidates {
+            let class_descriptor = self.heap.get(view_id)
+                .map_err(|error| format!("Custom View class lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class_descriptor.starts_with("Landroid/") { continue; }
+            let Some(method_id) = self.class_loader.find_method(
+                &class_descriptor, "onDraw", "(Landroid/graphics/Canvas;)V"
+            ) else { continue };
+            let method_id = u16::try_from(method_id)
+                .map_err(|_| "Custom View onDraw method ID exceeds interpreter limit".to_owned())?;
+            let canvas_id = self.heap.allocate_instance("Landroid/graphics/Canvas;")
+                .map_err(|error| format!("Guest Canvas allocation failed: {:?}", error))?;
+            for (field, value) in [
+                ("mStrideCommandCount", Value::Int(0)),
+                ("mStrideSaveDepth", Value::Int(0)),
+                ("mStrideWidth", Value::Int(self.surface.width as i32)),
+                ("mStrideHeight", Value::Int(self.surface.height as i32)),
+                ("mStrideBitmap", Value::Null),
+            ] {
+                self.heap.set_instance_field(canvas_id, field, value)
+                    .map_err(|error| format!("Guest Canvas initialization failed: {:?}", error))?;
+            }
+
+            let method_map = self.class_loader.export_method_codes();
+            let metadata = self.class_loader.dex_inventories.first().cloned();
+            let strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &method_map, strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+            if let Some(inventory) = metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            let report = vm.execute_method(
+                method_id,
+                &[Value::Object(view_id), Value::Object(canvas_id)],
+                250_000,
+            ).map_err(|error| format!("Guest onDraw interpreter error in {}: {}", class_descriptor, error))?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) => {
+                    return Err(format!("Guest {}.onDraw threw {}: {:?}", class_descriptor, exception.class_descriptor, exception.message));
+                }
+                ExecutionStopReason::StepLimitExceeded => {
+                    return Err(format!("Guest {}.onDraw exceeded its drawing instruction budget", class_descriptor));
+                }
+                _ => {}
+            }
+
+            let command_count = crate::canvas_jni::recorded_command_count(&self.heap, canvas_id)?;
+            let mut canvas = Canvas::new(&mut self.surface);
+            for index in 0..command_count {
+                let prefix = format!("mStrideCommand{}", index);
+                let read = |suffix: &str| self.heap.get_instance_field(canvas_id, &format!("{prefix}{suffix}"))
+                    .map_err(|error| format!("Guest Canvas command {}{} unavailable: {:?}", index, suffix, error));
+                let kind = read("Type")?.as_int();
+                let number = |suffix: &str| -> Result<f32, String> { Ok(read(suffix)?.as_float()) };
+                let color = |suffix: &str| -> Result<u32, String> { Ok(read(suffix)?.as_int() as u32) };
+                match kind {
+                    1 => canvas.draw_color(color("Arg0")?),
+                    2 => {
+                        let mut paint = Paint::new();
+                        paint.color = color("Arg4")?;
+                        canvas.draw_rect(RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?), &paint);
+                    }
+                    3 => {
+                        let text_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawText received null text")?;
+                        let text = self.heap.get_string(text_id)
+                            .map_err(|error| format!("Guest Canvas text lookup failed: {:?}", error))?.to_owned();
+                        let mut paint = Paint::new();
+                        paint.color = color("Arg3")?;
+                        paint.text_size = number("Arg4")?;
+                        canvas.draw_text(&text, number("Arg1")?, number("Arg2")?, &paint);
+                    }
+                    4 => {
+                        let mut paint = Paint::new();
+                        paint.color = color("Arg4")?;
+                        canvas.draw_line(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?, &paint);
+                    }
+                    5 => {
+                        let mut paint = Paint::new();
+                        paint.color = color("Arg3")?;
+                        canvas.draw_circle(number("Arg0")?, number("Arg1")?, number("Arg2")?, &paint);
+                    }
+                    6 => { canvas.save(); }
+                    7 => { canvas.restore(); }
+                    8 => { canvas.translate(number("Arg0")?, number("Arg1")?); }
+                    9 => { canvas.scale(number("Arg0")?, number("Arg1")?); }
+                    unknown => return Err(format!("Unsupported guest Canvas command type {}", unknown)),
+                }
+            }
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::Info, "Graphics", "GUEST_CUSTOM_VIEW_ONDRAW_EXECUTED",
+                "App-owned custom View.onDraw(Canvas) executed and its drawing commands were replayed",
+                Some(&format!("class={} instructions={} commands={}", class_descriptor, report.steps_executed, command_count)),
+                None,
+            );
+        }
+        Ok(())
+    }
+
     fn hit_test_edit_text(&self, x: f32, y: f32) -> Option<u32> {
         self.rendered_view_bounds.iter().rev().find_map(|(view_id, bounds)| {
             let inside = x >= bounds.left && x <= bounds.right
