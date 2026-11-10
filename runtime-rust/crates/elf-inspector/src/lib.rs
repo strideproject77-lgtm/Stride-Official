@@ -55,7 +55,7 @@ pub struct DynamicSymbol { pub index:u32, pub name:String, pub value:u64, pub si
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct Relocation { pub kind:RelocationKind, pub offset:u64, pub symbol_index:u32, pub relocation_type:u32, pub addend:Option<i64> }
 #[derive(Debug,Clone,PartialEq,Eq)]
-pub struct ElfDynamicInfo { pub symbols:Vec<DynamicSymbol>, pub relocations:Vec<Relocation>, pub dynamic_tags:Vec<(i64,u64)> }
+pub struct ElfDynamicInfo { pub symbols:Vec<DynamicSymbol>, pub relocations:Vec<Relocation>, pub needed_libraries:Vec<String>, pub dynamic_tags:Vec<(i64,u64)> }
 #[derive(Debug,Clone,Copy,PartialEq,Eq)]
 pub enum DynamicError { MissingDynamicSegment, InvalidDynamicTable, MissingStringTable, MissingSymbolTable, InvalidStringTable, InvalidSymbolTable, InvalidHashTable, InvalidRelocationTable, UnsupportedSymbolEntrySize }
 fn vaddr_offset(info:&ElfProgramInfo,addr:u64,size:u64)->Result<usize,DynamicError>{
@@ -91,6 +91,16 @@ pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicI
  let str_off=vaddr_offset(info,str_addr,str_size).map_err(|_|DynamicError::InvalidStringTable)?;
  let str_end=str_off.checked_add(str_size as usize).filter(|e|*e<=bytes.len()).ok_or(DynamicError::InvalidStringTable)?;
  let strings=&bytes[str_off..str_end];
+ // DT_NEEDED values are offsets into DT_STRTAB, not SONAMEs themselves.
+ // Decode them here while the bounded string table is available.
+ let mut needed_libraries=Vec::new();
+ for (_,value) in tags.iter().filter(|(tag,_)|*tag==1) {
+  let offset=usize::try_from(*value).map_err(|_|DynamicError::InvalidStringTable)?;
+  if offset>=strings.len(){return Err(DynamicError::InvalidStringTable);}
+  let name=c_string(strings,offset,strings.len()-offset)?;
+  if name.is_empty(){return Err(DynamicError::InvalidStringTable);}
+  needed_libraries.push(name);
+ }
  let sym_addr=get(6).ok_or(DynamicError::MissingSymbolTable)?;let sym_ent=get(11).unwrap_or(if is64{24}else{16}) as usize;
  if sym_ent<(if is64{24}else{16}){return Err(DynamicError::UnsupportedSymbolEntrySize);}
  let sym_count=if let Some(hash)=get(4){
@@ -143,7 +153,7 @@ pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicI
  if let (Some(a),Some(s))=(get(17),get(18)){parse_reloc(a,s,RelocationKind::Rel)?;}
  if let (Some(a),Some(s))=(get(7),get(8)){parse_reloc(a,s,RelocationKind::Rela)?;}
  if let (Some(a),Some(s))=(get(23),get(2)){let k=if get(20)==Some(7){RelocationKind::PltRela}else{RelocationKind::PltRel};parse_reloc(a,s,k)?;}
- Ok(ElfDynamicInfo{symbols,relocations,dynamic_tags:tags})
+ Ok(ElfDynamicInfo{symbols,relocations,needed_libraries,dynamic_tags:tags})
 }
 
 #[cfg(test)]
