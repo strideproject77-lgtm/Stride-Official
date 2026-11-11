@@ -289,6 +289,28 @@ impl AppClassLoader {
         self.method_lookup.get(&(class.to_string(), name.to_string(), proto.to_string())).copied()
     }
 
+    /// Resolves an instance callback through the concrete class, its
+    /// superclasses, and implemented interfaces (including default methods).
+    pub fn find_method_in_hierarchy(&self, class: &str, name: &str, proto: &str) -> Option<u32> {
+        let mut pending = vec![class.to_owned()];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(owner) = pending.pop() {
+            if !visited.insert(owner.clone()) {
+                continue;
+            }
+            if let Some(method_id) = self.find_method(&owner, name, proto) {
+                return Some(method_id);
+            }
+            if let Some(loaded_class) = self.classes.get(&owner) {
+                if let Some(superclass) = loaded_class.super_descriptor.as_ref() {
+                    pending.push(superclass.clone());
+                }
+                pending.extend(loaded_class.interface_descriptors.iter().cloned());
+            }
+        }
+        None
+    }
+
     /// Converts loaded methods into the format consumed by ArtVm.
     pub fn export_method_codes(&self) -> HashMap<u32, MethodCode> {
         let mut out = HashMap::new();
@@ -382,6 +404,48 @@ impl AppClassLoader {
 #[cfg(test)]
 mod diagnostics_tests {
     use super::*;
+
+    #[test]
+    fn callback_method_lookup_walks_superclasses_and_interfaces() {
+        let mut loader = AppClassLoader::new();
+        let child = "Ltest/CalculatorListener;";
+        let parent = "Ltest/BaseListener;";
+        let contract = "Ltest/ClickContract;";
+        let signature = "(Landroid/view/View;)V";
+        loader.classes.insert(child.into(), LoadedClass {
+            descriptor: child.into(),
+            super_descriptor: Some(parent.into()),
+            interface_descriptors: vec![contract.into()],
+            access_flags: 0,
+            init_state: ClassInitState::NotInitialized,
+            static_fields: HashMap::new(),
+            instance_field_names: Vec::new(),
+            direct_methods: Vec::new(),
+            virtual_methods: Vec::new(),
+        });
+        loader.classes.insert(parent.into(), LoadedClass {
+            descriptor: parent.into(),
+            super_descriptor: None,
+            interface_descriptors: Vec::new(),
+            access_flags: 0,
+            init_state: ClassInitState::NotInitialized,
+            static_fields: HashMap::new(),
+            instance_field_names: Vec::new(),
+            direct_methods: Vec::new(),
+            virtual_methods: Vec::new(),
+        });
+        loader.method_lookup.insert(
+            (parent.into(), "onClick".into(), signature.into()), 41,
+        );
+        assert_eq!(loader.find_method_in_hierarchy(child, "onClick", signature), Some(41));
+
+        loader.method_lookup.remove(&(parent.into(), "onClick".into(), signature.into()));
+        loader.method_lookup.insert(
+            (contract.into(), "onClick".into(), signature.into()), 42,
+        );
+        assert_eq!(loader.find_method_in_hierarchy(child, "onClick", signature), Some(42));
+        assert_eq!(loader.find_method_in_hierarchy(child, "missing", signature), None);
+    }
 
     #[test]
     fn dex_parse_failure_is_written_to_the_attached_session_report() {
