@@ -911,7 +911,7 @@ private struct APKDetailSheet: View {
     @State private var guestFramebufferWidth = 0
     @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
-    @State private var touchResponseMilliseconds: Double?\n    @State private var pendingTouchTimestamp: UInt64?
+    @State private var touchResponseMilliseconds: Double?
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
@@ -1044,13 +1044,10 @@ private struct APKDetailSheet: View {
                                             guestFramebufferData = frame.data
                                             guestFramebufferWidth = frame.width
                                             guestFramebufferHeight = frame.height
-                                            // Record one real input-to-guest-render sample only after
-                                            // the guest callback batch has run and its framebuffer
-                                            // has been copied. Never substitute host dispatch-call time.
-                                            if pump.delivered > 0, let started = pendingTouchTimestamp {
-                                                let elapsed = DispatchTime.now().uptimeNanoseconds &- started
-                                                touchResponseMilliseconds = Double(elapsed) / 1_000_000
-                                                pendingTouchTimestamp = nil
+                                            // Rust timestamps each queued event and reports the
+                                            // actual guest callback plus guest-render processing time.
+                                            if let measured = pump.touchMilliseconds {
+                                                touchResponseMilliseconds = Double(measured)
                                             }
                                         }
                                     } else {
@@ -1475,10 +1472,7 @@ private struct APKDetailSheet: View {
 
     private func measureGuestTouchDispatch(action: Int32, point: CGPoint) {
         guard let session = executionResult?.session else { return }
-        let accepted = session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
-        if accepted {
-            pendingTouchTimestamp = DispatchTime.now().uptimeNanoseconds
-        }
+        _ = session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
     }
 
     private func executionMetric(_ title: String, value: String) -> some View {
