@@ -1477,7 +1477,7 @@ private struct APKDetailSheet: View {
         return String(format: "%.0f", fps)
     }
 
-    // Per-input sample: iOS touch dispatch -> guest event pump/callback -> framebuffer copy.
+    // Per-input sample from Rust: queue enqueue -> guest callback processing -> guest surface redraw.
     // No touch or no guest response means no fabricated value is displayed.
     private var touchLatencyLabel: String {
         guard let value = touchResponseMilliseconds else { return "--" }
