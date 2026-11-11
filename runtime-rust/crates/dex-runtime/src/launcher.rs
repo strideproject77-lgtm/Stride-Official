@@ -1894,13 +1894,18 @@ impl AndroidRuntime {
         let activity_class = self.active_activity_class.clone()
             .ok_or_else(|| "No active Android Activity class is recorded".to_string())?;
 
-        let callback = self.class_loader
+        // dispatchTouchEvent is the Activity's outer dispatch hook. onTouchEvent
+        // is only the final fallback after child Views have had a chance to handle
+        // the gesture; invoking it first incorrectly swallows Button clicks.
+        let dispatch_callback_method_id = self.class_loader
             .find_method(&activity_class, "dispatchTouchEvent", "(Landroid/view/MotionEvent;)Z")
-            .or_else(|| self.class_loader.find_method(
-                &activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z"
-            ));
-        let callback_method_id = callback.map(|id| u16::try_from(id)
-            .map_err(|_| "Touch callback method ID exceeds the interpreter limit".to_string()))
+            .map(|id| u16::try_from(id)
+                .map_err(|_| "dispatchTouchEvent method ID exceeds the interpreter limit".to_string()))
+            .transpose()?;
+        let on_touch_fallback_method_id = self.class_loader
+            .find_method(&activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z")
+            .map(|id| u16::try_from(id)
+                .map_err(|_| "onTouchEvent method ID exceeds the interpreter limit".to_string()))
             .transpose()?;
         let method_map = self.class_loader.export_method_codes();
         let dex_metadata = self.class_loader.dex_inventories.first().cloned();
@@ -1922,7 +1927,8 @@ impl AndroidRuntime {
             }
             let mut activity_consumed = false;
 
-            if let Some(method_id) = callback_method_id {
+            // Only the outer dispatchTouchEvent hook runs before child Views.
+            if let Some(method_id) = dispatch_callback_method_id {
                 let event_obj = self.heap.allocate_instance("Landroid/view/MotionEvent;")
                     .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
                 self.heap.set_instance_field(event_obj, "action", Value::Int(event.action))
@@ -1933,14 +1939,9 @@ impl AndroidRuntime {
                     .map_err(|error| format!("MotionEvent Y setup failed: {:?}", error))?;
                 self.heap.set_instance_field(event_obj, "pressure", Value::Float(pointer.map(|p| p.pressure).unwrap_or(0.0)))
                     .map_err(|error| format!("MotionEvent pressure setup failed: {:?}", error))?;
-
                 let mut vm = ArtVm::new(
-                    &mut self.heap,
-                    &mut self.hierarchy,
-                    &mut self.monitors,
-                    &mut self.jni,
-                    &method_map,
-                    dex_strings,
+                    &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                    &mut self.jni, &method_map, dex_strings,
                 );
                 vm.attach_diagnostics(&self.diagnostics);
                 vm.attach_static_fields(&mut self.static_fields);
@@ -1951,13 +1952,13 @@ impl AndroidRuntime {
                 }
                 let args = [Value::Object(activity_obj), Value::Object(event_obj)];
                 let report = vm.execute_method(method_id, &args, step_budget.max(1))
-                    .map_err(|error| format!("Touch callback interpreter error: {}", error))?;
+                    .map_err(|error| format!("dispatchTouchEvent interpreter error: {}", error))?;
                 match report.stop_reason {
                     ExecutionStopReason::UncaughtException(exception) => return Err(format!(
-                        "Touch callback threw {}: {:?}", exception.class_descriptor, exception.message
+                        "dispatchTouchEvent threw {}: {:?}", exception.class_descriptor, exception.message
                     )),
                     ExecutionStopReason::StepLimitExceeded => return Err(
-                        "Touch callback exceeded its per-event instruction budget".to_string()
+                        "dispatchTouchEvent exceeded its per-event instruction budget".to_string()
                     ),
                     ExecutionStopReason::ReturnedValue(value) => activity_consumed = value.as_int() != 0,
                     ExecutionStopReason::ReturnedVoid => activity_consumed = false,
@@ -1971,9 +1972,11 @@ impl AndroidRuntime {
                 }
             }
 
+            let mut child_consumed = activity_consumed;
             match event.action {
                 ACTION_DOWN => {
                     self.pressed_view = if activity_consumed { None } else { self.hit_test_clickable_view(x, y) };
+                    child_consumed |= self.pressed_view.is_some();
                 }
                 ACTION_UP => {
                     let released_view = self.hit_test_clickable_view(x, y);
@@ -1981,8 +1984,8 @@ impl AndroidRuntime {
                     if !activity_consumed && pressed_view.is_some() && pressed_view == released_view {
                         if let Some(view_id) = released_view {
                             if self.dispatch_view_click(view_id, step_budget)? {
+                                child_consumed = true;
                                 delivered += 1;
-                                continue;
                             }
                         }
                     }
@@ -1991,7 +1994,49 @@ impl AndroidRuntime {
                 _ => {}
             }
 
-            if callback_method_id.is_some() {
+            // Activity.onTouchEvent is the fallback after the View tree declines
+            // the event, matching Android dispatch order rather than pre-empting
+            // a focused EditText or a Button's click listener.
+            if !child_consumed {
+                if let Some(method_id) = on_touch_fallback_method_id {
+                    let event_obj = self.heap.allocate_instance("Landroid/view/MotionEvent;")
+                        .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
+                    for (field, value) in [
+                        ("action", Value::Int(event.action)),
+                        ("x", Value::Float(x)),
+                        ("y", Value::Float(y)),
+                        ("pressure", Value::Float(pointer.map(|p| p.pressure).unwrap_or(0.0))),
+                    ] {
+                        self.heap.set_instance_field(event_obj, field, value)
+                            .map_err(|error| format!("MotionEvent {} setup failed: {:?}", field, error))?;
+                    }
+                    let mut vm = ArtVm::new(
+                        &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                        &mut self.jni, &method_map, dex_strings,
+                    );
+                    vm.attach_diagnostics(&self.diagnostics);
+                    vm.attach_static_fields(&mut self.static_fields);
+                    vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+                    if let Some(inventory) = dex_metadata.as_ref() {
+                        vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                        vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                    }
+                    let args = [Value::Object(activity_obj), Value::Object(event_obj)];
+                    let report = vm.execute_method(method_id, &args, step_budget.max(1))
+                        .map_err(|error| format!("onTouchEvent fallback interpreter error: {}", error))?;
+                    match report.stop_reason {
+                        ExecutionStopReason::UncaughtException(exception) => return Err(format!(
+                            "onTouchEvent fallback threw {}: {:?}", exception.class_descriptor, exception.message
+                        )),
+                        ExecutionStopReason::StepLimitExceeded => return Err(
+                            "onTouchEvent fallback exceeded its per-event instruction budget".to_string()
+                        ),
+                        ExecutionStopReason::ReturnedValue(value) => activity_consumed = value.as_int() != 0,
+                        ExecutionStopReason::ReturnedVoid => activity_consumed = false,
+                    }
+                }
+            }
+            if dispatch_callback_method_id.is_some() || on_touch_fallback_method_id.is_some() || child_consumed {
                 delivered += 1;
             }
         }
