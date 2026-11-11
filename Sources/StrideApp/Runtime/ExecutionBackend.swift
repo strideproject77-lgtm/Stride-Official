@@ -46,13 +46,15 @@ final class APKRuntimeSession: @unchecked Sendable {
         }
     }
 
-    func pumpGuestEvents(maxEvents: UInt32 = 8, instructionBudget: Int = 20_000) -> (status: Int32, delivered: UInt32) {
+    func pumpGuestEvents(maxEvents: UInt32 = 8, instructionBudget: Int = 20_000) -> (status: Int32, delivered: UInt32, touchMilliseconds: Float?) {
         lock.lock()
         defer { lock.unlock() }
-        guard let runtime else { return (1, 0) }
+        guard let runtime else { return (1, 0, nil) }
         var delivered: UInt32 = 0
         let status = stride_runtime_pump_guest_events(runtime, maxEvents, instructionBudget, &delivered)
-        return (status, delivered)
+        guard status == 0 else { return (status, delivered, nil) }
+        let measured = stride_runtime_last_touch_processing_ms(runtime)
+        return (status, delivered, measured >= 0 ? measured : nil)
     }
 
     func copyFramebuffer() -> (data: Data, width: Int, height: Int)? {
