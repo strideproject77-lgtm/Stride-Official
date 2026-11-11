@@ -122,7 +122,9 @@ fn parse_string_pool(bytes: &[u8], base: usize, chunk_size: usize) -> Result<Vec
                 words.push(u16_at(bytes, at, end)?);
                 at += 2;
             }
-            strings.push(String::from_utf16_lossy(&words));
+            let value = String::from_utf16(&words)
+                .map_err(|_| format!("resource string {index} contains invalid UTF-16"))?;
+            strings.push(value);
         }
     }
     Ok(strings)
@@ -284,4 +286,21 @@ mod tests {
         let pool = utf8_pool(&[0xc3, 0x28], 2);
         assert!(parse_string_pool(&pool, 0, pool.len()).is_err());
     }
+
+    #[test]
+    fn rejects_unpaired_surrogates_in_utf16_resource_strings() {
+        let mut pool = vec![0u8; 28];
+        pool[0..2].copy_from_slice(&1u16.to_le_bytes());
+        pool[2..4].copy_from_slice(&28u16.to_le_bytes());
+        pool[8..12].copy_from_slice(&1u32.to_le_bytes());
+        pool[20..24].copy_from_slice(&32u32.to_le_bytes());
+        pool.extend_from_slice(&0u32.to_le_bytes());
+        pool.extend_from_slice(&1u16.to_le_bytes());
+        pool.extend_from_slice(&0xd800u16.to_le_bytes());
+        pool.extend_from_slice(&0u16.to_le_bytes());
+        let size = pool.len() as u32;
+        pool[4..8].copy_from_slice(&size.to_le_bytes());
+        assert!(parse_string_pool(&pool, 0, pool.len()).is_err());
+    }
+
 }
