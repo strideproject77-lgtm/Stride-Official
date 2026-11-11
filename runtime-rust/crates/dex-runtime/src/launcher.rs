@@ -243,26 +243,10 @@ impl AndroidRuntime {
         let ok_zero: fn(&mut crate::jni::JniEnv, &[crate::types::Value]) -> Result<Option<crate::types::Value>, String>
             = |_env, _args| Ok(Some(crate::types::Value::Int(0)));
 
-        // --- Fingersoft / Hill Climb Racing native bridge ---
-        for class in &[
-            "Lcom/fingersoft/hillclimb/MainActivity;",
-            "Lcom/fingersoft/game/NativeApp;",
-            "Lcom/fingersoft/hillclimb/NativeBridge;",
-        ] {
-            jni.register(class, "nativeOnCreate",  "(Landroid/app/Activity;)V", ok_unit);
-            jni.register(class, "nativeOnStart",   "()V", ok_unit);
-            jni.register(class, "nativeOnResume",  "()V", ok_unit);
-            jni.register(class, "nativeOnPause",   "()V", ok_unit);
-            jni.register(class, "nativeOnStop",    "()V", ok_unit);
-            jni.register(class, "nativeOnDestroy", "()V", ok_unit);
-            jni.register(class, "nativeRender",    "()V", ok_unit);
-            jni.register(class, "nativeResize",    "(II)V", ok_unit);
-            jni.register(class, "nativeTouch",     "(IFFI)V", ok_unit);
-            jni.register(class, "nativeKeyDown",   "(I)V", ok_unit);
-            jni.register(class, "nativeKeyUp",     "(I)V", ok_unit);
-            jni.register(class, "nativeInit",      "()Z", ok_one);
-            jni.register(class, "isInitialized",   "()Z", ok_one);
-        }
+        // HCR's app-defined native entry points are deliberately not registered as
+        // no-op successes. Until the ELF CPU/JNI bridge can execute them, the
+        // interpreter must report the exact unresolved native signature rather
+        // than falsely claiming nativeInit/nativeRender succeeded.
 
         // --- android.media.SoundPool ---
         jni.register("Landroid/media/SoundPool;", "<init>",     "(III)V", ok_unit);
