@@ -165,17 +165,6 @@ impl AppClassLoader {
                     return Err(detail);
                 };
                 self.next_method_id = next_method_id;
-                if mid > u16::MAX as u32 {
-                    if let Some(diagnostics) = diagnostics {
-                        diagnostics.record_detailed(
-                            DiagnosticSeverity::Warning, "ClassLoader", "METHOD_ID_EXCEEDS_VM_LIMIT",
-                            "Loaded method cannot be represented by the current 16-bit interpreter ID",
-                            Some(&format!("method_id={} {}->{}{}", mid, descriptor, m.name, m.prototype)),
-                            Some("Widen interpreter method IDs or provide an explicit DEX-reference-to-runtime-ID map"),
-                        );
-                    }
-                }
-
                 let code = if m.code_offset != 0 {
                     match read_code_item(dex_bytes, m.code_offset) {
                         Ok(item) => {
@@ -301,13 +290,11 @@ impl AppClassLoader {
     }
 
     /// Converts loaded methods into the format consumed by ArtVm.
-    pub fn export_method_codes(&self) -> HashMap<u16, MethodCode> {
+    pub fn export_method_codes(&self) -> HashMap<u32, MethodCode> {
         let mut out = HashMap::new();
-        for (mid, loaded) in &self.methods_by_id {
+        for (method_id, loaded) in &self.methods_by_id {
             if let Some(code) = &loaded.code {
-                if let Ok(id_u16) = u16::try_from(*mid) {
-                    out.insert(id_u16, code.clone());
-                }
+                out.insert(*method_id, code.clone());
             }
         }
         out
