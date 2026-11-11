@@ -372,7 +372,8 @@ impl<'a> Canvas<'a> {
                         ((color >> 24) & 0xff) as f64 / 255.0,
                     );
                     CGContextSetTextDrawingMode(context, 0);
-                    // The bytes below are ASCII/MacRoman character codes, not font-specific glyph IDs.\n                    // Using kCGEncodingFontSpecific (0) maps letters to unrelated glyphs on device.\n                    CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
+                    // The bytes below are ASCII/MacRoman character codes, not font-specific glyph IDs.
+                    // Using kCGEncodingFontSpecific (0) maps letters to unrelated glyphs on device.\n                    CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
                     CGContextShowTextAtPoint(context, x as f64, baseline as f64, bytes.as_ptr().cast(), bytes.len());
                     CGContextFlush(context);
                 }
