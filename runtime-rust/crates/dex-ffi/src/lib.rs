@@ -420,7 +420,13 @@ pub unsafe extern "C" fn stride_runtime_gl_swap_buffers(runtime: *mut AndroidRun
 pub unsafe extern "C" fn stride_runtime_guest_fps(runtime: *const AndroidRuntime) -> f32 {
     if runtime.is_null() { return -1.0; }
     let rt = unsafe { &*runtime };
-    if rt.guest_frame_count < 2 { -1.0 } else { rt.telemetry.current_fps() }
+    if rt.guest_frame_count < 2 {
+        -1.0
+    } else if rt.last_guest_swap_at.is_some_and(|last| last.elapsed().as_secs_f64() > 1.0) {
+        0.0
+    } else {
+        rt.telemetry.current_fps()
+    }
 }
 
 /// Returns the number of successful guest OpenGL buffer swaps in this runtime session.
