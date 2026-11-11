@@ -251,7 +251,7 @@ fn parameter_word_count(prototype: &str) -> Result<u16, ClassReadError> {
     Ok(words)
 }
 
-fn validate_register_layout(
+pub fn validate_method_register_layout(
     registers_size: u16,
     ins_size: u16,
     access_flags: u32,
@@ -350,7 +350,7 @@ fn class_data(
                     CodeItemError::InvalidInstructions => ClassReadError::InvalidInstructions,
                     _ => ClassReadError::InvalidCodeItem,
                 })?;
-                validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)
+                validate_method_register_layout(body.registers_size, body.ins_size, flags, &prototype)
                     .map_err(|_| ClassReadError::InvalidRegisterLayoutAt {
                         method_index: idx, code_offset: code,
                     })?;
@@ -730,9 +730,9 @@ mod tests {
         assert_eq!(parameter_word_count("(JD)V"), Ok(4));
         assert_eq!(parameter_word_count("([JLjava/lang/Object;)V"), Ok(2));
         assert_eq!(parameter_word_count("(Q)V"), Err(ClassReadError::InvalidRegisterLayout));
-        assert_eq!(validate_register_layout(4, 4, 0x08, "(JD)V"), Ok(()));
-        assert_eq!(validate_register_layout(5, 5, 0, "(JD)V"), Ok(()));
-        assert_eq!(validate_register_layout(4, 4, 0, "(JD)V"), Err(ClassReadError::InvalidRegisterLayout));
+        assert_eq!(validate_method_register_layout(4, 4, 0x08, "(JD)V"), Ok(()));
+        assert_eq!(validate_method_register_layout(5, 5, 0, "(JD)V"), Ok(()));
+        assert_eq!(validate_method_register_layout(4, 4, 0, "(JD)V"), Err(ClassReadError::InvalidRegisterLayout));
     }
 
     #[test]
