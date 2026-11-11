@@ -1016,6 +1016,7 @@ private struct APKDetailSheet: View {
                             frameScheduler?.stop()
                             frameScheduler = nil
                             guestTouchActive = false
+                            touchResponseMilliseconds = nil
                             executionResult = nil
                             sessionLogLines = []
                             diagnostics.beginSession(apkName: item.displayName)
@@ -1228,6 +1229,7 @@ private struct APKDetailSheet: View {
             launchTask = nil
             frameScheduler?.stop()
             frameScheduler = nil
+            touchResponseMilliseconds = nil
             StrideOrientationController.shared.reset()
             executionResult?.session.close()
             if executionResult != nil {
@@ -1360,6 +1362,7 @@ private struct APKDetailSheet: View {
         frameScheduler?.stop()
         frameScheduler = nil
         guestTouchActive = false
+        touchResponseMilliseconds = nil
         showingGuestKeyboard = false
         guestKeyboardFocused = false
         guestFramebufferData = nil
