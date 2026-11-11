@@ -265,6 +265,7 @@ pub unsafe extern "C" fn stride_runtime_dispatch_touch(
     let event = MotionEvent {
         action: motion_action,
         event_time_ms: 0,
+        host_enqueued_at: std::time::Instant::now(),
         pointers: vec![PointerCoords {
             id: 0,
             x,
@@ -335,6 +336,7 @@ pub unsafe extern "C" fn stride_runtime_pump_guest_events(
         return 1;
     }
     let rt = unsafe { &mut *runtime };
+    rt.last_touch_processing_ms = None;
     let result = catch_unwind(AssertUnwindSafe(|| {
         let delivered=rt.pump_guest_events(max_events as usize,step_budget)?;
         // Re-render after every guest event batch so View mutations reach the host framebuffer.
@@ -367,6 +369,15 @@ pub unsafe extern "C" fn stride_runtime_pump_guest_events(
             3
         }
     }
+}
+
+
+/// Returns the latest touch event's measured queue-to-guest-render processing time in ms.
+/// Returns a negative value when this pump has not processed a touch event.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_last_touch_processing_ms(runtime: *const AndroidRuntime) -> f32 {
+    if runtime.is_null() { return -1.0; }
+    unsafe { (&*runtime).last_touch_processing_ms.unwrap_or(-1.0) }
 }
 
 /// Records a completed frame time and returns the updated rolling FPS.
