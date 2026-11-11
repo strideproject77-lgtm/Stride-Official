@@ -188,6 +188,7 @@ mod tests {
         let motion = MotionEvent {
             action: ACTION_DOWN,
             event_time_ms: 100,
+            host_enqueued_at: std::time::Instant::now(),
             pointers: vec![crate::graphics::PointerCoords {
                 id: 0,
                 x: 300.0,
