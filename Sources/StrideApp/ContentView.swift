@@ -913,6 +913,7 @@ private struct APKDetailSheet: View {
     @State private var guestTouchActive = false
     @State private var touchResponseMilliseconds: Double?
     @State private var liveGuestFPS: Float?
+    @State private var lastGuestTouchDiagnostic = ""
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
@@ -1019,6 +1020,7 @@ private struct APKDetailSheet: View {
                             guestTouchActive = false
                             touchResponseMilliseconds = nil
                             liveGuestFPS = nil
+                            lastGuestTouchDiagnostic = ""
                             executionResult = nil
                             sessionLogLines = []
                             diagnostics.beginSession(apkName: item.displayName)
@@ -1046,6 +1048,16 @@ private struct APKDetailSheet: View {
                                     if pump.status == 0 {
                                         if pump.delivered > 0 {
                                             appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
+                                            if let snapshot = res.session.diagnosticsSnapshot() {
+                                                let callbackLines = snapshot.components(separatedBy: .newlines).filter {
+                                                    $0.contains("ACTIVITY_TOUCH_CALLBACK_EXECUTED") ||
+                                                    $0.contains("GUEST_TOUCH_DISPATCH_FAILED")
+                                                }
+                                                if let latest = callbackLines.last, latest != lastGuestTouchDiagnostic {
+                                                    lastGuestTouchDiagnostic = latest
+                                                    appendSessionLog("[GUEST] \(latest)")
+                                                }
+                                            }
                                         }
                                         if let frame = res.session.copyFramebuffer() {
                                             guestFramebufferData = frame.data
