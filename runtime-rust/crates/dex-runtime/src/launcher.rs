@@ -1577,8 +1577,6 @@ impl AndroidRuntime {
                 if let Some(size_method) = self.class_loader.find_method(
                     &class_descriptor, "onSizeChanged", "(IIII)V"
                 ) {
-                    let size_method = u32::try_from(size_method)
-                        .map_err(|_| "Custom View onSizeChanged method ID exceeds interpreter limit".to_owned())?;
                     let method_map = self.class_loader.export_method_codes();
                     let metadata = self.class_loader.dex_inventories.first().cloned();
                     let strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
@@ -1611,8 +1609,6 @@ impl AndroidRuntime {
                 }
             }
 
-            let method_id = u32::try_from(method_id)
-                .map_err(|_| "Custom View onDraw method ID exceeds interpreter limit".to_owned())?;
             let canvas_id = self.heap.allocate_instance("Landroid/graphics/Canvas;")
                 .map_err(|error| format!("Guest Canvas allocation failed: {:?}", error))?;
             for (field, value) in [
@@ -1723,8 +1719,7 @@ impl AndroidRuntime {
             vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
         }
         for (name, id, text_id, before, after) in resolved {
-            let method_id = u32::try_from(id)
-                .map_err(|_| format!("TextWatcher.{} method ID exceeds interpreter limit", name))?;
+            let method_id = id;
             let args = [
                 Value::Object(watcher_id),
                 Value::Object(text_id),
@@ -1804,7 +1799,6 @@ impl AndroidRuntime {
             .class_descriptor().to_owned();
         let method_id = self.class_loader.find_method(&listener_class, "onTouch", "(Landroid/view/View;Landroid/view/MotionEvent;)Z");
         let Some(method_id) = method_id else { return Ok(false) };
-        let method_id = u32::try_from(method_id).map_err(|_| "View touch listener method ID exceeds interpreter limit".to_string())?;
         let event_id = self.heap.allocate_instance("Landroid/view/MotionEvent;")
             .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
         self.heap.set_instance_field(event_id, "action", Value::Int(action)).map_err(|e| format!("MotionEvent action setup failed: {:?}", e))?;
@@ -1850,8 +1844,6 @@ impl AndroidRuntime {
             );
             return Ok(false);
         };
-        let method_id = u32::try_from(method_id)
-            .map_err(|_| "View click listener method ID exceeds the interpreter limit".to_string())?;
         let method_map = self.class_loader.export_method_codes();
         let dex_metadata = self.class_loader.dex_inventories.first().cloned();
         let dex_strings = dex_metadata.as_ref()
@@ -1898,15 +1890,9 @@ impl AndroidRuntime {
         // is only the final fallback after child Views have had a chance to handle
         // the gesture; invoking it first incorrectly swallows Button clicks.
         let dispatch_callback_method_id = self.class_loader
-            .find_method(&activity_class, "dispatchTouchEvent", "(Landroid/view/MotionEvent;)Z")
-            .map(|id| u32::try_from(id)
-                .map_err(|_| "dispatchTouchEvent method ID exceeds the interpreter limit".to_string()))
-            .transpose()?;
+            .find_method(&activity_class, "dispatchTouchEvent", "(Landroid/view/MotionEvent;)Z");
         let on_touch_fallback_method_id = self.class_loader
-            .find_method(&activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z")
-            .map(|id| u32::try_from(id)
-                .map_err(|_| "onTouchEvent method ID exceeds the interpreter limit".to_string()))
-            .transpose()?;
+            .find_method(&activity_class, "onTouchEvent", "(Landroid/view/MotionEvent;)Z");
         let method_map = self.class_loader.export_method_codes();
         let dex_metadata = self.class_loader.dex_inventories.first().cloned();
         let dex_strings = dex_metadata.as_ref()
