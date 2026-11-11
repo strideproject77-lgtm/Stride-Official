@@ -270,7 +270,25 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         try Task.checkCancellation()
-        let packageName = url.deletingPathExtension().lastPathComponent
+        var packageName = url.deletingPathExtension().lastPathComponent
+        var packageNameBuffer = [CChar](repeating: 0, count: 512)
+        let packageNameLength = manifestData.withUnsafeBytes { manifestBuffer -> Int in
+            guard let manifestBytes = manifestBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+            return packageNameBuffer.withUnsafeMutableBufferPointer { output in
+                Int(stride_manifest_package_name(
+                    manifestBytes, manifestBuffer.count, output.baseAddress, output.count
+                ))
+            }
+        }
+        if packageNameLength > 1, packageNameLength <= packageNameBuffer.count {
+            let parsedPackageName = String(cString: packageNameBuffer)
+            if !parsedPackageName.isEmpty {
+                packageName = parsedPackageName
+                onLog("[INFO] Android package identity: \(parsedPackageName)")
+            }
+        } else {
+            onLog("[WARN] Could not resolve package identity from manifest; using archive fallback")
+        }
         onLog("[INFO] Resource table: \(resourceTableData.count) bytes")
         onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
