@@ -400,8 +400,34 @@ pub unsafe extern "C" fn stride_runtime_gl_swap_buffers(runtime: *mut AndroidRun
         return 1;
     }
     let rt = unsafe { &mut *runtime };
-    let target = &mut rt.surface;
-    rt.gl_engine.egl_swap_buffers(target)
+    let status = rt.gl_engine.egl_swap_buffers(&mut rt.surface);
+    if status == 0 {
+        let now = std::time::Instant::now();
+        if let Some(previous) = rt.last_guest_swap_at.replace(now) {
+            let elapsed_ms = now.duration_since(previous).as_secs_f64() as f32 * 1_000.0;
+            if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
+                rt.telemetry.record_frame(elapsed_ms);
+            }
+        }
+        rt.guest_frame_count = rt.guest_frame_count.saturating_add(1);
+    }
+    status
+}
+
+/// Returns the rolling FPS measured only from successful guest OpenGL buffer swaps.
+/// A negative value means fewer than two guest frames have been observed.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_guest_fps(runtime: *const AndroidRuntime) -> f32 {
+    if runtime.is_null() { return -1.0; }
+    let rt = unsafe { &*runtime };
+    if rt.guest_frame_count < 2 { -1.0 } else { rt.telemetry.current_fps() }
+}
+
+/// Returns the number of successful guest OpenGL buffer swaps in this runtime session.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_guest_frame_count(runtime: *const AndroidRuntime) -> u64 {
+    if runtime.is_null() { return 0; }
+    unsafe { (&*runtime).guest_frame_count }
 }
 
 /// Sets the OpenGL ES viewport.
