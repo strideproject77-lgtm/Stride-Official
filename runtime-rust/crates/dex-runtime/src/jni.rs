@@ -333,6 +333,111 @@ impl JniNativeRegistry {
         self.register("Landroid/util/Log;", "w", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
         self.register("Landroid/util/Log;", "v", "(Ljava/lang/String;Ljava/lang/String;)I", log_fn);
 
+        // java.lang.StringBuilder bridges used by ordinary DEX-generated input handlers.
+        // Keep builder contents on the guest object so constructor/append/toString calls
+        // participate in the same managed heap as the app's other objects.
+        self.register("Ljava/lang/StringBuilder;", "<init>", "()V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("StringBuilder constructor receiver is null")?;
+            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(env.new_string_utf("")?))?;
+            Ok(None)
+        });
+        self.register("Ljava/lang/StringBuilder;", "<init>", "(Ljava/lang/String;)V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("StringBuilder constructor receiver is null")?;
+            let initial = args.get(1).and_then(Value::as_object)
+                .map(|id| env.get_string_utf(id).map(str::to_owned))
+                .transpose()?.unwrap_or_default();
+            let value = env.new_string_utf(&initial)?;
+            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(value))?;
+            Ok(None)
+        });
+        self.register("Ljava/lang/StringBuilder;", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("StringBuilder.append receiver is null")?;
+            let current = env.get_object_field(receiver, "mStrideBuilderValue")
+                .ok().and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
+            let suffix = args.get(1).and_then(Value::as_object)
+                .map(|id| env.get_string_utf(id).map(str::to_owned))
+                .transpose()?.unwrap_or_else(|| "null".to_owned());
+            let updated = env.new_string_utf(&format!("{current}{suffix}"))?;
+            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(updated))?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("StringBuilder.toString receiver is null")?;
+            let value = env.get_object_field(receiver, "mStrideBuilderValue")
+                .ok().and_then(Value::as_object)
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
+            Ok(Some(Value::Object(env.new_string_utf(&value)?)))
+        });
+
+        // Boxing and formatting are required by the calculator's equals/result path.
+        self.register("Ljava/lang/Double;", "valueOf", "(D)Ljava/lang/Double;", |env, args| {
+            let value = args.first().map(Value::as_double).unwrap_or(0.0);
+            let boxed = env.heap.allocate_instance("Ljava/lang/Double;")
+                .map_err(|error| format!("Double.valueOf allocation failed: {:?}", error))?;
+            env.set_object_field(boxed, "value", Value::Double(value))?;
+            Ok(Some(Value::Object(boxed)))
+        });
+        self.register("Ljava/lang/String;", "format", "(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;", |env, args| {
+            let format_id = args.get(1).and_then(Value::as_object)
+                .ok_or("String.format format argument is null")?;
+            let format_text = env.get_string_utf(format_id)?.to_owned();
+            let array_id = args.get(2).and_then(Value::as_object)
+                .ok_or("String.format argument array is null")?;
+            let count = env.get_array_length(array_id)?;
+            let mut values = Vec::with_capacity(count);
+            for index in 0..count {
+                let item = env.heap.get_array_element(array_id, index as i32)
+                    .map_err(|error| format!("String.format argument read failed: {:?}", error))?;
+                let object_id = item.as_object().ok_or("String.format received a null boxed argument")?;
+                let class_name = env.heap.get(object_id)
+                    .map_err(|error| format!("String.format boxed argument lookup failed: {:?}", error))?
+                    .class_descriptor().to_owned();
+                let number = if class_name == "Ljava/lang/Double;" {
+                    env.get_object_field(object_id, "value")?.as_double()
+                } else {
+                    return Err(format!("String.format does not support boxed argument type {class_name}"));
+                };
+                values.push(number);
+            }
+            let mut rendered = format_text.clone();
+            for number in values {
+                let Some(start) = rendered.find("%.") else { break };
+                let tail = &rendered[start + 2..];
+                let digits = tail.chars().take_while(|ch| ch.is_ascii_digit()).collect::<String>();
+                let precision = digits.parse::<usize>().unwrap_or(6).clamp(1, 17);
+                let conversion_at = start + 2 + digits.len();
+                let Some(conversion) = rendered[conversion_at..].chars().next() else { break };
+                let formatted = match conversion {
+                    'g' | 'G' => {
+                        if number == 0.0 { format!("{:.*}", precision.saturating_sub(1), number) }
+                        else if number.is_finite() {
+                            let exponent = number.abs().log10().floor() as i32;
+                            if exponent < -4 || exponent >= precision as i32 {
+                                let raw = format!("{:.*e}", precision - 1, number);
+                                if let Some((mantissa, exp)) = raw.split_once('e') {
+                                    let exp_value = exp.parse::<i32>().unwrap_or(0);
+                                    format!("{mantissa}e{}{exp_value:02}", if exp_value >= 0 { "+" } else { "-" })
+                                } else { raw }
+                            } else {
+                                let decimals = (precision as i32 - 1 - exponent).max(0) as usize;
+                                format!("{:.*}", decimals, number)
+                            }
+                        } else { number.to_string() }
+                    }
+                    'f' | 'F' => format!("{:.*}", precision, number),
+                    _ => return Err(format!("String.format conversion %{conversion} is unsupported")),
+                };
+                let end = conversion_at + conversion.len_utf8();
+                rendered.replace_range(start..end, &formatted);
+            }
+            Ok(Some(Value::Object(env.new_string_utf(&rendered)?)))
+        });
+
         // java.lang.Math standard operations
         self.register("Ljava/lang/Math;", "abs", "(I)I", |_env, args| {
             let v = args.first().map(|v| v.as_int()).unwrap_or(0);
@@ -469,6 +574,34 @@ mod tests {
         let is_empty = registry.find("Ljava/lang/String;", "isEmpty", "()Z").unwrap();
         let empty = env.new_string_utf("").unwrap();
         assert_eq!(is_empty(&mut env, &[Value::Object(empty)]).unwrap(), Some(Value::Int(1)));
+    }
+
+    #[test]
+    fn calculator_string_builder_and_result_formatting_bridges_work_end_to_end() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+
+        let builder = env.heap.allocate_instance("Ljava/lang/StringBuilder;").unwrap();
+        let initial = env.new_string_utf("12").unwrap();
+        let constructor = registry.find("Ljava/lang/StringBuilder;", "<init>", "(Ljava/lang/String;)V").unwrap().clone();
+        constructor(&mut env, &[Value::Object(builder), Value::Object(initial)]).unwrap();
+        let suffix = env.new_string_utf("3").unwrap();
+        let append = registry.find("Ljava/lang/StringBuilder;", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;").unwrap().clone();
+        assert_eq!(append(&mut env, &[Value::Object(builder), Value::Object(suffix)]).unwrap(), Some(Value::Object(builder)));
+        let to_string = registry.find("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;").unwrap().clone();
+        let result = to_string(&mut env, &[Value::Object(builder)]).unwrap().and_then(Value::as_object).unwrap();
+        assert_eq!(env.get_string_utf(result).unwrap(), "123");
+
+        let boxed = registry.find("Ljava/lang/Double;", "valueOf", "(D)Ljava/lang/Double;").unwrap().clone();
+        let boxed_value = boxed(&mut env, &[Value::Double(12.5)]).unwrap().and_then(Value::as_object).unwrap();
+        let args = env.heap.allocate_array("[Ljava/lang/Object;", 1).unwrap();
+        env.heap.set_array_element(args, 0, Value::Object(boxed_value)).unwrap();
+        let format = env.new_string_utf("%.8g").unwrap();
+        let format_call = registry.find("Ljava/lang/String;", "format", "(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;").unwrap().clone();
+        let rendered = format_call(&mut env, &[Value::Null, Value::Object(format), Value::Object(args)])
+            .unwrap().and_then(Value::as_object).unwrap();
+        assert_eq!(env.get_string_utf(rendered).unwrap(), "12.500000");
     }
 
 }
