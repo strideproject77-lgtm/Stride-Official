@@ -483,7 +483,7 @@ struct ContentView: View {
                                     .overlay { if customAccentHex == hex { Image(systemName: "checkmark").font(.system(size: 10, weight: .black)).foregroundStyle(hex == "#FFFFFF" ? .black : .white) } }
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("Accent color \\(hex)")
+                            .accessibilityLabel("Accent color \(hex)")
                         }
                     }
                     ColorPicker("Custom accent", selection: Binding(
