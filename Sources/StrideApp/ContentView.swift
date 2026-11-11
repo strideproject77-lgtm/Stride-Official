@@ -1212,7 +1212,6 @@ private struct APKDetailSheet: View {
         .background(canvas.ignoresSafeArea())
         .fullScreenCover(isPresented: $showingExecutionScreen) {
             executionScreen
-                .ignoresSafeArea()
                 .statusBarHidden(true)
                 .interactiveDismissDisabled(true)
         }
@@ -1297,7 +1296,6 @@ private struct APKDetailSheet: View {
 
                     guestFramebufferSurface.overlay { guestTouchSurface }
                 }
-                .padding(.top, UIDevice.current.orientation.isLandscape ? 8 : 44)
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else {
                 guestFramebufferSurface
