@@ -3,8 +3,8 @@
 //! Provides the symbol resolution table, Bionic runtime environment,
 //! and native library relocation resolution for ELF ARM/ARM64 shared libraries.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture, ElfClass, ElfByteOrder};
 use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan, IOS_PAGE_SIZE};
 use stride_elf_inspector::{Relocation, RelocationKind};
@@ -12,6 +12,130 @@ use crate::types::Value;
 use crate::jni::JniEnv;
 
 pub type BionicFn = Arc<dyn Fn(&[Value]) -> Result<Value, String> + Send + Sync>;
+
+
+/// Bounded guest address space used by Bionic pointer-taking functions.
+/// Addresses are opaque guest integers; host pointers are never exposed.
+#[derive(Debug)]
+struct GuestAddressSpace {
+    allocations: BTreeMap<u64, Vec<u8>>,
+    next_address: u64,
+    allocated_bytes: usize,
+}
+
+impl Default for GuestAddressSpace {
+    fn default() -> Self {
+        Self {
+            allocations: BTreeMap::new(),
+            next_address: 0x0000_6000_0000_0000,
+            allocated_bytes: 0,
+        }
+    }
+}
+
+impl GuestAddressSpace {
+    const MAX_ALLOCATION: usize = 64 * 1024 * 1024;
+    const MAX_TOTAL: usize = 256 * 1024 * 1024;
+    const MAX_C_STRING: usize = 1024 * 1024;
+
+    fn allocate(&mut self, requested: usize) -> Result<u64, String> {
+        let size = requested.max(1);
+        if size > Self::MAX_ALLOCATION
+            || self.allocated_bytes.checked_add(size).filter(|n| *n <= Self::MAX_TOTAL).is_none()
+        {
+            return Err("guest allocation exceeds Bionic memory limit".into());
+        }
+        let aligned = self.next_address.checked_add(15).map(|v| v & !15)
+            .ok_or("guest address space exhausted")?;
+        let next = aligned.checked_add(size as u64).and_then(|v| v.checked_add(16))
+            .ok_or("guest address space exhausted")?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(size).map_err(|_| "guest allocation failed")?;
+        bytes.resize(size, 0);
+        self.allocations.insert(aligned, bytes);
+        self.allocated_bytes += size;
+        self.next_address = next;
+        Ok(aligned)
+    }
+
+    fn allocation_range(&self, address: u64, length: usize) -> Result<(u64, usize), String> {
+        let (&base, bytes) = self.allocations.range(..=address).next_back()
+            .ok_or_else(|| format!("invalid guest pointer {address:#x}"))?;
+        let offset = usize::try_from(address - base).map_err(|_| "guest pointer offset overflow")?;
+        let end = offset.checked_add(length).ok_or("guest memory range overflow")?;
+        if end > bytes.len() {
+            return Err(format!("guest memory range {address:#x}+{length} is out of bounds"));
+        }
+        Ok((base, offset))
+    }
+
+    fn read(&self, address: u64, length: usize) -> Result<&[u8], String> {
+        let (base, offset) = self.allocation_range(address, length)?;
+        Ok(&self.allocations.get(&base).ok_or("guest allocation disappeared")?[offset..offset + length])
+    }
+
+    fn write(&mut self, address: u64, data: &[u8]) -> Result<(), String> {
+        let (base, offset) = self.allocation_range(address, data.len())?;
+        let bytes = self.allocations.get_mut(&base).ok_or("guest allocation disappeared")?;
+        bytes[offset..offset + data.len()].copy_from_slice(data);
+        Ok(())
+    }
+
+    fn free(&mut self, address: u64) -> Result<(), String> {
+        if address == 0 { return Ok(()); }
+        let bytes = self.allocations.remove(&address)
+            .ok_or_else(|| format!("free requires an allocation base, got {address:#x}"))?;
+        self.allocated_bytes = self.allocated_bytes.saturating_sub(bytes.len());
+        Ok(())
+    }
+
+    fn realloc(&mut self, address: u64, requested: usize) -> Result<u64, String> {
+        if address == 0 { return self.allocate(requested); }
+        if requested == 0 { self.free(address)?; return Ok(0); }
+        let old = self.allocations.get(&address)
+            .ok_or_else(|| format!("realloc requires an allocation base, got {address:#x}"))?
+            .clone();
+        let new_size = requested.max(1);
+        if new_size > Self::MAX_ALLOCATION {
+            return Err("guest reallocation exceeds per-allocation limit".into());
+        }
+        self.free(address)?;
+        match self.allocate(new_size) {
+            Ok(new_address) => {
+                let copy_len = old.len().min(new_size);
+                self.write(new_address, &old[..copy_len])?;
+                Ok(new_address)
+            }
+            Err(error) => {
+                self.allocations.insert(address, old.clone());
+                self.allocated_bytes = self.allocated_bytes.saturating_add(old.len());
+                Err(error)
+            }
+        }
+    }
+
+    fn c_string(&self, address: u64) -> Result<Vec<u8>, String> {
+        if address == 0 { return Err("null guest C string".into()); }
+        let (&base, bytes) = self.allocations.range(..=address).next_back()
+            .ok_or_else(|| format!("invalid guest C string pointer {address:#x}"))?;
+        let offset = usize::try_from(address - base).map_err(|_| "guest string offset overflow")?;
+        let available = bytes.len().saturating_sub(offset).min(Self::MAX_C_STRING);
+        let slice = &bytes[offset..offset + available];
+        let end = slice.iter().position(|byte| *byte == 0)
+            .ok_or("guest C string is not terminated within the readable allocation")?;
+        Ok(slice[..end].to_vec())
+    }
+}
+
+fn guest_pointer(value: Option<&Value>) -> Result<u64, String> {
+    let pointer = value.map(Value::as_long).unwrap_or(0);
+    u64::try_from(pointer).map_err(|_| "negative guest pointer".into())
+}
+
+fn guest_length(value: Option<&Value>) -> Result<usize, String> {
+    let length = value.map(Value::as_long).unwrap_or(0);
+    usize::try_from(length).map_err(|_| "negative or oversized guest length".into())
+}
 
 /// Builds an explicit failure for symbols whose guest ABI implementation is not
 /// available. Returning a plausible pointer/status here would corrupt guest state.
@@ -23,9 +147,16 @@ fn unsupported_symbol(name: &'static str) -> impl Fn(&[Value]) -> Result<Value, 
 }
 
 /// Bionic libc/libm/liblog/libdl symbol emulation environment.
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct BionicEnvironment {
     symbols: HashMap<String, BionicFn>,
+    memory: Arc<Mutex<GuestAddressSpace>>,
+}
+
+impl Default for BionicEnvironment {
+    fn default() -> Self {
+        Self { symbols: HashMap::new(), memory: Arc::new(Mutex::new(GuestAddressSpace::default())) }
+    }
 }
 
 impl BionicEnvironment {
@@ -103,23 +234,111 @@ impl BionicEnvironment {
         });
 
         // --- libc memory ---
-        // Guest pointers are 64-bit addresses, but this compatibility table does
-        // not yet own a guest virtual-memory allocator or mapped-memory view.
-        // Fail explicitly instead of handing native code a fabricated address.
-        for name in ["malloc", "calloc", "realloc", "free", "memset", "memcpy", "memmove", "memcmp"] {
-            self.register(name, unsupported_symbol(match name {
-                "malloc" => "malloc", "calloc" => "calloc", "realloc" => "realloc",
-                "free" => "free", "memset" => "memset", "memcpy" => "memcpy",
-                "memmove" => "memmove", _ => "memcmp",
-            }));
+        // These functions operate only on Stride-owned guest allocations. A
+        // bad pointer/range is an error; host process memory is never dereferenced.
+        let memory = self.memory.clone();
+        self.register("malloc", move |args| {
+            let size = guest_length(args.first())?;
+            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(size)?;
+            Ok(Value::Long(address as i64))
+        });
+        let memory = self.memory.clone();
+        self.register("calloc", move |args| {
+            let count = guest_length(args.first())?;
+            let size = guest_length(args.get(1))?;
+            let total = count.checked_mul(size).ok_or("calloc size overflow")?;
+            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(total)?;
+            Ok(Value::Long(address as i64))
+        });
+        let memory = self.memory.clone();
+        self.register("realloc", move |args| {
+            let address = guest_pointer(args.first())?;
+            let size = guest_length(args.get(1))?;
+            let updated = memory.lock().map_err(|_| "guest memory lock poisoned")?.realloc(address, size)?;
+            Ok(Value::Long(updated as i64))
+        });
+        let memory = self.memory.clone();
+        self.register("free", move |args| {
+            let address = guest_pointer(args.first())?;
+            memory.lock().map_err(|_| "guest memory lock poisoned")?.free(address)?;
+            Ok(Value::Int(0))
+        });
+        let memory = self.memory.clone();
+        self.register("memset", move |args| {
+            let address = guest_pointer(args.first())?;
+            let byte = args.get(1).map(Value::as_int).unwrap_or(0) as u8;
+            let length = guest_length(args.get(2))?;
+            let data = vec![byte; length];
+            memory.lock().map_err(|_| "guest memory lock poisoned")?.write(address, &data)?;
+            Ok(Value::Long(address as i64))
+        });
+        for name in ["memcpy", "memmove"] {
+            let memory = self.memory.clone();
+            self.register(name, move |args| {
+                let destination = guest_pointer(args.first())?;
+                let source = guest_pointer(args.get(1))?;
+                let length = guest_length(args.get(2))?;
+                let mut space = memory.lock().map_err(|_| "guest memory lock poisoned")?;
+                let copied = space.read(source, length)?.to_vec();
+                space.write(destination, &copied)?;
+                Ok(Value::Long(destination as i64))
+            });
         }
+        let memory = self.memory.clone();
+        self.register("memcmp", move |args| {
+            let left = guest_pointer(args.first())?;
+            let right = guest_pointer(args.get(1))?;
+            let length = guest_length(args.get(2))?;
+            let space = memory.lock().map_err(|_| "guest memory lock poisoned")?;
+            let a = space.read(left, length)?;
+            let b = space.read(right, length)?;
+            let result = a.iter().zip(b).find_map(|(x, y)| (x != y).then_some(*x as i32 - *y as i32)).unwrap_or(0);
+            Ok(Value::Int(result))
+        });
 
         // --- libc strings ---
-        self.register("strlen", unsupported_symbol("strlen"));
-        self.register("strcmp", unsupported_symbol("strcmp"));
-        self.register("strncmp", unsupported_symbol("strncmp"));
-        self.register("strcpy", unsupported_symbol("strcpy"));
-        self.register("strncpy", unsupported_symbol("strncpy"));
+        let memory = self.memory.clone();
+        self.register("strlen", move |args| {
+            let address = guest_pointer(args.first())?;
+            let bytes = memory.lock().map_err(|_| "guest memory lock poisoned")?.c_string(address)?;
+            Ok(Value::Long(bytes.len() as i64))
+        });
+        for name in ["strcmp", "strncmp"] {
+            let memory = self.memory.clone();
+            self.register(name, move |args| {
+                let left = guest_pointer(args.first())?;
+                let right = guest_pointer(args.get(1))?;
+                let limit = if name == "strncmp" { guest_length(args.get(2))? } else { GuestAddressSpace::MAX_C_STRING };
+                let space = memory.lock().map_err(|_| "guest memory lock poisoned")?;
+                let a = space.c_string(left)?;
+                let b = space.c_string(right)?;
+                let result = a.iter().copied().chain(std::iter::once(0))
+                    .zip(b.iter().copied().chain(std::iter::once(0)))
+                    .take(limit)
+                    .find_map(|(x, y)| (x != y).then_some(x as i32 - y as i32))
+                    .unwrap_or(0);
+                Ok(Value::Int(result))
+            });
+        }
+        for name in ["strcpy", "strncpy"] {
+            let memory = self.memory.clone();
+            self.register(name, move |args| {
+                let destination = guest_pointer(args.first())?;
+                let source = guest_pointer(args.get(1))?;
+                let mut space = memory.lock().map_err(|_| "guest memory lock poisoned")?;
+                let source_bytes = space.c_string(source)?;
+                let limit = if name == "strncpy" { guest_length(args.get(2))? } else { source_bytes.len() + 1 };
+                let mut copied = source_bytes;
+                if name == "strncpy" {
+                    copied.truncate(limit);
+                    copied.resize(limit, 0);
+                } else {
+                    copied.push(0);
+                }
+                space.write(destination, &copied)?;
+                Ok(Value::Long(destination as i64))
+            });
+        }
         self.register("strcat", unsupported_symbol("strcat"));
         self.register("strchr", unsupported_symbol("strchr"));
         self.register("strstr", unsupported_symbol("strstr"));
