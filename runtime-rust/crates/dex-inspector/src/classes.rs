@@ -629,22 +629,33 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unsupported_opcode_in_defined_method() {
-        let (bytes, _) = sample_with_code(0x0073);
-        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
+    fn rejects_unsupported_opcode_in_defined_method_with_method_context() {
+        let (bytes, code_offset) = sample_with_code(0x0073);
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InstructionDecode {
+            method_index: 0,
+            code_offset: code_offset as u32,
+            reason: super::super::DecodeError::InvalidOpcode(0x73),
+        }));
     }
 
     #[test]
-    fn rejects_out_of_range_register_operand_in_defined_method() {
-        let (bytes, _) = sample_with_code(0x0112); // const/4 references v1, but only v0 exists
-        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidInstructions));
+    fn rejects_out_of_range_register_operand_in_defined_method_with_method_context() {
+        let (bytes, code_offset) = sample_with_code(0x0112); // const/4 references v1, but only v0 exists
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::RegisterOperandDecode {
+            method_index: 0,
+            code_offset: code_offset as u32,
+            reason: super::super::DecodeError::InvalidRegister,
+        }));
     }
 
     #[test]
     fn rejects_incoming_register_count_mismatch() {
         let (mut bytes, code_offset) = sample_with_code(0x000e);
         bytes[code_offset + 2..code_offset + 4].copy_from_slice(&0u16.to_le_bytes());
-        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidRegisterLayout));
+        assert_eq!(inspect_classes(&bytes), Err(ClassReadError::InvalidRegisterLayoutAt {
+            method_index: 0,
+            code_offset: code_offset as u32,
+        }));
     }
 
     #[test]
