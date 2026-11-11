@@ -2040,6 +2040,14 @@ impl AndroidRuntime {
                         self.heap.set_instance_field(event_obj, field, value)
                             .map_err(|error| format!("MotionEvent {} setup failed: {:?}", field, error))?;
                     }
+                    let display_text = |heap: &ManagedHeap| -> Option<String> {
+                        let display = heap.get_instance_field(activity_obj, "display").ok()
+                            .and_then(|value| value.as_object())?;
+                        let text = heap.get_instance_field(display, "mText").ok()
+                            .and_then(|value| value.as_object())?;
+                        heap.get_string(text).ok().map(str::to_owned)
+                    };
+                    let display_before = display_text(&self.heap);
                     let mut vm = ArtVm::new(
                         &mut self.heap, &mut self.hierarchy, &mut self.monitors,
                         &mut self.jni, &method_map, dex_strings,
@@ -2051,14 +2059,6 @@ impl AndroidRuntime {
                         vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                         vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                     }
-                    let display_text = |heap: &ManagedHeap| -> Option<String> {
-                        let display = heap.get_instance_field(activity_obj, "display").ok()
-                            .and_then(|value| value.as_object())?;
-                        let text = heap.get_instance_field(display, "mText").ok()
-                            .and_then(|value| value.as_object())?;
-                        heap.get_string(text).ok().map(str::to_owned)
-                    };
-                    let display_before = display_text(&self.heap);
                     let args = [Value::Object(activity_obj), Value::Object(event_obj)];
                     let report = vm.execute_method(method_id, &args, step_budget.max(1))
                         .map_err(|error| format!("onTouchEvent fallback interpreter error: {}", error))?;
