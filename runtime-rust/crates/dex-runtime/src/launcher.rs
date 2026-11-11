@@ -1813,7 +1813,20 @@ impl AndroidRuntime {
         let listener_id = self.heap.get_instance_field(view_id, "mOnClickListener")
             .map_err(|error| format!("View click listener lookup failed: {:?}", error))?
             .as_object().filter(|id| *id != 0);
-        let Some(listener_id) = listener_id else { return Ok(false) };
+        let Some(listener_id) = listener_id else {
+            let view_class = self.heap.get(view_id)
+                .map(|object| object.class_descriptor().to_owned())
+                .unwrap_or_else(|_| "<unknown-view>".to_string());
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::Warning,
+                "Input",
+                "VIEW_CLICK_LISTENER_MISSING",
+                "Tap landed on a View without a registered click listener",
+                Some(&format!("view={} object_id={}", view_class, view_id)),
+                Some("Check guest setOnClickListener registration and hit-test bounds"),
+            );
+            return Ok(false);
+        };
         let listener_class = self.heap.get(listener_id)
             .map_err(|error| format!("Click listener object lookup failed: {:?}", error))?
             .class_descriptor().to_owned();
@@ -1969,7 +1982,6 @@ impl AndroidRuntime {
                         if let Some(view_id) = released_view {
                             if self.dispatch_view_click(view_id, step_budget)? {
                                 child_consumed = true;
-                                delivered += 1;
                             }
                         }
                     }
