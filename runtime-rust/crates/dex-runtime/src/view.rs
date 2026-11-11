@@ -175,11 +175,17 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         Ok(Some(env.get_object_field(id,"mText")?))
     });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;)V",|env,args|{
-        let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        let id=receiver(args)?;
+        env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        // A CharSequence update replaces any XML text resource, including null
+        // (which means clear the display), rather than falling back to stale text.
+        env.set_object_field(id,"mTextResourceId",Value::Int(0))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
     });
     jni.register("Landroid/widget/TextView;","setText","(Ljava/lang/CharSequence;Landroid/widget/TextView$BufferType;)V",|env,args|{
-        let id=receiver(args)?;env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        let id=receiver(args)?;
+        env.set_object_field(id,"mText",args.get(1).copied().unwrap_or(Value::Null))?;
+        env.set_object_field(id,"mTextResourceId",Value::Int(0))?;
         env.set_object_field(id,"mNeedsDraw",Value::Int(1))?;Ok(None)
     });
     jni.register("Landroid/widget/TextView;","setText","(I)V",|env,args|{
