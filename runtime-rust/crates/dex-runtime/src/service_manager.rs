@@ -152,7 +152,7 @@ impl ServiceManager {
             args.push(Value::Object(0)); // Null Intent ref for basic dispatch
             args.push(Value::Int(0));    // flags = 0
             args.push(Value::Int(start_id as i32));
-            let _ = vm.execute_method(u16::try_from(loaded_method).unwrap_or(u16::MAX), &args, 10_000);
+            let _ = vm.execute_method(loaded_method, &args, 10_000);
         }
     }
 
