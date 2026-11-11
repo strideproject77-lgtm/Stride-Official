@@ -1817,6 +1817,9 @@ impl AndroidRuntime {
         let listener_class = self.heap.get(listener_id)
             .map_err(|error| format!("Click listener object lookup failed: {:?}", error))?
             .class_descriptor().to_owned();
+        let view_class = self.heap.get(view_id)
+            .map_err(|error| format!("Clicked View lookup failed: {:?}", error))?
+            .class_descriptor().to_owned();
         let Some(method_id) = self.class_loader.find_method(
             &listener_class, "onClick", "(Landroid/view/View;)V"
         ) else {
@@ -1850,6 +1853,17 @@ impl AndroidRuntime {
         let args = [Value::Object(listener_id), Value::Object(view_id)];
         let report = vm.execute_method(method_id, &args, step_budget.max(1))
             .map_err(|error| format!("View click listener interpreter error: {}", error))?;
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Info,
+            "Input",
+            "VIEW_CLICK_CALLBACK_EXECUTED",
+            "Guest View click listener callback returned to the runtime",
+            Some(&format!(
+                "view={} listener={} method_id={} steps={} stop={:?}",
+                view_class, listener_class, method_id, report.steps_executed, report.stop_reason
+            )),
+            Some("Confirm the callback's state changes in the subsequent guest Surface render"),
+        );
         match report.stop_reason {
             ExecutionStopReason::UncaughtException(exception) => Err(format!(
                 "View click listener threw {}: {:?}", exception.class_descriptor, exception.message
