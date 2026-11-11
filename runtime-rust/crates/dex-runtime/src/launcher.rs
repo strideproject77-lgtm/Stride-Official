@@ -1781,7 +1781,7 @@ impl AndroidRuntime {
         let listener_class = self.heap.get(listener_id)
             .map_err(|error| format!("Touch listener object lookup failed: {:?}", error))?
             .class_descriptor().to_owned();
-        let method_id = self.class_loader.find_method(&listener_class, "onTouch", "(Landroid/view/View;Landroid/view/MotionEvent;)Z");
+        let method_id = self.class_loader.find_method_in_hierarchy(&listener_class, "onTouch", "(Landroid/view/View;Landroid/view/MotionEvent;)Z");
         let Some(method_id) = method_id else { return Ok(false) };
         let event_id = self.heap.allocate_instance("Landroid/view/MotionEvent;")
             .map_err(|error| format!("MotionEvent allocation failed: {:?}", error))?;
@@ -1833,7 +1833,7 @@ impl AndroidRuntime {
         let view_class = self.heap.get(view_id)
             .map_err(|error| format!("Clicked View lookup failed: {:?}", error))?
             .class_descriptor().to_owned();
-        let Some(method_id) = self.class_loader.find_method(
+        let Some(method_id) = self.class_loader.find_method_in_hierarchy(
             &listener_class, "onClick", "(Landroid/view/View;)V"
         ) else {
             self.diagnostics.record(
