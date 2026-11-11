@@ -272,6 +272,7 @@ fn class_data(
     methods: &std::ops::Range<usize>, strings: &std::ops::Range<usize>,
     types: &std::ops::Range<usize>, protos: &std::ops::Range<usize>,
     field_count: u32, method_count: u32, string_count: u32, type_count: u32,
+    validate_code_items: bool,
 ) -> Result<ClassDefinition, ClassReadError> {
     let mut p = usize::try_from(offset).map_err(|_| ClassReadError::InvalidClassData)?;
     if p < HEADER || p >= b.len() { return Err(ClassReadError::InvalidClassData); }
@@ -341,7 +342,7 @@ fn class_data(
             if (name == "<init>" || name == "<clinit>") && flags & 0x10000 == 0 {
                 return Err(ClassReadError::InvalidMethodKind);
             }
-            if code != 0 {
+            if code != 0 && validate_code_items {
                 let body = read_code_item(b, code).map_err(|error| match error {
                     CodeItemError::InstructionDecode(reason) => ClassReadError::InstructionDecode {
                         method_index: idx, code_offset: code, reason,
@@ -374,7 +375,7 @@ fn class_data(
 }
 
 /// Reads class definitions and their encoded fields/methods after validating DEX table bounds.
-pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
+fn inspect_classes_internal(bytes: &[u8], validate_code_items: bool) -> Result<ClassInventory, ClassReadError> {
     if bytes.len() < HEADER { return Err(ClassReadError::TruncatedHeader); }
     if bytes.get(0..4) != Some(&b"dex\n"[..])
         || !bytes.get(4..7).is_some_and(|v| v.iter().all(u8::is_ascii_digit))
@@ -481,7 +482,7 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         } else {
             class_data(
                 b, data_off, id, &fields, &methods, &string_ids, &types, &protos,
-                field_count, method_count, string_count, type_count,
+                field_count, method_count, string_count, type_count, validate_code_items,
             )?
         };
         class.descriptor = type_descriptor(b, &string_ids, &types, string_count, type_count, id)?;
@@ -511,6 +512,18 @@ pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
         type_descriptors.push(type_descriptor(b, &string_ids, &types, string_count, type_count, index)?);
     }
     Ok(ClassInventory { classes, method_references, field_references, strings, type_descriptors })
+}
+
+/// Strict inspection validates every method body and rejects the DEX on any invalid code item.
+pub fn inspect_classes(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
+    inspect_classes_internal(bytes, true)
+}
+
+/// Loader-oriented inspection keeps valid class/method metadata even when an individual
+/// method body is unsupported or malformed. The runtime loader then rejects only that body
+/// and records a method-specific diagnostic, allowing unrelated methods to remain loadable.
+pub fn inspect_classes_for_loading(bytes: &[u8]) -> Result<ClassInventory, ClassReadError> {
+    inspect_classes_internal(bytes, false)
 }
 
 #[cfg(test)]
