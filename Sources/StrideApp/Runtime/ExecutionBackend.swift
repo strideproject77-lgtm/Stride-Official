@@ -424,7 +424,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 onLog("[WARN] Native library \(soName) could not be loaded (status \(nativeStatus)); continuing best-effort execution")
                 continue
             }
-            onLog("[INFO] Native library \(soName) loaded successfully")
+            onLog("[INFO] Native ELF image \(soName) materialized; guest entry points and JNI_OnLoad are not yet executed")
         }
         let unresolvedNativeModules = stride_runtime_finish_native_loading(runtime)
         if unresolvedNativeModules == UInt32.max {
