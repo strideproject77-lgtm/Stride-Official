@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var isImporting = false
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
+    @State private var showingThemeSettings = false
     @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.indigoNavy.rawValue
     @AppStorage("stride.customAccentHex") private var customAccentHex = "#4F46E5"
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
@@ -38,6 +39,8 @@ struct ContentView: View {
                         home
                     } else if selectedTab == 1 {
                         libraryView
+                    } else if showingThemeSettings {
+                        themeSettingsView
                     } else {
                         settingsView
                     }
@@ -393,12 +396,82 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("SETTINGS")
                         .font(.system(size: 23, weight: .bold, design: .rounded))
-                    Text("Make Stride feel like yours.")
+                    Text("Manage your Stride experience.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(muted)
                 }
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { showingThemeSettings = true }
+                } label: {
+                    HStack(spacing: 13) {
+                        Image(systemName: "paintpalette.fill")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .frame(width: 44, height: 44)
+                            .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Theme")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.primary)
+                            Text("\(theme.title) · Customize appearance and accent")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(muted)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(muted)
+                    }
+                    .padding(14)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open Theme settings")
+                aboutStrideCard
+                VStack(alignment: .leading, spacing: 11) {
+                    Text("RUNTIME STATUS")
+                        .font(.system(size: 9, weight: .heavy))
+                        .kerning(1.3)
+                        .foregroundStyle(muted)
+                    statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
+                    statusCard("DEX parsing and method loading", detail: "Integrated foundations", symbol: "curlybraces", good: true)
+                    statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
+                    statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
+                }
+                Text("STRIDE · EXPERIMENTAL BUILD")
+                    .font(.system(size: 8, weight: .heavy))
+                    .kerning(1.2)
+                    .foregroundStyle(muted.opacity(0.75))
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 2)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 10)
+            .padding(.bottom, 24)
+        }
+    }
+
+    private var themeSettingsView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 17) {
+                HStack(spacing: 12) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { showingThemeSettings = false }
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(accent)
+                            .frame(width: 36, height: 36)
+                            .background(panel, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    Text("THEME")
+                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                    Spacer()
+                }
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("THEME & ACCENT COLOR")
+                    Text("ACCENT COLOR")
                         .font(.system(size: 9, weight: .heavy))
                         .kerning(1.3)
                         .foregroundStyle(muted)
@@ -408,7 +481,9 @@ struct ContentView: View {
                                 Circle().fill(Color(hex: hex) ?? .indigo).frame(width: 29, height: 29)
                                     .overlay(Circle().stroke(Color.white.opacity(customAccentHex == hex ? 0.95 : 0.16), lineWidth: customAccentHex == hex ? 2.5 : 1))
                                     .overlay { if customAccentHex == hex { Image(systemName: "checkmark").font(.system(size: 10, weight: .black)).foregroundStyle(hex == "#FFFFFF" ? .black : .white) } }
-                            }.buttonStyle(.plain).accessibilityLabel("Accent color \\(hex)")
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Accent color \\(hex)")
                         }
                     }
                     ColorPicker("Custom accent", selection: Binding(
@@ -416,6 +491,12 @@ struct ContentView: View {
                         set: { customAccentHex = $0.hexString }
                     ), supportsOpacity: false)
                     .font(.system(size: 12, weight: .medium))
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("APPEARANCE")
+                        .font(.system(size: 9, weight: .heavy))
+                        .kerning(1.3)
+                        .foregroundStyle(muted)
                     ForEach(StrideTheme.allCases.filter { $0 != .darkBronze }) { option in
                         Button { themeRawValue = option.rawValue } label: {
                             HStack(spacing: 12) {
@@ -435,7 +516,7 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(option.title)
                                         .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(.primary)
                                     Text(option.subtitle)
                                         .font(.system(size: 9, weight: .medium))
                                         .foregroundStyle(muted)
@@ -451,31 +532,12 @@ struct ContentView: View {
                                 }
                             }
                             .padding(11)
-                            .background(theme == option ? option.accent.opacity(0.09) : panel,
-                                        in: RoundedRectangle(cornerRadius: 15))
-                            .overlay(RoundedRectangle(cornerRadius: 15)
-                                .stroke(theme == option ? option.accent.opacity(0.45) : line, lineWidth: 1))
+                            .background(theme == option ? option.accent.opacity(0.09) : panel, in: RoundedRectangle(cornerRadius: 15))
+                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(theme == option ? option.accent.opacity(0.45) : line, lineWidth: 1))
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                aboutStrideCard
-                VStack(alignment: .leading, spacing: 11) {
-                    Text("RUNTIME STATUS")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.3)
-                        .foregroundStyle(muted)
-                    statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
-                    statusCard("DEX parsing and method loading", detail: "Integrated foundations", symbol: "curlybraces", good: true)
-                    statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
-                    statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
-                }
-                Text("STRIDE · EXPERIMENTAL BUILD")
-                    .font(.system(size: 8, weight: .heavy))
-                    .kerning(1.2)
-                    .foregroundStyle(muted.opacity(0.75))
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 2)
             }
             .padding(.horizontal, 18)
             .padding(.top, 10)
@@ -849,6 +911,7 @@ private struct APKDetailSheet: View {
     @State private var guestFramebufferWidth = 0
     @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
+    @State private var touchDispatchMilliseconds: Double?
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
@@ -1342,11 +1405,7 @@ private struct APKDetailSheet: View {
                             ) else { return }
                             let action: Int32 = guestTouchActive ? 2 : 0
                             guestTouchActive = true
-                            _ = executionResult?.session.dispatchTouch(
-                                action: action,
-                                x: Float(point.x),
-                                y: Float(point.y)
-                            )
+                            measureGuestTouchDispatch(action: action, point: point)
                         }
                         .onEnded { value in
                             if let point = guestSurfacePoint(
@@ -1355,11 +1414,7 @@ private struct APKDetailSheet: View {
                                 surfaceWidth: guestFramebufferWidth,
                                 surfaceHeight: guestFramebufferHeight
                             ) {
-                                _ = executionResult?.session.dispatchTouch(
-                                    action: 1,
-                                    x: Float(point.x),
-                                    y: Float(point.y)
-                                )
+                                measureGuestTouchDispatch(action: 1, point: point)
                             }
                             guestTouchActive = false
                         }
@@ -1399,14 +1454,22 @@ private struct APKDetailSheet: View {
         return .green
     }
 
-    // Metrics stay unavailable until the runtime reports real rendered frames
-    // and consumed touch events. Never substitute fabricated zero values.
-    private var liveFPSLabel: String {
-        guard let result = executionResult, result.averageFps > 0 else { return "Starting" }
-        return String(format: "%.0f", result.averageFps)
+    // Guest rendering is not active yet; never present host display cadence as game FPS.
+    // FPS remains unavailable until the guest actually produces frames.
+    private var liveFPSLabel: String { "--" }
+
+    // Measures the real time spent handing a touch event to the guest runtime queue.
+    private var touchLatencyLabel: String {
+        guard let value = touchDispatchMilliseconds else { return "--" }
+        return String(format: "%.2f", value)
     }
 
-    private var touchLatencyLabel: String { "--" }
+    private func measureGuestTouchDispatch(action: Int32, point: CGPoint) {
+        let start = DispatchTime.now().uptimeNanoseconds
+        _ = executionResult?.session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
+        let elapsed = DispatchTime.now().uptimeNanoseconds &- start
+        touchDispatchMilliseconds = Double(elapsed) / 1_000_000
+    }
 
     private func executionMetric(_ title: String, value: String) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
@@ -1551,6 +1614,7 @@ private struct APKIconView: View {
             }
         }
         .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.25, style: .continuous))
         .accessibilityHidden(true)
     }
 }
