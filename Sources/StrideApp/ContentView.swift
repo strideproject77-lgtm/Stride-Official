@@ -911,7 +911,7 @@ private struct APKDetailSheet: View {
     @State private var guestFramebufferWidth = 0
     @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
-    @State private var touchDispatchMilliseconds: Double?
+    @State private var touchResponseMilliseconds: Double?\n    @State private var pendingTouchTimestamp: UInt64?
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
@@ -1037,11 +1037,21 @@ private struct APKDetailSheet: View {
                                 let scheduler = GuestFrameScheduler { _ in
                                     let pump = res.session.pumpGuestEvents()
                                     if pump.status == 0 {
-                                        if pump.delivered > 0 { appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity") }
+                                        if pump.delivered > 0 {
+                                            appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
+                                        }
                                         if let frame = res.session.copyFramebuffer() {
                                             guestFramebufferData = frame.data
                                             guestFramebufferWidth = frame.width
                                             guestFramebufferHeight = frame.height
+                                            // Record one real input-to-guest-render sample only after
+                                            // the guest callback batch has run and its framebuffer
+                                            // has been copied. Never substitute host dispatch-call time.
+                                            if let started = pendingTouchTimestamp {
+                                                let elapsed = DispatchTime.now().uptimeNanoseconds &- started
+                                                touchResponseMilliseconds = Double(elapsed) / 1_000_000
+                                                pendingTouchTimestamp = nil
+                                            }
                                         }
                                     } else {
                                         appendSessionLog("[ERROR] Guest input pump failed with status \(pump.status)")
@@ -1262,7 +1272,7 @@ private struct APKDetailSheet: View {
                         Spacer(minLength: 6)
 
                         executionMetric("FPS", value: liveFPSLabel)
-                        executionMetric("MS", value: touchLatencyLabel)
+                        executionMetric("TOUCH MS", value: touchLatencyLabel)
 
                         Button {
                             guestInputText = ""
@@ -1456,17 +1466,19 @@ private struct APKDetailSheet: View {
     // FPS remains unavailable until the guest actually produces frames.
     private var liveFPSLabel: String { "--" }
 
-    // Measures the real time spent handing a touch event to the guest runtime queue.
+    // Per-input sample: iOS touch dispatch -> guest event pump/callback -> framebuffer copy.
+    // No touch or no guest response means no fabricated value is displayed.
     private var touchLatencyLabel: String {
-        guard let value = touchDispatchMilliseconds else { return "--" }
+        guard let value = touchResponseMilliseconds else { return "--" }
         return String(format: "%.2f", value)
     }
 
     private func measureGuestTouchDispatch(action: Int32, point: CGPoint) {
-        let start = DispatchTime.now().uptimeNanoseconds
-        _ = executionResult?.session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
-        let elapsed = DispatchTime.now().uptimeNanoseconds &- start
-        touchDispatchMilliseconds = Double(elapsed) / 1_000_000
+        guard let session = executionResult?.session else { return }
+        let accepted = session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
+        if accepted {
+            pendingTouchTimestamp = DispatchTime.now().uptimeNanoseconds
+        }
     }
 
     private func executionMetric(_ title: String, value: String) -> some View {
