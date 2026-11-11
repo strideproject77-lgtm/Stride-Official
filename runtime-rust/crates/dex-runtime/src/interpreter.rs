@@ -48,7 +48,7 @@ pub struct ArtVm<'a> {
     pub hierarchy: &'a mut ClassHierarchy,
     pub monitors: &'a mut MonitorTable,
     pub jni: &'a mut JniNativeRegistry,
-    pub methods: &'a HashMap<u16, MethodCode>,
+    pub methods: &'a HashMap<u32, MethodCode>,
     pub static_fields: HashMap<(String, String), Value>,
     shared_static_fields: Option<&'a mut HashMap<(String, String), Value>>,
     pub strings: &'a [String],
@@ -117,7 +117,7 @@ impl<'a> ArtVm<'a> {
         hierarchy: &'a mut ClassHierarchy,
         monitors: &'a mut MonitorTable,
         jni: &'a mut JniNativeRegistry,
-        methods: &'a HashMap<u16, MethodCode>,
+        methods: &'a HashMap<u32, MethodCode>,
         strings: &'a [String],
     ) -> Self {
         Self {
@@ -209,7 +209,7 @@ impl<'a> ArtVm<'a> {
 
     pub fn execute_method(
         &mut self,
-        method_id: u16,
+        method_id: u32,
         arguments: &[Value],
         step_limit: usize,
     ) -> Result<InterpreterReport, String> {
@@ -233,7 +233,7 @@ impl<'a> ArtVm<'a> {
 
     fn execute_internal(
         &mut self,
-        method_id: u16,
+        method_id: u32,
         arguments: &[Value],
         step_limit: usize,
         call_depth: usize,
@@ -1256,9 +1256,9 @@ impl<'a> ArtVm<'a> {
                     let runtime_method_id = if let Some((class, name, proto)) = signature {
                         self.method_lookup
                             .and_then(|lookup| lookup.get(&(class.to_owned(), name.to_owned(), proto.to_owned())).copied())
-                            .and_then(|id| u16::try_from(id).ok())
+                            
                     } else if self.method_references.is_none() {
-                        Some(dex_method_index)
+                        Some(u32::from(dex_method_index))
                     } else {
                         None
                     };
@@ -1290,9 +1290,7 @@ impl<'a> ArtVm<'a> {
                                 if let Some((_, implementation)) = self.hierarchy.resolve_virtual_method(
                                     &receiver_class, target_name, target_proto,
                                 ) {
-                                    if let Ok(id) = u16::try_from(implementation.method_index) {
-                                        dispatched_method_id = Some(id);
-                                    }
+                                    dispatched_method_id = Some(implementation.method_index);
                                 }
                             }
                         }
@@ -1427,14 +1425,14 @@ mod tests {
         let mut monitors = MonitorTable::new();
         let mut jni = JniNativeRegistry::new();
         let methods = HashMap::from([
-            (1u16, MethodCode {
+            (1u32, MethodCode {
                 class_descriptor: "Ltest/Primary;".into(),
                 name: "read".into(),
                 prototype: "()Ljava/lang/String;".into(),
                 code_units: vec![0x001a, 0x0000, 0x0011],
                 registers_size: 1, ins_size: 0, try_blocks: vec![],
             }),
-            (2u16, MethodCode {
+            (2u32, MethodCode {
                 class_descriptor: "Ltest/Secondary;".into(),
                 name: "read".into(),
                 prototype: "()Ljava/lang/String;".into(),
@@ -1456,7 +1454,7 @@ mod tests {
         let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
         vm.attach_multi_dex_metadata(&inventories, &method_owners);
 
-        for (method_id, expected) in [(1u16, "primary-dex"), (2u16, "secondary-dex")] {
+        for (method_id, expected) in [(1u32, "primary-dex"), (2u32, "secondary-dex")] {
             let report = vm.execute_method(method_id, &[], 16).unwrap();
             let ExecutionStopReason::ReturnedValue(Value::Object(string_id)) = report.stop_reason else {
                 panic!("const-string method must return a String object");
@@ -1473,12 +1471,12 @@ mod tests {
         let mut jni = JniNativeRegistry::new();
         let strings = vec!["counter".to_string()];
         let methods = HashMap::from([
-            (1u16, MethodCode {
+            (1u32, MethodCode {
                 class_descriptor: "LTest;".into(), name: "writeCounter".into(), prototype: "()V".into(),
                 code_units: vec![0x7012, 0x0067, 0x0000, 0x000e],
                 registers_size: 1, ins_size: 0, try_blocks: vec![],
             }),
-            (2u16, MethodCode {
+            (2u32, MethodCode {
                 class_descriptor: "LTest;".into(), name: "readCounter".into(), prototype: "()I".into(),
                 code_units: vec![0x0060, 0x0000, 0x000f],
                 registers_size: 1, ins_size: 0, try_blocks: vec![],
@@ -1723,7 +1721,7 @@ mod tests {
         hierarchy.register_class(child);
 
         let methods = HashMap::from([
-            (1u16, MethodCode {
+            (1u32, MethodCode {
                 class_descriptor: "Ltest/Caller;".into(),
                 name: "run".into(),
                 prototype: "()I".into(),
@@ -1733,7 +1731,7 @@ mod tests {
                 ins_size: 0,
                 try_blocks: vec![],
             }),
-            (2u16, MethodCode {
+            (2u32, MethodCode {
                 class_descriptor: "Ltest/Base;".into(),
                 name: "value".into(),
                 prototype: "()I".into(),
@@ -1742,7 +1740,7 @@ mod tests {
                 ins_size: 0,
                 try_blocks: vec![],
             }),
-            (3u16, MethodCode {
+            (3u32, MethodCode {
                 class_descriptor: "Ltest/Child;".into(),
                 name: "value".into(),
                 prototype: "()I".into(),
@@ -1802,7 +1800,7 @@ mod tests {
         let mut monitors = MonitorTable::new();
         let mut jni = JniNativeRegistry::new();
         let methods = HashMap::from([(
-            1u16,
+            1u32,
             MethodCode {
                 class_descriptor: "Ltest/Factory;".into(),
                 name: "create".into(),
@@ -1832,7 +1830,7 @@ mod tests {
         let mut monitors = MonitorTable::new();
         let mut jni = JniNativeRegistry::new();
         let methods = HashMap::from([(
-            1u16,
+            1u32,
             MethodCode {
                 class_descriptor: "Ltest/Caller;".into(),
                 name: "write".into(),
@@ -1867,7 +1865,7 @@ mod tests {
         let mut monitors = MonitorTable::new();
         let mut jni = JniNativeRegistry::new();
         let methods = HashMap::from([(
-            1u16,
+            1u32,
             MethodCode {
                 class_descriptor: "Ltest/DoubleCompare;".into(),
                 name: "compare".into(),
