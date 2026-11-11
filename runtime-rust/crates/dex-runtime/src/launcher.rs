@@ -1240,6 +1240,15 @@ impl AndroidRuntime {
                 stats.empty_text_views += 1;
             }
 
+            let background_resource = field("mBackgroundResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
+            if background_resource != 0 {
+                if let Some(color) = resources.color(background_resource) {
+                    let mut paint = Paint::new();
+                    paint.color = color;
+                    canvas.draw_rect(bounds, &paint);
+                }
+            }
+
             if let Some(text) = text_to_draw {
                 let mut paint = Paint::new();
                 let color = field("mTextColor")?.as_int() as u32;
@@ -1262,15 +1271,6 @@ impl AndroidRuntime {
             let image_id = field("mImageResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
             if let Some((image_width, image_height, pixels)) = images.get(&image_id) {
                 canvas.draw_image_argb(pixels, *image_width, *image_height, bounds.left as i32, bounds.top as i32);
-            }
-
-            let background_resource = field("mBackgroundResourceId").map(|value| value.as_int() as u32).unwrap_or(0);
-            if background_resource != 0 {
-                if let Some(color) = resources.color(background_resource) {
-                    let mut paint = Paint::new();
-                    paint.color = color;
-                    canvas.draw_rect(bounds, &paint);
-                }
             }
 
             let count = field("mChildCount")?.as_int().clamp(0, 4096) as usize;
