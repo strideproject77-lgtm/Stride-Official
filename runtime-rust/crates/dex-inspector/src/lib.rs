@@ -253,7 +253,7 @@ pub fn validate_register_operands(
         let b4 = usize::from((first >> 12) & 0x0f);
         match op {
             // 12x: two four-bit register operands.
-            0x01 | 0x04 | 0x07 | 0x7b..=0x8f | 0xb0..=0xcf => {
+            0x01 | 0x04 | 0x07 | 0x21 | 0x7b..=0x8f | 0xb0..=0xcf => {
                 check(a4)?; check(b4)?;
             }
             // 11x and 11n: one byte or four-bit register.
@@ -270,7 +270,7 @@ pub fn validate_register_operands(
             }
             // 21* formats: one byte register in the first unit.
             0x13 | 0x14 | 0x15 | 0x16 | 0x17 | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1f |
-            0x22 | 0x26 | 0x29 | 0x2a | 0x2b | 0x2c | 0x60..=0x6d |
+            0x22 | 0x26 | 0x2b | 0x2c | 0x60..=0x6d |
             0x38..=0x3d | 0xfe | 0xff => check(a8)?,
             // 22t/22c/22s formats: two four-bit registers.
             0x20 | 0x23 | 0x32..=0x37 | 0x52..=0x5f | 0xd0..=0xd7 => {
@@ -418,6 +418,15 @@ mod decoder_tests {
  #[test] fn rejects_unknown_opcode(){assert_eq!(decode_instructions(&words(&[0x0073])),Err(DecodeError::InvalidOpcode(0x73)));}
  #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
+ #[test] fn goto_16_and_goto_32_do_not_treat_offsets_as_registers(){
+  assert!(validate_register_operands(&words(&[0x0029,0x0001,0x000e]),0).is_ok());
+  assert!(validate_register_operands(&words(&[0x002a,0x0002,0x0000,0x000e]),0).is_ok());
+ }
+ #[test] fn array_length_validates_both_register_operands(){
+  assert!(validate_register_operands(&words(&[0x1021,0x000e]),2).is_ok());
+  assert_eq!(validate_register_operands(&words(&[0x2021,0x000e]),2),Err(DecodeError::InvalidRegister));
+ }
+
  #[test] fn decodes_goto_10t_signed_offset_from_high_byte(){
   let decoded=decode_instructions(&words(&[0x0528,0x000e,0x000e,0x000e,0x000e,0x000e])).unwrap();
   assert_eq!(decoded[0].code_unit_offset,0);
