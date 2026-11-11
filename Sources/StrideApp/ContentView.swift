@@ -1037,6 +1037,17 @@ private struct APKDetailSheet: View {
                                     return
                                 }
                                 executionResult = res
+                                // Seed the guest surface before accepting the first gesture. The
+                                // touch mapper needs real framebuffer dimensions; waiting for the
+                                // first CADisplayLink tick can silently drop an immediate tap.
+                                if let initialFrame = res.session.copyFramebuffer() {
+                                    guestFramebufferData = initialFrame.data
+                                    guestFramebufferWidth = initialFrame.width
+                                    guestFramebufferHeight = initialFrame.height
+                                    appendSessionLog("[FRAMEBUFFER] Initial guest surface ready (\(initialFrame.width)x\(initialFrame.height))")
+                                } else {
+                                    appendSessionLog("[WARN] Initial guest framebuffer is not ready; input mapping will wait for the first guest surface")
+                                }
                                 appendSessionLog("[SESSION] APK screenOrientation=\(res.screenOrientation) recorded; iOS auto-rotation remains enabled")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 let scheduler = GuestFrameScheduler { _ in
