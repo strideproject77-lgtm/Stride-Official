@@ -1973,6 +1973,28 @@ impl AndroidRuntime {
             match event.action {
                 ACTION_DOWN => {
                     self.pressed_view = if activity_consumed { None } else { self.hit_test_clickable_view(x, y) };
+                    if let Some(view_id) = self.pressed_view {
+                        let view_class = self.heap.get(view_id)
+                            .map(|object| object.class_descriptor().to_owned())
+                            .unwrap_or_else(|_| "<unknown-view>".to_string());
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info,
+                            "Input",
+                            "VIEW_TOUCH_TARGET_SELECTED",
+                            "Guest touch-down matched a clickable View",
+                            Some(&format!("view={} object_id={} x={:.1} y={:.1}", view_class, view_id, x, y)),
+                            None,
+                        );
+                    } else {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info,
+                            "Input",
+                            "VIEW_TOUCH_TARGET_MISSED",
+                            "Guest touch-down did not match a clickable View",
+                            Some(&format!("x={:.1} y={:.1} activity_consumed={}", x, y, activity_consumed)),
+                            Some("Check View listener registration, guest bounds and host-to-surface coordinate mapping"),
+                        );
+                    }
                     child_consumed |= self.pressed_view.is_some();
                 }
                 ACTION_UP => {
@@ -1984,6 +2006,18 @@ impl AndroidRuntime {
                                 child_consumed = true;
                             }
                         }
+                    } else if pressed_view.is_some() {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Warning,
+                            "Input",
+                            "VIEW_CLICK_RELEASE_MISMATCH",
+                            "Touch-up did not release the originally pressed clickable View",
+                            Some(&format!(
+                                "pressed={:?} released={:?} x={:.1} y={:.1}",
+                                pressed_view, released_view, x, y
+                            )),
+                            Some("Check hit-test bounds and coordinate scaling across the complete gesture"),
+                        );
                     }
                 }
                 ACTION_CANCEL => self.pressed_view = None,
