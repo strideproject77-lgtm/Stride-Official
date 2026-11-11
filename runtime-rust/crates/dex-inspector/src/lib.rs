@@ -419,8 +419,8 @@ mod decoder_tests {
  #[test] fn rejects_truncated_instruction(){assert_eq!(decode_instructions(&words(&[0x0013])),Err(DecodeError::TruncatedInstruction));}
  #[test] fn rejects_branch_outside_method(){assert_eq!(decode_instructions(&words(&[0xff28,0x000e])),Err(DecodeError::InvalidBranchTarget));}
  #[test] fn goto_16_and_goto_32_do_not_treat_offsets_as_registers(){
-  assert!(validate_register_operands(&words(&[0x0029,0x0001,0x000e]),0).is_ok());
-  assert!(validate_register_operands(&words(&[0x002a,0x0002,0x0000,0x000e]),0).is_ok());
+  assert!(validate_register_operands(&words(&[0x0029,0x0002,0x000e]),0).is_ok());
+  assert!(validate_register_operands(&words(&[0x002a,0x0003,0x0000,0x000e]),0).is_ok());
  }
  #[test] fn array_length_validates_both_register_operands(){
   assert!(validate_register_operands(&words(&[0x1021,0x000e]),2).is_ok());
