@@ -201,7 +201,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         var manifestData = Data()
         var dexDataList: [(source: String, path: String, data: Data)] = []
-        var soDataList: [(String, Data)] = []
+        var soDataList: [(source: String, name: String, data: Data)] = []
         var resourceTableData = Data()
 
         // XAPK/APKS/APKM imports are normalized to <package>/base.apk and
@@ -261,7 +261,10 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     var so = Data()
                     _ = try packageArchive.extract(entry) { chunk in so.append(chunk) }
                     let name = URL(fileURLWithPath: entry.path).lastPathComponent
-                    soDataList.append((name, so))
+                    let sourceName = packageArchiveNames.indices.contains(archiveIndex)
+                        ? packageArchiveNames[archiveIndex]
+                        : "package-component-\(archiveIndex)"
+                    soDataList.append((source: sourceName, name: name, data: so))
                 } else if entry.path.hasPrefix("lib/") && entry.path.hasSuffix(".so") {
                     onLog("[WARN] Skipping native library for non-selected ABI: \(entry.path)")
                 }
@@ -405,9 +408,12 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
-        for (soName, soData) in soDataList {
+        for nativeEntry in soDataList {
             try Task.checkCancellation()
-            onLog("[INFO] Loading native library \(soName) (\(soData.count) bytes)")
+            let soName = nativeEntry.name
+            let soData = nativeEntry.data
+            let nativeLabel = "\(nativeEntry.source)!lib/arm64-v8a/\(soName)"
+            onLog("[INFO] Loading native library \(nativeLabel) (\(soData.count) bytes)")
             let nativeStatus = soData.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                     return 1
@@ -421,10 +427,10 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 // Best-effort launch: a failed optional/unsupported .so must not
                 // prevent trying the remaining libraries and managed Activity.
                 // Apps that require this library may still fail later at the call site.
-                onLog("[WARN] Native library \(soName) could not be loaded (status \(nativeStatus)); continuing best-effort execution")
+                onLog("[WARN] Native library \(nativeLabel) could not be materialized (status \(nativeStatus)); continuing best-effort execution")
                 continue
             }
-            onLog("[INFO] Native ELF image \(soName) materialized; guest entry points and JNI_OnLoad are not yet executed")
+            onLog("[INFO] Native ELF image \(nativeLabel) materialized; guest entry points and JNI_OnLoad are not yet executed")
         }
         let unresolvedNativeModules = stride_runtime_finish_native_loading(runtime)
         if unresolvedNativeModules == UInt32.max {
