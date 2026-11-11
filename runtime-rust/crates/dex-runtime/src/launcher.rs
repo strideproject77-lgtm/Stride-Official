@@ -2051,9 +2051,19 @@ impl AndroidRuntime {
                         vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                         vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
                     }
+                    let display_text = |heap: &ManagedHeap| -> Option<String> {
+                        let display = heap.get_instance_field(activity_obj, "display").ok()
+                            .and_then(Value::as_object)?;
+                        let text = heap.get_instance_field(display, "mText").ok()
+                            .and_then(Value::as_object)?;
+                        heap.get_string(text).ok().map(str::to_owned)
+                    };
+                    let display_before = display_text(&self.heap);
                     let args = [Value::Object(activity_obj), Value::Object(event_obj)];
                     let report = vm.execute_method(method_id, &args, step_budget.max(1))
                         .map_err(|error| format!("onTouchEvent fallback interpreter error: {}", error))?;
+                    let callback_steps = report.steps_executed;
+                    let callback_stop = format!("{:?}", report.stop_reason);
                     match report.stop_reason {
                         ExecutionStopReason::UncaughtException(exception) => return Err(format!(
                             "onTouchEvent fallback threw {}: {:?}", exception.class_descriptor, exception.message
@@ -2063,6 +2073,22 @@ impl AndroidRuntime {
                         ),
                         ExecutionStopReason::ReturnedValue(value) => activity_consumed = value.as_int() != 0,
                         ExecutionStopReason::ReturnedVoid => activity_consumed = false,
+                    }
+                    drop(vm);
+                    if event.action == ACTION_UP {
+                        let display_after = display_text(&self.heap);
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info,
+                            "Input",
+                            "ACTIVITY_TOUCH_CALLBACK_EXECUTED",
+                            "Guest Activity.onTouchEvent completed for a touch-up event",
+                            Some(&format!(
+                                "activity={} x={:.1} y={:.1} steps={} stop={} consumed={} display_before={:?} display_after={:?}",
+                                activity_class, x, y, callback_steps, callback_stop, activity_consumed,
+                                display_before, display_after
+                            )),
+                            Some("A changed display value confirms the calculator's guest input and TextView update path"),
+                        );
                     }
                 }
             }
