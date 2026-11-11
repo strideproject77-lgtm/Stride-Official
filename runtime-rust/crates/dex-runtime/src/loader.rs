@@ -302,10 +302,12 @@ impl AppClassLoader {
                 return Some(method_id);
             }
             if let Some(loaded_class) = self.classes.get(&owner) {
+                // Search class inheritance before interface defaults, matching
+                // normal virtual-method resolution precedence.
+                pending.extend(loaded_class.interface_descriptors.iter().cloned());
                 if let Some(superclass) = loaded_class.super_descriptor.as_ref() {
                     pending.push(superclass.clone());
                 }
-                pending.extend(loaded_class.interface_descriptors.iter().cloned());
             }
         }
         None
@@ -437,7 +439,14 @@ mod diagnostics_tests {
         loader.method_lookup.insert(
             (parent.into(), "onClick".into(), signature.into()), 41,
         );
-        assert_eq!(loader.find_method_in_hierarchy(child, "onClick", signature), Some(41));
+        loader.method_lookup.insert(
+            (contract.into(), "onClick".into(), signature.into()), 43,
+        );
+        assert_eq!(
+            loader.find_method_in_hierarchy(child, "onClick", signature),
+            Some(41),
+            "class implementations must take precedence over interface defaults",
+        );
 
         loader.method_lookup.remove(&(parent.into(), "onClick".into(), signature.into()));
         loader.method_lookup.insert(
