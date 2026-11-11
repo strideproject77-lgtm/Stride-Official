@@ -71,6 +71,15 @@ uint32_t stride_runtime_finish_native_loading(AndroidRuntime *runtime);
  */
 int32_t stride_manifest_screen_orientation(const uint8_t *manifest_data, size_t manifest_len, int32_t *out_orientation);
 
+/* Copy the Android package name into a caller-owned UTF-8 buffer.
+ * Returns required capacity including NUL, or 0 when parsing fails. */
+size_t stride_manifest_package_name(
+    const uint8_t *manifest_data,
+    size_t manifest_len,
+    char *out_name,
+    size_t capacity
+);
+
 /*
  * Dispatch the launch Activity lifecycle from AndroidManifest.xml.
  * out_report.status_code: 0=active guest runtime (reserved), 1=finished,
@@ -117,6 +126,15 @@ int32_t stride_runtime_pump_guest_events(
     size_t step_budget,
     uint32_t *out_delivered
 );
+
+/* Latest queue-to-render touch processing time in milliseconds; negative if unavailable. */
+float stride_runtime_last_touch_processing_ms(const AndroidRuntime *runtime);
+
+/* Successful guest OpenGL swaps observed in this runtime session. */
+uint64_t stride_runtime_guest_frame_count(const AndroidRuntime *runtime);
+
+/* Guest-only rolling FPS; negative until at least two guest frames are observed. */
+float stride_runtime_guest_fps(const AndroidRuntime *runtime);
 
 /*
  * Record a completed frame duration (ms) and return current rolling FPS.
