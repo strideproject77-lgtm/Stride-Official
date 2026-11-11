@@ -232,46 +232,46 @@ impl JniNativeRegistry {
 
         // Core java.lang.String operations used by ordinary Activity input handlers.
         self.register("Ljava/lang/String;", "equals", "(Ljava/lang/Object;)Z", |env, args| {
-            let Some(receiver) = args.first().and_then(Value::as_object) else {
+            let Some(receiver) = args.first().and_then(|value| value.as_object()) else {
                 return Ok(Some(Value::Int(0)));
             };
             let left = env.get_string_utf(receiver)?.to_owned();
-            let right = args.get(1).and_then(Value::as_object)
+            let right = args.get(1).and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
             Ok(Some(Value::Int(if left == right { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "length", "()I", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.length receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.length receiver is null")?;
             let text = env.get_string_utf(receiver)?;
             Ok(Some(Value::Int(text.encode_utf16().count() as i32)))
         });
         self.register("Ljava/lang/String;", "isEmpty", "()Z", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.isEmpty receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.isEmpty receiver is null")?;
             Ok(Some(Value::Int(i32::from(env.get_string_utf(receiver)?.is_empty()))))
         });
         self.register("Ljava/lang/String;", "startsWith", "(Ljava/lang/String;)Z", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.startsWith receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.startsWith receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
-            let prefix = args.get(1).and_then(Value::as_object)
+            let prefix = args.get(1).and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
             Ok(Some(Value::Int(if text.starts_with(prefix) { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "contains", "(Ljava/lang/CharSequence;)Z", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.contains receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.contains receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
-            let needle = args.get(1).and_then(Value::as_object)
+            let needle = args.get(1).and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("");
             Ok(Some(Value::Int(if text.contains(needle) { 1 } else { 0 })))
         });
         self.register("Ljava/lang/String;", "substring", "(I)Ljava/lang/String;", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.substring receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.substring receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
             let start = args.get(1).map(Value::as_int).unwrap_or(0).max(0) as usize;
             let suffix = text.chars().skip(start).collect::<String>();
             Ok(Some(Value::Object(env.new_string_utf(&suffix)?)))
         });
         self.register("Ljava/lang/String;", "substring", "(II)Ljava/lang/String;", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.substring receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.substring receiver is null")?;
             let text = env.get_string_utf(receiver)?.to_owned();
             let chars = text.chars().collect::<Vec<_>>();
             let start = args.get(1).map(Value::as_int).unwrap_or(0).max(0) as usize;
@@ -282,9 +282,9 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(env.new_string_utf(&result)?)))
         });
         self.register("Ljava/lang/String;", "concat", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
-            let receiver = args.first().and_then(Value::as_object).ok_or("String.concat receiver is null")?;
+            let receiver = args.first().and_then(|value| value.as_object()).ok_or("String.concat receiver is null")?;
             let left = env.get_string_utf(receiver)?.to_owned();
-            let right = args.get(1).and_then(Value::as_object)
+            let right = args.get(1).and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
             Ok(Some(Value::Object(env.new_string_utf(&format!("{}{}", left, right))?)))
         });
@@ -297,7 +297,7 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(env.new_string_utf(&value.to_string())?)))
         });
         self.register("Ljava/lang/Double;", "parseDouble", "(Ljava/lang/String;)D", |env, args| {
-            let value = args.first().and_then(Value::as_object)
+            let value = args.first().and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok())
                 .and_then(|text| text.parse::<f64>().ok()).unwrap_or(0.0);
             Ok(Some(Value::Double(value)))
@@ -337,16 +337,16 @@ impl JniNativeRegistry {
         // Keep builder contents on the guest object so constructor/append/toString calls
         // participate in the same managed heap as the app's other objects.
         self.register("Ljava/lang/StringBuilder;", "<init>", "()V", |env, args| {
-            let receiver = args.first().and_then(Value::as_object)
+            let receiver = args.first().and_then(|value| value.as_object())
                 .ok_or("StringBuilder constructor receiver is null")?;
             let empty = env.new_string_utf("")?;
             env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(empty))?;
             Ok(None)
         });
         self.register("Ljava/lang/StringBuilder;", "<init>", "(Ljava/lang/String;)V", |env, args| {
-            let receiver = args.first().and_then(Value::as_object)
+            let receiver = args.first().and_then(|value| value.as_object())
                 .ok_or("StringBuilder constructor receiver is null")?;
-            let initial = args.get(1).and_then(Value::as_object)
+            let initial = args.get(1).and_then(|value| value.as_object())
                 .map(|id| env.get_string_utf(id).map(str::to_owned))
                 .transpose()?.unwrap_or_default();
             let value = env.new_string_utf(&initial)?;
@@ -354,12 +354,12 @@ impl JniNativeRegistry {
             Ok(None)
         });
         self.register("Ljava/lang/StringBuilder;", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", |env, args| {
-            let receiver = args.first().and_then(Value::as_object)
+            let receiver = args.first().and_then(|value| value.as_object())
                 .ok_or("StringBuilder.append receiver is null")?;
             let current = env.get_object_field(receiver, "mStrideBuilderValue")
-                .ok().and_then(Value::as_object)
+                .ok().and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
-            let suffix = args.get(1).and_then(Value::as_object)
+            let suffix = args.get(1).and_then(|value| value.as_object())
                 .map(|id| env.get_string_utf(id).map(str::to_owned))
                 .transpose()?.unwrap_or_else(|| "null".to_owned());
             let updated = env.new_string_utf(&format!("{current}{suffix}"))?;
@@ -367,10 +367,10 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(receiver)))
         });
         self.register("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;", |env, args| {
-            let receiver = args.first().and_then(Value::as_object)
+            let receiver = args.first().and_then(|value| value.as_object())
                 .ok_or("StringBuilder.toString receiver is null")?;
             let value = env.get_object_field(receiver, "mStrideBuilderValue")
-                .ok().and_then(Value::as_object)
+                .ok().and_then(|value| value.as_object())
                 .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
             Ok(Some(Value::Object(env.new_string_utf(&value)?)))
         });
@@ -384,10 +384,10 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(boxed)))
         });
         self.register("Ljava/lang/String;", "format", "(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;", |env, args| {
-            let format_id = args.get(1).and_then(Value::as_object)
+            let format_id = args.get(1).and_then(|value| value.as_object())
                 .ok_or("String.format format argument is null")?;
             let format_text = env.get_string_utf(format_id)?.to_owned();
-            let array_id = args.get(2).and_then(Value::as_object)
+            let array_id = args.get(2).and_then(|value| value.as_object())
                 .ok_or("String.format argument array is null")?;
             let count = env.get_array_length(array_id)?;
             let mut values = Vec::with_capacity(count);
@@ -591,17 +591,17 @@ mod tests {
         let append = registry.find("Ljava/lang/StringBuilder;", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;").unwrap().clone();
         assert_eq!(append(&mut env, &[Value::Object(builder), Value::Object(suffix)]).unwrap(), Some(Value::Object(builder)));
         let to_string = registry.find("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;").unwrap().clone();
-        let result = to_string(&mut env, &[Value::Object(builder)]).unwrap().and_then(Value::as_object).unwrap();
+        let result = to_string(&mut env, &[Value::Object(builder)]).unwrap().and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(result).unwrap(), "123");
 
         let boxed = registry.find("Ljava/lang/Double;", "valueOf", "(D)Ljava/lang/Double;").unwrap().clone();
-        let boxed_value = boxed(&mut env, &[Value::Double(12.5)]).unwrap().and_then(Value::as_object).unwrap();
+        let boxed_value = boxed(&mut env, &[Value::Double(12.5)]).unwrap().and_then(|value| value.as_object()).unwrap();
         let args = env.heap.allocate_array("[Ljava/lang/Object;", 1).unwrap();
         env.heap.set_array_element(args, 0, Value::Object(boxed_value)).unwrap();
         let format = env.new_string_utf("%.8g").unwrap();
         let format_call = registry.find("Ljava/lang/String;", "format", "(Ljava/util/Locale;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;").unwrap().clone();
         let rendered = format_call(&mut env, &[Value::Null, Value::Object(format), Value::Object(args)])
-            .unwrap().and_then(Value::as_object).unwrap();
+            .unwrap().and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(rendered).unwrap(), "12.500000");
     }
 
