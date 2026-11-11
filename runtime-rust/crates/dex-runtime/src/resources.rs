@@ -93,7 +93,7 @@ fn parse_string_pool(bytes: &[u8], base: usize, chunk_size: usize) -> Result<Vec
             let utf16_length = read_len8(bytes, &mut cursor, string_data_end)?;
             let byte_length = read_len8(bytes, &mut cursor, string_data_end)?;
             let end = cursor.checked_add(byte_length)
-                .filter(|end| end < string_data_end)
+                .filter(|end| *end < string_data_end)
                 .ok_or_else(|| format!("resource string {index} exceeds string data"))?;
             if bytes.get(end) != Some(&0) {
                 return Err(format!("resource string {index} has no UTF-8 terminator"));
