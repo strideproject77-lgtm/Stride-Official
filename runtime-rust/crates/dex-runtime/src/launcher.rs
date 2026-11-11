@@ -66,6 +66,8 @@ pub struct AndroidRuntime {
     pub environment: AndroidEnvironment,
     pub surface: Surface,
     pub input_queue: Arc<InputQueue>,
+    /// Latest event-to-guest-callback-and-render latency for the current input pump.
+    pub last_touch_processing_ms: Option<f32>,
     pub display_metrics: DisplayMetrics,
     pub active_activity_obj: Option<u32>,
     pub active_activity_class: Option<String>,
@@ -203,6 +205,7 @@ impl AndroidRuntime {
             environment: AndroidEnvironment::new(package_name),
             surface: Surface::new(1080, 1920),
             input_queue: Arc::new(InputQueue::new()),
+            last_touch_processing_ms: None,
             display_metrics: DisplayMetrics::default(),
             active_activity_obj: None,
             active_activity_class: None,
@@ -1900,9 +1903,11 @@ impl AndroidRuntime {
             .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
         let mut delivered = 0usize;
         let mut had_events = false;
+        let mut latest_event_enqueued_at = None;
 
         while delivered < max_events {
             let Some(event) = self.input_queue.poll_motion() else { break };
+            latest_event_enqueued_at = Some(event.host_enqueued_at);
             had_events = true;
             let pointer = event.pointers.first();
             let x = pointer.map(|p| p.x).unwrap_or(0.0);
@@ -1988,6 +1993,10 @@ impl AndroidRuntime {
         if had_events {
             self.render_active_activity_surface()
                 .map_err(|error| format!("Guest redraw after input failed: {error}"))?;
+            if let Some(enqueued_at) = latest_event_enqueued_at {
+                self.last_touch_processing_ms =
+                    Some(enqueued_at.elapsed().as_secs_f64() as f32 * 1_000.0);
+            }
         }
         Ok(delivered)
     }
