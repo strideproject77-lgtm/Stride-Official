@@ -6,6 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{ClassInventory, inspect_classes_for_loading};
 use stride_dex_inspector::read_code_item;
+use stride_dex_inspector::classes::validate_method_register_layout;
+use stride_dex_inspector::validate_register_operands;
 use crate::hierarchy::{ClassHierarchy, RuntimeClass};
 use crate::interpreter::{MethodCode, ArtVm, ExecutionStopReason};
 use crate::heap::ManagedHeap;
@@ -177,19 +179,37 @@ impl AppClassLoader {
                 let code = if m.code_offset != 0 {
                     match read_code_item(dex_bytes, m.code_offset) {
                         Ok(item) => {
-                            let mut units = Vec::with_capacity(item.instructions.len() / 2);
-                            for chunk in item.instructions.chunks_exact(2) {
-                                units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                            let validation = validate_method_register_layout(
+                                item.registers_size, item.ins_size, m.access_flags, &m.prototype,
+                            ).map_err(|error| format!("register layout: {:?}", error))
+                            .and_then(|_| validate_register_operands(item.instructions, item.registers_size)
+                                .map_err(|error| format!("register operands: {:?}", error)));
+                            if let Err(error) = validation {
+                                if let Some(diagnostics) = diagnostics {
+                                    diagnostics.record_detailed(
+                                        DiagnosticSeverity::Warning, "DexLoader", "DEX_METHOD_REGISTER_LAYOUT_REJECTED",
+                                        "Method metadata was retained but its code has invalid register usage",
+                                        Some(&format!("{}->{}{} code_offset={} error={}",
+                                            descriptor, m.name, m.prototype, m.code_offset, error)),
+                                        Some("Check incoming argument word counts and every encoded register operand; this method will not execute"),
+                                    );
+                                }
+                                None
+                            } else {
+                                let mut units = Vec::with_capacity(item.instructions.len() / 2);
+                                for chunk in item.instructions.chunks_exact(2) {
+                                    units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
+                                }
+                                Some(MethodCode {
+                                    class_descriptor: descriptor.clone(),
+                                    name: m.name.clone(),
+                                    prototype: m.prototype.clone(),
+                                    code_units: units,
+                                    registers_size: item.registers_size as usize,
+                                    ins_size: item.ins_size as usize,
+                                    try_blocks: Vec::new(),
+                                })
                             }
-                            Some(MethodCode {
-                                class_descriptor: descriptor.clone(),
-                                name: m.name.clone(),
-                                prototype: m.prototype.clone(),
-                                code_units: units,
-                                registers_size: item.registers_size as usize,
-                                ins_size: item.ins_size as usize,
-                                try_blocks: Vec::new(),
-                            })
                         }
                         Err(error) => {
                             if let Some(diagnostics) = diagnostics {
