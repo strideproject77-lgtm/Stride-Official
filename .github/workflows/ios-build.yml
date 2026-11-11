@@ -40,7 +40,7 @@ jobs:
 
   build-ipa:
     name: Build and verify unsigned iOS IPA
-    if: github.event_name == 'workflow_dispatch' && inputs.build_ipa == true
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_ipa == true) || (github.event_name == 'push' && github.event.head_commit.message == 'Build Calculator validation IPA after tests')
     needs: rust-tests
     runs-on: macos-latest
     timeout-minutes: 90
