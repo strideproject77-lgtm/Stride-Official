@@ -2053,9 +2053,9 @@ impl AndroidRuntime {
                     }
                     let display_text = |heap: &ManagedHeap| -> Option<String> {
                         let display = heap.get_instance_field(activity_obj, "display").ok()
-                            .and_then(Value::as_object)?;
+                            .and_then(|value| value.as_object())?;
                         let text = heap.get_instance_field(display, "mText").ok()
-                            .and_then(Value::as_object)?;
+                            .and_then(|value| value.as_object())?;
                         heap.get_string(text).ok().map(str::to_owned)
                     };
                     let display_before = display_text(&self.heap);
