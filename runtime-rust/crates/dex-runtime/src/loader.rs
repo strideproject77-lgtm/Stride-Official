@@ -4,7 +4,7 @@
 //! resolves method/field references, and executes static initializers (<clinit>).
 
 use std::collections::{HashMap, HashSet};
-use stride_dex_inspector::classes::{ClassInventory, inspect_classes};
+use stride_dex_inspector::classes::{ClassInventory, inspect_classes_for_loading};
 use stride_dex_inspector::read_code_item;
 use crate::hierarchy::{ClassHierarchy, RuntimeClass};
 use crate::interpreter::{MethodCode, ArtVm, ExecutionStopReason};
@@ -93,7 +93,7 @@ impl AppClassLoader {
         dex_bytes: &[u8],
         diagnostics: Option<&RuntimeDiagnostics>,
     ) -> Result<usize, String> {
-        let inventory = match inspect_classes(dex_bytes) {
+        let inventory = match inspect_classes_for_loading(dex_bytes) {
             Ok(inventory) => inventory,
             Err(error) => {
                 let detail = format!("DEX class inspection failed: {:?}", error);
