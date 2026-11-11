@@ -18,6 +18,9 @@ pub enum ClassReadError {
     InvalidUleb128,
     InvalidCodeItem,
     InvalidInstructions,
+    InstructionDecode { method_index: u32, code_offset: u32, reason: super::DecodeError },
+    RegisterOperandDecode { method_index: u32, code_offset: u32, reason: super::DecodeError },
+    InvalidRegisterLayoutAt { method_index: u32, code_offset: u32 },
     InvalidRegisterLayout,
     InvalidMethodKind,
     DuplicateMethod,
@@ -337,14 +340,20 @@ fn class_data(
             }
             if code != 0 {
                 let body = read_code_item(b, code).map_err(|error| match error {
+                    CodeItemError::InstructionDecode(reason) => ClassReadError::InstructionDecode {
+                        method_index: idx, code_offset: code, reason,
+                    },
                     CodeItemError::InvalidInstructions => ClassReadError::InvalidInstructions,
                     _ => ClassReadError::InvalidCodeItem,
                 })?;
-                validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)?;
-                super::decode_instructions(body.instructions)
-                    .map_err(|_| ClassReadError::InvalidInstructions)?;
+                validate_register_layout(body.registers_size, body.ins_size, flags, &prototype)
+                    .map_err(|_| ClassReadError::InvalidRegisterLayoutAt {
+                        method_index: idx, code_offset: code,
+                    })?;
                 super::validate_register_operands(body.instructions, body.registers_size)
-                    .map_err(|_| ClassReadError::InvalidInstructions)?;
+                    .map_err(|reason| ClassReadError::RegisterOperandDecode {
+                        method_index: idx, code_offset: code, reason,
+                    })?;
             }
             found.push(MethodDefinition {
                 method_index: idx, name, prototype, access_flags: flags, code_offset: code, is_direct
