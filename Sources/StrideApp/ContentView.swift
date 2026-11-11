@@ -1047,7 +1047,7 @@ private struct APKDetailSheet: View {
                                             // Record one real input-to-guest-render sample only after
                                             // the guest callback batch has run and its framebuffer
                                             // has been copied. Never substitute host dispatch-call time.
-                                            if let started = pendingTouchTimestamp {
+                                            if pump.delivered > 0, let started = pendingTouchTimestamp {
                                                 let elapsed = DispatchTime.now().uptimeNanoseconds &- started
                                                 touchResponseMilliseconds = Double(elapsed) / 1_000_000
                                                 pendingTouchTimestamp = nil
