@@ -282,8 +282,8 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                       let located = packageArchives.lazy.compactMap({ candidate -> (Archive, Entry)? in
                           guard let match = candidate.first(where: { $0.path == path }) else { return nil }
                           return (candidate, match)
-                      }).first,
-                      let (resourceArchive, entry) = located else { continue }
+                      }).first else { continue }
+                let (resourceArchive, entry) = located
                 var encoded = Data()
                 _ = try resourceArchive.extract(entry) { encoded.append($0) }
                 guard let image = UIImage(data: encoded), let cgImage = image.cgImage else { continue }
