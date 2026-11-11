@@ -180,6 +180,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
     )
 
     func launch(packageAt url: URL, onLog: @escaping (String) -> Void = { _ in }) async throws -> APKExecutionResult {
+        try Task.checkCancellation()
         onLog("[INFO] Launch requested for \(url.lastPathComponent)")
         onLog("[INFO] Opening APK archive")
         guard let archive = Archive(url: url, accessMode: .read) else {
@@ -214,6 +215,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }()
         for splitURL in splitURLs {
+            try Task.checkCancellation()
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
             } else {
@@ -223,7 +225,9 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         onLog("[INFO] Package components discovered: \(packageArchives.count) APK(s), \(splitURLs.count) split(s)")
 
         for (archiveIndex, packageArchive) in packageArchives.enumerated() {
+            try Task.checkCancellation()
             for entry in packageArchive {
+                try Task.checkCancellation()
                 if entry.path == "resources.arsc" {
                     // ResourceCatalog currently accepts one table. Prefer the base table.
                     if resourceTableData.isEmpty {
@@ -254,6 +258,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             throw RuntimeExecutionError.missingManifest
         }
 
+        try Task.checkCancellation()
         let packageName = url.deletingPathExtension().lastPathComponent
         onLog("[INFO] Resource table: \(resourceTableData.count) bytes")
         onLog("[INFO] Initializing ART-compatible runtime")
@@ -261,6 +266,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             onLog("[FATAL] Rust runtime creation returned null")
             throw RuntimeExecutionError.runtimeInitializationFailed
         }
+        var runtimeOwnershipTransferred = false
+        defer {
+            if !runtimeOwnershipTransferred {
+                stride_runtime_destroy(runtime)
+            }
+        }
+        try Task.checkCancellation()
         if !resourceTableData.isEmpty {
             let resourceStatus = resourceTableData.withUnsafeBytes { raw in
                 stride_runtime_load_resource_table(runtime, raw.bindMemory(to: UInt8.self).baseAddress, resourceTableData.count)
@@ -272,6 +284,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             let fileCount = stride_runtime_resource_file_count(runtime)
             var decodedImages = 0
             for index in 0..<min(fileCount, 4096) {
+                try Task.checkCancellation()
                 var resourceID: UInt32 = 0
                 var pathBuffer = [UInt8](repeating: 0, count: 1024)
                 let pathLength = pathBuffer.withUnsafeMutableBufferPointer { buffer in
@@ -311,13 +324,6 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             onLog("[INFO] Decoded \(decodedImages) Android image resources")
         }
-        var runtimeOwnershipTransferred = false
-        defer {
-            if !runtimeOwnershipTransferred {
-                stride_runtime_destroy(runtime)
-            }
-        }
-
         // A manifest without executable DEX code cannot enter the managed runtime.
         guard !dexDataList.isEmpty else {
             onLog("[ERROR] No classes*.dex entries found in APK")
@@ -326,6 +332,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         // Load every DEX and stop immediately if the runtime rejects one.
         for (index, dex) in dexDataList.enumerated() {
+            try Task.checkCancellation()
             onLog("[INFO] Loading DEX file \(index + 1)/\(dexDataList.count) (\(dex.count) bytes)")
             let dexStatus = dex.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
@@ -333,6 +340,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 }
                 return stride_runtime_load_dex(runtime, ptr, rawBuffer.count)
             }
+            try Task.checkCancellation()
             guard dexStatus == 0 else {
                 onLog("[ERROR] DEX \(index + 1) load failed with status \(dexStatus)")
 
@@ -362,6 +370,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
         for (soName, soData) in soDataList {
+            try Task.checkCancellation()
             onLog("[INFO] Loading native library \(soName) (\(soData.count) bytes)")
             let nativeStatus = soData.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
@@ -371,6 +380,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     stride_runtime_load_so(runtime, namePtr, ptr, rawBuffer.count)
                 }
             }
+            try Task.checkCancellation()
             guard nativeStatus == 0 else {
                 // Best-effort launch: a failed optional/unsupported .so must not
                 // prevent trying the remaining libraries and managed Activity.
