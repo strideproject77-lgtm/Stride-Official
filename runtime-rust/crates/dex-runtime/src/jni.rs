@@ -339,7 +339,8 @@ impl JniNativeRegistry {
         self.register("Ljava/lang/StringBuilder;", "<init>", "()V", |env, args| {
             let receiver = args.first().and_then(Value::as_object)
                 .ok_or("StringBuilder constructor receiver is null")?;
-            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(env.new_string_utf("")?))?;
+            let empty = env.new_string_utf("")?;
+            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(empty))?;
             Ok(None)
         });
         self.register("Ljava/lang/StringBuilder;", "<init>", "(Ljava/lang/String;)V", |env, args| {
