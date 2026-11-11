@@ -912,6 +912,7 @@ private struct APKDetailSheet: View {
     @State private var guestFramebufferHeight = 0
     @State private var guestTouchActive = false
     @State private var touchResponseMilliseconds: Double?
+    @State private var liveGuestFPS: Float?
     @State private var showingGuestKeyboard = false
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
@@ -1017,6 +1018,7 @@ private struct APKDetailSheet: View {
                             frameScheduler = nil
                             guestTouchActive = false
                             touchResponseMilliseconds = nil
+                            liveGuestFPS = nil
                             executionResult = nil
                             sessionLogLines = []
                             diagnostics.beginSession(apkName: item.displayName)
@@ -1037,6 +1039,10 @@ private struct APKDetailSheet: View {
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 let scheduler = GuestFrameScheduler { _ in
                                     let pump = res.session.pumpGuestEvents()
+                                    let guestFrames = res.session.guestFrameStats()
+                                    if let fps = guestFrames.fps {
+                                        liveGuestFPS = fps
+                                    }
                                     if pump.status == 0 {
                                         if pump.delivered > 0 {
                                             appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
@@ -1230,6 +1236,7 @@ private struct APKDetailSheet: View {
             frameScheduler?.stop()
             frameScheduler = nil
             touchResponseMilliseconds = nil
+            liveGuestFPS = nil
             StrideOrientationController.shared.reset()
             executionResult?.session.close()
             if executionResult != nil {
@@ -1363,6 +1370,7 @@ private struct APKDetailSheet: View {
         frameScheduler = nil
         guestTouchActive = false
         touchResponseMilliseconds = nil
+        liveGuestFPS = nil
         showingGuestKeyboard = false
         guestKeyboardFocused = false
         guestFramebufferData = nil
@@ -1462,9 +1470,12 @@ private struct APKDetailSheet: View {
         return .green
     }
 
-    // Guest rendering is not active yet; never present host display cadence as game FPS.
-    // FPS remains unavailable until the guest actually produces frames.
-    private var liveFPSLabel: String { "--" }
+    // FPS is sourced only from successful guest OpenGL buffer swaps.
+    // Host CADisplayLink ticks and framebuffer polling never count as guest frames.
+    private var liveFPSLabel: String {
+        guard let fps = liveGuestFPS else { return "--" }
+        return String(format: "%.0f", fps)
+    }
 
     // Per-input sample: iOS touch dispatch -> guest event pump/callback -> framebuffer copy.
     // No touch or no guest response means no fabricated value is displayed.
