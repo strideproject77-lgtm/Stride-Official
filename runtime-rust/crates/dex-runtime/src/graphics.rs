@@ -1,6 +1,7 @@
 //! Android Graphics, Input Events, and Audio subsystem architectures.
 
 use std::collections::VecDeque;
+use std::time::Instant;
 use std::sync::Mutex;
 
 /// Screen orientation matching Android Configuration.ORIENTATION_*.
@@ -127,6 +128,8 @@ pub struct PointerCoords {
 pub struct MotionEvent {
     pub action: i32,
     pub event_time_ms: u64,
+    /// Host monotonic timestamp captured when the event enters Stride's guest queue.
+    pub host_enqueued_at: Instant,
     pub pointers: Vec<PointerCoords>,
 }
 
@@ -265,6 +268,7 @@ mod tests {
         q.enqueue_motion(MotionEvent {
             action: ACTION_DOWN,
             event_time_ms: 100,
+            host_enqueued_at: Instant::now(),
             pointers: vec![PointerCoords { id: 0, x: 50.0, y: 75.0, pressure: 1.0 }],
         });
         let ev = q.poll_motion().unwrap();
