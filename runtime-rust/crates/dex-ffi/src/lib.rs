@@ -338,10 +338,9 @@ pub unsafe extern "C" fn stride_runtime_pump_guest_events(
     let rt = unsafe { &mut *runtime };
     rt.last_touch_processing_ms = None;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        let delivered=rt.pump_guest_events(max_events as usize,step_budget)?;
-        // Re-render after every guest event batch so View mutations reach the host framebuffer.
-        rt.render_active_activity_surface()?;
-        Ok::<usize,String>(delivered)
+        // AndroidRuntime pumps callbacks and redraws only when queued guest input exists.
+        // Do not synthesize a render on every host display-link tick.
+        rt.pump_guest_events(max_events as usize,step_budget)
     }));
     match result {
         Ok(Ok(delivered)) => {
