@@ -68,6 +68,9 @@ pub struct AndroidRuntime {
     pub input_queue: Arc<InputQueue>,
     /// Latest event-to-guest-callback-and-render latency for the current input pump.
     pub last_touch_processing_ms: Option<f32>,
+    /// Guest-produced OpenGL swap count and timestamp; host display ticks never increment these.
+    pub guest_frame_count: u64,
+    pub last_guest_swap_at: Option<std::time::Instant>,
     pub display_metrics: DisplayMetrics,
     pub active_activity_obj: Option<u32>,
     pub active_activity_class: Option<String>,
@@ -206,6 +209,8 @@ impl AndroidRuntime {
             surface: Surface::new(1080, 1920),
             input_queue: Arc::new(InputQueue::new()),
             last_touch_processing_ms: None,
+            guest_frame_count: 0,
+            last_guest_swap_at: None,
             display_metrics: DisplayMetrics::default(),
             active_activity_obj: None,
             active_activity_class: None,
