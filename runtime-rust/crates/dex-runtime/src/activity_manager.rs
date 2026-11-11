@@ -187,7 +187,7 @@ impl ActivityManager {
             if let Some(obj_ref) = receiver {
                 args.push(Value::Object(obj_ref));
             }
-            let _ = vm.execute_method(u16::try_from(loaded_method).unwrap_or(u16::MAX), &args, 10_000);
+            let _ = vm.execute_method(loaded_method, &args, 10_000);
         }
     }
 }
