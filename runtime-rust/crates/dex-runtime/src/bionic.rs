@@ -268,7 +268,12 @@ impl BionicEnvironment {
             let address = guest_pointer(args.first())?;
             let byte = args.get(1).map(Value::as_int).unwrap_or(0) as u8;
             let length = guest_length(args.get(2))?;
-            let data = vec![byte; length];
+            if length > GuestAddressSpace::MAX_ALLOCATION {
+                return Err("memset length exceeds guest memory limit".into());
+            }
+            let mut data = Vec::new();
+            data.try_reserve_exact(length).map_err(|_| "memset allocation failed")?;
+            data.resize(length, byte);
             memory.lock().map_err(|_| "guest memory lock poisoned")?.write(address, &data)?;
             Ok(Value::Long(address as i64))
         });
@@ -328,6 +333,9 @@ impl BionicEnvironment {
                 let mut space = memory.lock().map_err(|_| "guest memory lock poisoned")?;
                 let source_bytes = space.c_string(source)?;
                 let limit = if name == "strncpy" { guest_length(args.get(2))? } else { source_bytes.len() + 1 };
+                if limit > GuestAddressSpace::MAX_ALLOCATION {
+                    return Err("string copy length exceeds guest memory limit".into());
+                }
                 let mut copied = source_bytes;
                 if name == "strncpy" {
                     copied.truncate(limit);
@@ -860,9 +868,41 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_native_memory_and_thread_symbols_fail_explicitly() {
+    fn guest_malloc_memset_strlen_memcpy_memcmp_and_free_work_on_guest_memory() {
         let bionic = BionicEnvironment::new();
-        for name in ["malloc", "calloc", "pthread_create", "pthread_mutex_lock", "AAssetManager_open"] {
+        let malloc = bionic.resolve_symbol("malloc").unwrap();
+        let first = malloc(&[Value::Long(16)]).unwrap().as_long() as u64;
+        let second = malloc(&[Value::Long(16)]).unwrap().as_long() as u64;
+        assert_ne!(first, second);
+
+        let memset = bionic.resolve_symbol("memset").unwrap();
+        memset(&[Value::Long(first as i64), Value::Int(b'c' as i32), Value::Long(3)]).unwrap();
+        memset(&[Value::Long((first + 3) as i64), Value::Int(0), Value::Long(1)]).unwrap();
+        assert_eq!(
+            bionic.resolve_symbol("strlen").unwrap()(&[Value::Long(first as i64)]).unwrap(),
+            Value::Long(3)
+        );
+
+        bionic.resolve_symbol("memcpy").unwrap()(&[
+            Value::Long(second as i64), Value::Long(first as i64), Value::Long(4)
+        ]).unwrap();
+        assert_eq!(
+            bionic.resolve_symbol("memcmp").unwrap()(&[
+                Value::Long(first as i64), Value::Long(second as i64), Value::Long(4)
+            ]).unwrap(),
+            Value::Int(0)
+        );
+
+        let free = bionic.resolve_symbol("free").unwrap();
+        assert_eq!(free(&[Value::Long(first as i64)]).unwrap(), Value::Int(0));
+        assert!(free(&[Value::Long(first as i64)]).is_err());
+        free(&[Value::Long(second as i64)]).unwrap();
+    }
+
+    #[test]
+    fn unsupported_native_thread_and_asset_symbols_fail_explicitly() {
+        let bionic = BionicEnvironment::new();
+        for name in ["pthread_create", "pthread_mutex_lock", "AAssetManager_open"] {
             let result = bionic.resolve_symbol(name).expect("symbol should be discoverable")(&[]);
             assert!(result.unwrap_err().contains(name));
         }
