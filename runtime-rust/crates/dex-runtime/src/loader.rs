@@ -339,9 +339,7 @@ impl AppClassLoader {
         // Look for <clinit>()V
         let clinit_id = self.find_method(class_descriptor, "<clinit>", "()V");
         if let Some(mid) = clinit_id {
-            let id16 = u16::try_from(mid).map_err(|_| {
-                format!("Class initializer method ID {} exceeds the interpreter's 16-bit limit for {}", mid, class_descriptor)
-            })?;
+            let runtime_method_id = mid;
             let method_map = self.export_method_codes();
             let metadata = self.dex_inventories.first().cloned();
             let dex_strings = metadata.as_ref().map(|inventory| inventory.strings.as_slice()).unwrap_or(strings);
@@ -355,7 +353,7 @@ impl AppClassLoader {
                 vm.attach_method_resolver(&inventory.method_references, &method_lookup);
             }
             vm.attach_static_fields(static_fields);
-            let report = vm.execute_method(id16, &[], 50_000)?;
+            let report = vm.execute_method(runtime_method_id, &[], 50_000)?;
             match report.stop_reason {
                 ExecutionStopReason::UncaughtException(ex) => {
                     if let Some(class) = self.classes.get_mut(class_descriptor) {
