@@ -176,6 +176,36 @@ pub unsafe extern "C" fn stride_runtime_finish_native_loading(runtime: *mut Andr
     }
 }
 
+/// Copies the Android package name from the binary manifest into a caller-owned UTF-8 buffer.
+/// Returns the required buffer size including the null terminator, or 0 when parsing fails.
+#[no_mangle]
+pub unsafe extern "C" fn stride_manifest_package_name(
+    manifest_data: *const u8,
+    manifest_len: usize,
+    out_name: *mut c_char,
+    capacity: usize,
+) -> usize {
+    if manifest_data.is_null() || manifest_len == 0 || manifest_len > isize::MAX as usize {
+        return 0;
+    }
+    let bytes = unsafe { slice::from_raw_parts(manifest_data, manifest_len) };
+    let metadata = match stride_dex_runtime::parse_manifest(bytes) {
+        Ok(metadata) => metadata,
+        Err(_) => return 0,
+    };
+    let Some(package_name) = metadata.package_name else { return 0 };
+    let name = package_name.as_bytes();
+    let Some(required) = name.len().checked_add(1) else { return 0 };
+    if out_name.is_null() || capacity < required {
+        return required;
+    }
+    unsafe {
+        std::ptr::copy_nonoverlapping(name.as_ptr(), out_name.cast::<u8>(), name.len());
+        *out_name.add(name.len()) = 0;
+    }
+    required
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn stride_manifest_screen_orientation(
     manifest_data: *const u8, manifest_len: usize, out_orientation: *mut i32,
