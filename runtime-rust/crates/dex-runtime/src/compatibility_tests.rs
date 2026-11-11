@@ -66,6 +66,7 @@ mod tests {
         let motion = MotionEvent {
             action: ACTION_DOWN,
             event_time_ms: 1000,
+            host_enqueued_at: std::time::Instant::now(),
             pointers: vec![PointerCoords { id: 0, x: 250.0, y: 400.0, pressure: 1.0 }],
         };
         runtime.input_queue.enqueue_motion(motion);
