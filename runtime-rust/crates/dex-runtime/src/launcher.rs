@@ -2075,13 +2075,16 @@ impl AndroidRuntime {
                         ExecutionStopReason::ReturnedVoid => activity_consumed = false,
                     }
                     drop(vm);
-                    if event.action == ACTION_UP {
+                    // The calculator fixture mutates its display on ACTION_DOWN and
+                    // deliberately ignores ACTION_UP. Record both discrete transitions so
+                    // diagnostics observe the state-changing callback, not only its release.
+                    if event.action == ACTION_DOWN || event.action == ACTION_UP {
                         let display_after = display_text(&self.heap);
                         self.diagnostics.record_detailed(
                             DiagnosticSeverity::Info,
                             "Input",
                             "ACTIVITY_TOUCH_CALLBACK_EXECUTED",
-                            "Guest Activity.onTouchEvent completed for a touch-up event",
+                            "Guest Activity.onTouchEvent completed for a touch event",
                             Some(&format!(
                                 "activity={} x={:.1} y={:.1} steps={} stop={} consumed={} display_before={:?} display_after={:?}",
                                 activity_class, x, y, callback_steps, callback_stop, activity_consumed,
