@@ -6,7 +6,7 @@ pub mod classes;
 pub enum CodeItemError {
     Truncated, InvalidOffset, InstructionDataOutOfBounds, InvalidTryPadding,
     TryItemsOutOfBounds, InvalidTryRange, InvalidHandlerList, InvalidHandlerOffset,
-    InvalidHandlerAddress, InvalidInstructions,
+    InvalidHandlerAddress, InvalidInstructions, InstructionDecode(DecodeError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,7 +106,7 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
     let insns_bytes=usize::try_from(insns_size).ok().and_then(|n|n.checked_mul(2)).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let insns_end=insns_start.checked_add(insns_bytes).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::InstructionDataOutOfBounds)?;
     let decoded = decode_instructions(&bytes[insns_start..insns_end])
-        .map_err(|_| CodeItemError::InvalidInstructions)?;
+        .map_err(CodeItemError::InstructionDecode)?;
     let instruction_boundaries: Vec<usize> = decoded.iter()
         .filter(|instruction| instruction.kind == InstructionKind::Opcode)
         .map(|instruction| instruction.code_unit_offset)
