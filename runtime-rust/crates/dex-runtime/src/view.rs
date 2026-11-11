@@ -575,6 +575,12 @@ mod tests {
         assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getText",
             "()Ljava/lang/CharSequence;", &[Value::Object(view)]).unwrap(),
             Some(Value::Object(text)));
+        assert_eq!(
+            heap.get_instance_field(view, "mTextResourceId").unwrap(),
+            Value::Int(0),
+            "dynamic CharSequence text must suppress stale XML text resources",
+        );
+        assert_eq!(heap.get_instance_field(view, "mNeedsDraw").unwrap(), Value::Int(1));
         assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getCurrentTextColor",
             "()I", &[Value::Object(view)]).unwrap(), Some(Value::Int(0xff12ab34u32 as i32)));
         assert_eq!(invoke(&jni, &mut heap, "Landroid/widget/TextView;", "getTextSize",
