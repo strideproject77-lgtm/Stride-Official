@@ -595,7 +595,7 @@ mod tests {
         bytes[string_table_start..string_table_start + 4]
             .copy_from_slice(&(data_offset as u32).to_le_bytes());
         // U+1F600 is represented as its UTF-16 surrogate pair in Modified UTF-8.
-        bytes.extend_from_slice(&[6, 0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80, 0]);
+        bytes.extend_from_slice(&[2, 0xed, 0xa0, 0xbd, 0xed, 0xb8, 0x80, 0]);
         let decoded = dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0)
             .expect("a valid surrogate pair must decode");
         assert_eq!(decoded, "😀");
