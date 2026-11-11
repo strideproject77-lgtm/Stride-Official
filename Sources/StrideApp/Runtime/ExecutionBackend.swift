@@ -200,7 +200,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         var manifestData = Data()
-        var dexDataList: [Data] = []
+        var dexDataList: [(source: String, path: String, data: Data)] = []
         var soDataList: [(String, Data)] = []
         var resourceTableData = Data()
 
@@ -251,7 +251,12 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
                     var dex = Data()
                     _ = try packageArchive.extract(entry) { chunk in dex.append(chunk) }
-                    dexDataList.append(dex)
+                    let sourceName = archiveIndex == 0
+                        ? url.lastPathComponent
+                        : (splitURLs.indices.contains(archiveIndex - 1)
+                            ? splitURLs[archiveIndex - 1].lastPathComponent
+                            : "split-\(archiveIndex)")
+                    dexDataList.append((source: sourceName, path: entry.path, data: dex))
                 } else if entry.path.hasPrefix("lib/arm64-v8a/") && entry.path.hasSuffix(".so") {
                     var so = Data()
                     _ = try packageArchive.extract(entry) { chunk in so.append(chunk) }
@@ -360,9 +365,11 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         }
 
         // Load every DEX and stop immediately if the runtime rejects one.
-        for (index, dex) in dexDataList.enumerated() {
+        for (index, dexEntry) in dexDataList.enumerated() {
             try Task.checkCancellation()
-            onLog("[INFO] Loading DEX file \(index + 1)/\(dexDataList.count) (\(dex.count) bytes)")
+            let dex = dexEntry.data
+            let dexLabel = "\(dexEntry.source)!\(dexEntry.path)"
+            onLog("[INFO] Loading DEX file \(index + 1)/\(dexDataList.count): \(dexLabel) (\(dex.count) bytes)")
             let dexStatus = dex.withUnsafeBytes { rawBuffer -> Int32 in
                 guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
                     return 1
@@ -371,7 +378,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             try Task.checkCancellation()
             guard dexStatus == 0 else {
-                onLog("[ERROR] DEX \(index + 1) load failed with status \(dexStatus)")
+                onLog("[ERROR] DEX \(index + 1) \(dexLabel) load failed with status \(dexStatus)")
 
                 // Rust records the underlying parser/loader error in the runtime's
                 // bounded diagnostic timeline. Export it before destroying runtime.
@@ -392,9 +399,9 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 let detail = report.components(separatedBy: .newlines)
                     .last(where: { $0.contains("DEX load failed") || $0.contains("DEX class inspection failed") })
                     ?? "No detailed DEX diagnostic was recorded."
-                throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus, detail: detail)
+                throw RuntimeExecutionError.dexLoadFailed(index: index, status: dexStatus, detail: "\(dexLabel): \(detail)")
             }
-            onLog("[INFO] DEX file \(index + 1) loaded successfully (\(dex.count) bytes)")
+            onLog("[INFO] DEX file \(index + 1) loaded successfully: \(dexLabel) (\(dex.count) bytes)")
         }
 
         // Load native shared libraries (.so) into the Bionic/ELF linker
