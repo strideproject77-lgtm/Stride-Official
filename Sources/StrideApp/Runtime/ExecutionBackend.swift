@@ -207,6 +207,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         // XAPK/APKS/APKM imports are normalized to <package>/base.apk and
         // <package>/components/*.apk. Read the base first, then each retained split.
         var packageArchives: [Archive] = [archive]
+        var packageArchiveNames = [url.lastPathComponent]
         let componentsURL = url.deletingLastPathComponent().appendingPathComponent("components", isDirectory: true)
         let splitURLs: [URL] = {
             guard let enumerator = FileManager.default.enumerator(
@@ -229,6 +230,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             try Task.checkCancellation()
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
+                packageArchiveNames.append(splitURL.lastPathComponent)
             } else {
                 onLog("[WARN] Could not open preserved split APK: \(splitURL.lastPathComponent)")
             }
@@ -251,11 +253,9 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
                     var dex = Data()
                     _ = try packageArchive.extract(entry) { chunk in dex.append(chunk) }
-                    let sourceName = archiveIndex == 0
-                        ? url.lastPathComponent
-                        : (splitURLs.indices.contains(archiveIndex - 1)
-                            ? splitURLs[archiveIndex - 1].lastPathComponent
-                            : "split-\(archiveIndex)")
+                    let sourceName = packageArchiveNames.indices.contains(archiveIndex)
+                        ? packageArchiveNames[archiveIndex]
+                        : "package-component-\(archiveIndex)"
                     dexDataList.append((source: sourceName, path: entry.path, data: dex))
                 } else if entry.path.hasPrefix("lib/arm64-v8a/") && entry.path.hasSuffix(".so") {
                     var so = Data()
