@@ -422,7 +422,7 @@ impl JniNativeRegistry {
                                 let raw = format!("{:.*e}", precision - 1, number);
                                 if let Some((mantissa, exp)) = raw.split_once('e') {
                                     let exp_value = exp.parse::<i32>().unwrap_or(0);
-                                    format!("{mantissa}e{}{exp_value:02}", if exp_value >= 0 { "+" } else { "-" })
+                                    format!("{mantissa}e{}{magnitude:02}", if exp_value >= 0 { "+" } else { "-" }, magnitude = exp_value.abs())
                                 } else { raw }
                             } else {
                                 let decimals = (precision as i32 - 1 - exponent).max(0) as usize;
