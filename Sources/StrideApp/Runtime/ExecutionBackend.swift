@@ -57,6 +57,15 @@ final class APKRuntimeSession: @unchecked Sendable {
         return (status, delivered, measured >= 0 ? measured : nil)
     }
 
+    func guestFrameStats() -> (count: UInt64, fps: Float?) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return (0, nil) }
+        let count = stride_runtime_guest_frame_count(runtime)
+        let measured = stride_runtime_guest_fps(runtime)
+        return (count, measured >= 0 ? measured : nil)
+    }
+
     func copyFramebuffer() -> (data: Data, width: Int, height: Int)? {
         lock.lock();defer{lock.unlock()}
         guard let runtime else{return nil}
