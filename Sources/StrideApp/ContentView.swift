@@ -1064,7 +1064,7 @@ private struct APKDetailSheet: View {
                                 }
                                 frameScheduler = scheduler
                                 scheduler.start()
-                                appendSessionLog("[SESSION] Host display-link copies guest Surface pixels into SwiftUI; guest frame production is still pending")
+                                appendSessionLog("[SESSION] Host display-link polls guest input and copies the framebuffer; FPS counts successful guest GL swaps only")
                                 appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
                             } catch {
                                 guard !Task.isCancelled else { return }
@@ -1389,7 +1389,10 @@ private struct APKDetailSheet: View {
     private var executionStatusText: String {
         if isExecuting { return "Starting…" }
         if executionError != nil { return "Could not start — see the log" }
-        if executionResult != nil { return "Activity resumed · guest loop inactive" }
+        if executionResult != nil {
+            guard let fps = liveGuestFPS else { return "Activity resumed · waiting for guest frames" }
+            return fps > 0 ? "Guest rendering active" : "Guest renderer idle"
+        }
         return "Ready"
     }
 
