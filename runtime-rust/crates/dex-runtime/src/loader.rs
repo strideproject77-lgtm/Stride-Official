@@ -101,7 +101,7 @@ impl AppClassLoader {
                     diagnostics.record_detailed(
                         DiagnosticSeverity::RuntimeError, "DexLoader", "DEX_CLASS_INSPECTION_FAILED",
                         "DEX metadata inspection failed", Some(&detail),
-                        Some("Verify DEX magic/version, file size, checksum, map list, identifier tables and class-data offsets"),
+                        Some("Use the reported method_id, code_item offset and DecodeError to identify the unsupported opcode, malformed branch/payload, or invalid register operand"),
                     );
                 }
                 return Err(detail);
