@@ -57,6 +57,22 @@ final class APKRuntimeSession: @unchecked Sendable {
         return (status, delivered, measured >= 0 ? measured : nil)
     }
 
+    /// Exports the live Rust diagnostic timeline after guest input has been pumped.
+    /// Launch-time diagnostics alone cannot show callbacks that happen later.
+    func diagnosticsSnapshot() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let runtime else { return nil }
+        let required = stride_runtime_diagnostics_export(runtime, nil, 0)
+        guard required > 1, required <= 1_048_576 else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(required))
+        let written = buffer.withUnsafeMutableBufferPointer { storage in
+            stride_runtime_diagnostics_export(runtime, storage.baseAddress, storage.count)
+        }
+        guard written > 1 else { return nil }
+        return String(cString: buffer)
+    }
+
     func guestFrameStats() -> (count: UInt64, fps: Float?) {
         lock.lock()
         defer { lock.unlock() }
