@@ -148,6 +148,19 @@ impl GuestMemory {
         self.bytes[r].copy_from_slice(&value.to_le_bytes());
         Ok(())
     }
+    /// Read a bounded NUL-terminated guest string from a readable mapping.
+    pub fn read_c_string(&self, address: u64, max_len: usize) -> Result<Vec<u8>, Arm64Error> {
+        if max_len == 0 || max_len > 4096 { return Err(Arm64Error::MemoryLimit); }
+        let mut output = Vec::new();
+        output.try_reserve_exact(max_len.min(256)).map_err(|_| Arm64Error::MemoryLimit)?;
+        for offset in 0..max_len {
+            let current = address.checked_add(offset as u64).ok_or(Arm64Error::AddressOverflow)?;
+            let byte = self.read_u8(current)?;
+            if byte == 0 { return Ok(output); }
+            output.push(byte);
+        }
+        Err(Arm64Error::MemoryOutOfBounds)
+    }
     pub fn write_u64(&mut self, address: u64, value: u64) -> Result<(), Arm64Error> {
         self.check_permission(address, 8, false, true)?;
         let r = self.range(address, 8)?;
