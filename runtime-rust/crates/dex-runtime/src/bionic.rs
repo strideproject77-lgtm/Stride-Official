@@ -247,7 +247,8 @@ impl BionicEnvironment {
             let count = guest_length(args.first())?;
             let size = guest_length(args.get(1))?;
             let total = count.checked_mul(size).ok_or("calloc size overflow")?;
-            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(total)?;            Ok(Value::Long(address as i64))
+            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(total)?;
+            Ok(Value::Long(address as i64))
         });
         let memory = self.memory.clone();
         self.register("realloc", move |args| {
@@ -495,7 +496,8 @@ impl BionicEnvironment {
         ] {
             self.register(name, unsupported_symbol(match name {
                 "__system_property_get" => "__system_property_get",
-                "__system_property_find" => "__system_property_find",                "AAssetManager_fromJava" => "AAssetManager_fromJava",
+                "__system_property_find" => "__system_property_find",
+                "AAssetManager_fromJava" => "AAssetManager_fromJava",
                 "AAssetManager_open" => "AAssetManager_open", "AAsset_read" => "AAsset_read",
                 "AAsset_seek" => "AAsset_seek", "AAsset_getLength" => "AAsset_getLength",
                 "AAsset_getLength64" => "AAsset_getLength64", "AAsset_close" => "AAsset_close",
