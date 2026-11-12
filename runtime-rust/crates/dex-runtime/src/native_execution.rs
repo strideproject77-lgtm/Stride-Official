@@ -306,7 +306,7 @@ impl NativeGuestImage {
         cpu: &mut Arm64Cpu,
         instruction_budget_per_constructor: u64,
     ) -> Result<Vec<Arm64RunReport>, NativeExecutionError> {
-        let mut targets = Vec::with_capacity(self.init_array.len() + usize::from(self.init_function.is_some()));
+        let mut targets = Vec::with_capacity(self.init_array.len() + if self.init_function.is_some() { 1 } else { 0 });
         if let Some(address) = self.init_function { targets.push(address); }
         targets.extend(self.init_array.iter().copied());
         let mut reports = Vec::with_capacity(targets.len());
