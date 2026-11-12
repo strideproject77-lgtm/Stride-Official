@@ -3,7 +3,7 @@
 //! Provides the symbol resolution table, Bionic runtime environment,
 //! and native library relocation resolution for ELF ARM/ARM64 shared libraries.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use stride_elf_inspector::{inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture, ElfClass, ElfByteOrder};
 use stride_native_loader::{materialize_native_image, plan_native_image, NativeImagePlan, IOS_PAGE_SIZE};
@@ -247,8 +247,7 @@ impl BionicEnvironment {
             let count = guest_length(args.first())?;
             let size = guest_length(args.get(1))?;
             let total = count.checked_mul(size).ok_or("calloc size overflow")?;
-            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(total)?;
-            Ok(Value::Long(address as i64))
+            let address = memory.lock().map_err(|_| "guest memory lock poisoned")?.allocate(total)?;            Ok(Value::Long(address as i64))
         });
         let memory = self.memory.clone();
         self.register("realloc", move |args| {
@@ -496,8 +495,7 @@ impl BionicEnvironment {
         ] {
             self.register(name, unsupported_symbol(match name {
                 "__system_property_get" => "__system_property_get",
-                "__system_property_find" => "__system_property_find",
-                "AAssetManager_fromJava" => "AAssetManager_fromJava",
+                "__system_property_find" => "__system_property_find",                "AAssetManager_fromJava" => "AAssetManager_fromJava",
                 "AAssetManager_open" => "AAssetManager_open", "AAsset_read" => "AAsset_read",
                 "AAsset_seek" => "AAsset_seek", "AAsset_getLength" => "AAsset_getLength",
                 "AAsset_getLength64" => "AAsset_getLength64", "AAsset_close" => "AAsset_close",
@@ -667,7 +665,7 @@ impl NativeLinker {
         }
 
         for symbol in dynamic_info.symbols {
-            if !symbol.name.is_empty() && symbol.section_index != 0 {
+            if !symbol.name.is_empty() && symbol.section_index != 0 && symbol.binding != 0 {
                 if symbol.name == "JNI_OnLoad" {
                     has_jni_onload = true;
                     jni_onload_address = load_bias.checked_add(symbol.value);
@@ -699,80 +697,173 @@ impl NativeLinker {
         Ok(self.modules.get(soname).unwrap())
     }
 
-    /// Applies supported ARM/AArch64 dynamic relocations to guest image buffers.
-    /// Unsupported kinds and unresolved external symbols are returned as diagnostics.
+    /// Resolves an undefined symbol through the requester's DT_NEEDED closure first,
+    /// preserving dependency order, then through the process-wide loaded-module scope.
+    fn resolve_dependency_symbol(&self, requester: &str, symbol_name: &str) -> Option<u64> {
+        let root = self.modules.get(requester)?;
+        let mut pending: Vec<String> = root.needed_libraries.iter().rev().cloned().collect();
+        let mut visited = HashSet::new();
+
+        while let Some(name) = pending.pop() {
+            if !visited.insert(name.clone()) {
+                continue;
+            }
+            if let Some(module) = self.modules.get(&name) {
+                if let Some(address) = module.exported_symbols.get(symbol_name) {
+                    return Some(*address);
+                }
+                for dependency in module.needed_libraries.iter().rev() {
+                    pending.push(dependency.clone());
+                }
+            }
+        }
+
+        // Android's global linker scope can expose already-loaded global modules
+        // outside the direct dependency closure. Keep this deterministic.
+        for name in &self.loaded_order {
+            if name == requester || visited.contains(name) {
+                continue;
+            }
+            if let Some(address) = self.modules.get(name)
+                .and_then(|module| module.exported_symbols.get(symbol_name)) {
+                return Some(*address);
+            }
+        }
+        None
+    }
+
+    /// Applies supported ARM/AArch64 relocations transactionally per module.
+    /// If any relocation in a module cannot be resolved, none of that module's
+    /// staged relocation writes are committed.
     pub fn apply_relocations(&mut self) -> Vec<String> {
         let mut issues = Vec::new();
         let order = self.loaded_order.clone();
+
         for soname in order {
             let Some(snapshot) = self.modules.get(&soname) else { continue };
             let architecture = snapshot.architecture;
             let base = snapshot.load_bias;
             let relocations = snapshot.relocations.clone();
             let symbols = snapshot.dynamic_symbols.clone();
+            let mut patches: Vec<(usize, Vec<u8>)> = Vec::with_capacity(relocations.len());
+            let mut module_issues = Vec::new();
+
             for planned in relocations {
                 let Some(offset) = planned.image_offset else { continue };
                 let kind = planned.relocation.relocation_type;
                 let (width, relative) = match architecture {
                     ElfArchitecture::Aarch64 => match kind {
-                        1027 => (8usize, true),
-                        257 | 1025 | 1026 => (8, false),
-                        _ => { issues.push(format!("{}: unsupported AArch64 relocation {}", soname, kind)); continue; }
+                        1027 => (8usize, true),       // R_AARCH64_RELATIVE
+                        257 | 1025 | 1026 => (8, false), // ABS64, GLOB_DAT, JUMP_SLOT
+                        _ => {
+                            module_issues.push(format!("{}: unsupported AArch64 relocation {}", soname, kind));
+                            break;
+                        }
                     },
                     ElfArchitecture::Arm => match kind {
-                        23 => (4usize, true),
-                        2 | 21 | 22 => (4, false),
-                        _ => { issues.push(format!("{}: unsupported ARM relocation {}", soname, kind)); continue; }
+                        23 => (4usize, true), // R_ARM_RELATIVE
+                        2 | 21 | 22 => (4, false), // ABS32, GLOB_DAT, JUMP_SLOT
+                        _ => {
+                            module_issues.push(format!("{}: unsupported ARM relocation {}", soname, kind));
+                            break;
+                        }
                     },
-                    other => { issues.push(format!("{}: unsupported ELF architecture {:?}", soname, other)); continue; }
-                };
-                let Ok(start) = usize::try_from(offset) else {
-                    issues.push(format!("{}: relocation offset conversion overflow", soname)); continue;
-                };
-                if self.modules.get(&soname).and_then(|m| start.checked_add(width).map(|end| end <= m.mapped_image.len())) != Some(true) {
-                    issues.push(format!("{}: relocation target {:#x} is outside image", soname, offset)); continue;
-                }
-                let addend = if let Some(explicit) = planned.relocation.addend { explicit } else {
-                    let image = &self.modules.get(&soname).unwrap().mapped_image;
-                    if width == 8 {
-                        i64::from_le_bytes(image[start..start+8].try_into().unwrap())
-                    } else {
-                        i32::from_le_bytes(image[start..start+4].try_into().unwrap()) as i64
+                    other => {
+                        module_issues.push(format!("{}: unsupported ELF architecture {:?}", soname, other));
+                        break;
                     }
                 };
-                let symbol_address = if relative { Some(0u64) } else {
+
+                let Ok(start) = usize::try_from(offset) else {
+                    module_issues.push(format!("{}: relocation offset conversion overflow", soname));
+                    break;
+                };
+                let Some(end) = start.checked_add(width) else {
+                    module_issues.push(format!("{}: relocation target range overflow", soname));
+                    break;
+                };
+                let Some(image_len) = self.modules.get(&soname).map(|module| module.mapped_image.len()) else {
+                    module_issues.push(format!("{}: module disappeared during relocation", soname));
+                    break;
+                };
+                if end > image_len {
+                    module_issues.push(format!("{}: relocation target {:#x} is outside image", soname, offset));
+                    break;
+                }
+
+                let addend = if let Some(explicit) = planned.relocation.addend {
+                    explicit
+                } else {
+                    let image = &self.modules.get(&soname).unwrap().mapped_image;
+                    if width == 8 {
+                        i64::from_le_bytes(image[start..end].try_into().unwrap())
+                    } else {
+                        i32::from_le_bytes(image[start..end].try_into().unwrap()) as i64
+                    }
+                };
+
+                let symbol_address = if relative {
+                    Some(base)
+                } else {
                     let Some(symbol) = symbols.get(planned.relocation.symbol_index as usize) else {
-                        issues.push(format!("{}: missing relocation symbol index {}", soname, planned.relocation.symbol_index)); continue;
+                        module_issues.push(format!(
+                            "{}: missing relocation symbol index {}",
+                            soname, planned.relocation.symbol_index
+                        ));
+                        break;
                     };
                     if symbol.section_index != 0 {
                         base.checked_add(symbol.value)
                     } else if symbol.binding == 2 {
+                        // ELF weak undefined symbols resolve to address zero.
                         Some(0)
                     } else {
-                        let mut found = None;
-                        for candidate_name in &self.loaded_order {
-                            if let Some(candidate) = self.modules.get(candidate_name) {
-                                if let Some(address) = candidate.exported_symbols.get(&symbol.name) {
-                                    found = Some(*address);
-                                    if found.is_some() { break; }
-                                }
-                            }
-                        }
-                        found
+                        self.resolve_dependency_symbol(&soname, &symbol.name)
                     }
                 };
+
                 let Some(symbol_address) = symbol_address else {
-                    issues.push(format!("{}: unresolved relocation symbol {}", soname,
-                        symbols.get(planned.relocation.symbol_index as usize).map(|s| s.name.as_str()).unwrap_or("<invalid>")));
-                    continue;
+                    let symbol_name = symbols.get(planned.relocation.symbol_index as usize)
+                        .map(|symbol| symbol.name.as_str()).unwrap_or("<invalid>");
+                    module_issues.push(format!(
+                        "{}: unresolved relocation symbol {}",
+                        soname, symbol_name
+                    ));
+                    break;
                 };
-                let value = if relative { base as i128 + addend as i128 } else { symbol_address as i128 + addend as i128 };
+
+                let value = if relative {
+                    base as i128 + addend as i128
+                } else {
+                    symbol_address as i128 + addend as i128
+                };
                 if value < 0 || (width == 4 && value > u32::MAX as i128) || value > u64::MAX as i128 {
-                    issues.push(format!("{}: relocation result overflow for type {}", soname, kind)); continue;
+                    module_issues.push(format!(
+                        "{}: relocation result overflow for type {}",
+                        soname, kind
+                    ));
+                    break;
                 }
-                let Some(module) = self.modules.get_mut(&soname) else { continue };
-                if width == 8 { module.mapped_image[start..start+8].copy_from_slice(&(value as u64).to_le_bytes()); }
-                else { module.mapped_image[start..start+4].copy_from_slice(&(value as u32).to_le_bytes()); }
+
+                let patch = if width == 8 {
+                    (value as u64).to_le_bytes().to_vec()
+                } else {
+                    (value as u32).to_le_bytes().to_vec()
+                };
+                patches.push((start, patch));
+            }
+
+            if !module_issues.is_empty() {
+                // Preserve the original image on any unresolved/unsupported entry.
+                issues.extend(module_issues);
+                continue;
+            }
+
+            if let Some(module) = self.modules.get_mut(&soname) {
+                for (start, patch) in patches {
+                    let end = start + patch.len();
+                    module.mapped_image[start..end].copy_from_slice(&patch);
+                }
             }
         }
         issues
