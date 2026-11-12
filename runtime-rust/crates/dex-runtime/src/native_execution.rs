@@ -15,7 +15,7 @@ use stride_native_loader::{
 };
 use crate::bionic::{LoadedNativeModule, NativeLinker};
 use crate::arm64_guest::{
-    run_aarch64, Arm64Cpu, Arm64Error, Arm64RunReport, GuestMemory, MemoryProtection,
+    run_aarch64, Arm64Cpu, Arm64Error, Arm64RunReport, GuestMemory, MemoryProtection, MAX_GUEST_MEMORY,
 };
 
 pub const DEFAULT_GUEST_LOAD_BIAS: u64 = 0x0000_0001_0000_0000;
@@ -72,6 +72,10 @@ impl NativeGuestImage {
     /// the module has no unresolved relocation diagnostics.
     pub fn from_linked_module(module: &LoadedNativeModule) -> Result<Self, NativeExecutionError> {
         if module.architecture != ElfArchitecture::Aarch64 { return Err(NativeExecutionError::UnsupportedArchitecture); }
+        if module.mapped_image.len() as u64 != module.plan.image_size
+            || module.mapped_image.len().checked_add(GUEST_NATIVE_STACK_SIZE).filter(|size| *size <= MAX_GUEST_MEMORY).is_none() {
+            return Err(NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit));
+        }
         let image_base = module.load_bias.checked_add(module.plan.image_virtual_start)
             .ok_or(NativeExecutionError::EntryAddressOverflow)?;
         let image_size = module.mapped_image.len() as u64;
@@ -157,6 +161,10 @@ impl NativeGuestImage {
         }
 
         let plan = plan_native_image(&info, load_bias).map_err(NativeExecutionError::LoadPlan)?;
+        let image_size = usize::try_from(plan.image_size).map_err(|_| NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit))?;
+        if image_size.checked_add(GUEST_NATIVE_STACK_SIZE).filter(|size| *size <= MAX_GUEST_MEMORY).is_none() {
+            return Err(NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit));
+        }
         let mut image = materialize_native_image(bytes, &plan).map_err(NativeExecutionError::Materialize)?;
 
         let mut exports = HashMap::new();
