@@ -36,11 +36,11 @@ existing `NativeLinker`. The caller must first run
 path preserves the linker's dependency-aware symbol resolution and exported
 symbol table.
 
-The image exposes exported-symbol lookup, JNI short/long symbol candidate
-resolution, AAPCS64 integer/pointer argument setup (x0-x7), and bounded guest
-execution for exported functions. It also provides JNI_OnLoad and statically
-mangled JNI native entry invocation helpers when the caller supplies guest
-JNI handles.
+The image exposes exported-symbol lookup, JNI short/long symbol candidate resolution, AAPCS64
+integer/pointer argument setup (x0-x7), and bounded guest execution for exported
+functions. It also parses bounded guest JNINativeMethod arrays for
+RegisterNatives-style dispatch, and provides JNI_OnLoad and native entry
+invocation helpers when the caller supplies guest JNI handles.
 
 ## Explicit limitations
 
@@ -51,9 +51,12 @@ AAPCS64 arguments, and host-to-guest JNI object/reference conversion are not
 implemented. The guest stack is a private bounded region; this is not a complete
 Android process virtual-memory manager or thread scheduler.
 
-The JNI helpers only prepare guest ABI arguments and execute the resolved guest
-symbol. A real JavaVM/JNIEnv object model and callback bridge still need to be
-implemented before ordinary Android JNI code can be considered compatible.
+The JNI helpers only prepare guest ABI arguments, parse guest native-method
+metadata, and execute the resolved guest symbol. They are not yet wired into a
+real JavaVM/JNIEnv function table. A complete JavaVM/JNIEnv object model,
+RegisterNatives callback interception, reference conversion and callback bridge
+still need to be implemented before ordinary Android JNI code can be considered
+compatible.
 NativeActivity and Cocos2d-x initialization, EGL/OpenGL ES rendering, and HCR
 asset/API integration are not complete. Therefore this work does not establish
 that Hill Climb Racing reaches its original loading screen.
