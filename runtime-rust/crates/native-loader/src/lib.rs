@@ -243,7 +243,7 @@ mod relocation_tests {
 // Dependency ordering for Android DT_NEEDED graphs. The caller supplies the
 // archive/SONAME index; this routine validates the full dependency closure and
 // returns libraries in dependency-first constructor order.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub enum DependencyError {
