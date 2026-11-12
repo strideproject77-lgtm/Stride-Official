@@ -390,23 +390,30 @@ impl<'a> ArtVm<'a> {
                     rf.write_object(dst, v).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += if op == 0x07 { 1 } else if op == 0x08 { 2 } else { 3 };
                 }
-                0x0a | 0x0c => { // move-result, move-result-object
-                    if let Some(res) = pending_result.take() {
-                        match res {
-                            Value::Int(v) => rf.write_int(a8, v).map_err(|e| format!("Invalid reg {}", e))?,
-                            Value::Object(v) => rf.write_object(a8, v).map_err(|e| format!("Invalid reg {}", e))?,
-                            _ => rf.write_int(a8, res.as_int()).map_err(|e| format!("Invalid reg {}", e))?,
-                        }
-                    } else {
-                        return Err("move-result without preceding invoke".into());
+                0x0a => { // move-result (int or float; preserve the 32-bit register representation)
+                    match pending_result.take() {
+                        Some(Value::Int(value)) => rf.write_int(a8, value).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(Value::Float(value)) => rf.write_float(a8, value).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(other) => return Err(format!("move-result expected int or float, received {:?}", other)),
+                        None => return Err("move-result without preceding invoke".into()),
                     }
                     pc += 1;
                 }
-                0x0b => { // move-result-wide
-                    if let Some(Value::Long(v)) = pending_result.take() {
-                        rf.write_long(a8, v).map_err(|e| format!("Invalid reg {}", e))?;
-                    } else {
-                        return Err("move-result-wide expected wide value".into());
+                0x0c => { // move-result-object
+                    match pending_result.take() {
+                        Some(Value::Object(value)) => rf.write_object(a8, value).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(Value::Null) => rf.write_object(a8, 0).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(other) => return Err(format!("move-result-object expected object, received {:?}", other)),
+                        None => return Err("move-result-object without preceding invoke".into()),
+                    }
+                    pc += 1;
+                }
+                0x0b => { // move-result-wide (long or double; preserve both register words)
+                    match pending_result.take() {
+                        Some(Value::Long(value)) => rf.write_long(a8, value).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(Value::Double(value)) => rf.write_double(a8, value).map_err(|e| format!("Invalid reg {}", e))?,
+                        Some(other) => return Err(format!("move-result-wide expected long or double, received {:?}", other)),
+                        None => return Err("move-result-wide without preceding invoke".into()),
                     }
                     pc += 1;
                 }
@@ -1792,6 +1799,88 @@ mod tests {
             ExecutionStopReason::ReturnedValue(Value::Int(2)),
             "invoke-virtual must call Child.value(), not Base.value()",
         );
+    }
+
+    #[test]
+    fn move_result_preserves_motion_event_float_coordinates() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let event = heap.allocate_instance("Landroid/view/MotionEvent;").unwrap();
+        heap.set_instance_field(event, "x", Value::Float(318.75)).unwrap();
+
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Touch;".into(),
+                name: "readXAsInt".into(),
+                prototype: "(Landroid/view/MotionEvent;)I".into(),
+                // invoke-virtual {v1}, MotionEvent.getX()F; move-result v0;
+                // float-to-int v0, v0; return v0
+                code_units: vec![0x106e, 0x0000, 0x0001, 0x000a, 0x0087, 0x000f],
+                registers_size: 2,
+                ins_size: 1,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Landroid/view/MotionEvent;".into(),
+            name: "getX".into(),
+            prototype: "()F".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[Value::Object(event)], 32)
+            .expect("MotionEvent.getX float result should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(318)));
+    }
+
+    #[test]
+    fn move_result_wide_preserves_double_values() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        jni.register("Ltest/Native;", "readDouble", "()D", |_env, _args| {
+            Ok(Some(Value::Double(42.75)))
+        });
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "read".into(),
+                prototype: "()I".into(),
+                // invoke-static {}, Native.readDouble()D; move-result-wide v0;
+                // double-to-int v0, v0; return v0
+                code_units: vec![0x0071, 0x0000, 0x0000, 0x000b, 0x008a, 0x000f],
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ltest/Native;".into(),
+            name: "readDouble".into(),
+            prototype: "()D".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[], 32)
+            .expect("wide double result should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(42)));
     }
 
     #[test]
