@@ -42,7 +42,6 @@ mark.lineJoinStyle = .round
 mark.lineWidth = 112
 
 let shadow = mark.copy() as! NSBezierPath
-shadow.transform(using: AffineTransform(translationBy: NSPoint(x: 0, y: -15)))
 shadow.lineWidth = 174
 NSColor(calibratedRed: 0.02, green: 0.55, blue: 0.92, alpha: 0.30).setStroke()
 shadow.stroke()
