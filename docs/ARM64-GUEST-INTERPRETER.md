@@ -18,6 +18,16 @@ materializer in `dex-runtime::arm64_guest` and
 - Unsigned-offset integer LDR/STR (32-bit and 64-bit)
 - Integer LDP/STP pair forms (offset, pre-index and post-index)
 
+
+- Logical-immediate AND/ORR/EOR/ANDS forms (including MOV/TST aliases)
+- Conditional select family: CSEL, CSINC, CSINV and CSNEG
+- Unsigned-offset byte/halfword/word/doubleword LDR/STR
+- Unscaled-offset LDUR/STUR byte/halfword/word/doubleword
+
+Native image integration also preserves DT_INIT/DT_INIT_ARRAY metadata and can
+run the discovered constructors after relocations. The caller must initialize
+dependencies first and invoke this once per module in dependency order.
+
 Unknown or unsupported encodings fail closed with the instruction word. The
 interpreter has a hard per-call instruction budget. Guest loads, stores and
 instruction fetches are checked against mapped page permissions when strict
