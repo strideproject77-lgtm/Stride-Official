@@ -514,6 +514,52 @@ pub fn run_aarch64(
             }
             continue;
         }
+        // Bitfield operations: SBFM, BFM and UBFM (including LSL/LSR/ASR aliases).
+        if instruction & 0x1F80_0000 == 0x1300_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let width = if is_64 { 64u32 } else { 32u32 };
+            let opc = (instruction >> 29) & 0x3;
+            let n = (instruction >> 22) & 1;
+            let immr = (instruction >> 16) & 0x3F;
+            let imms = (instruction >> 10) & 0x3F;
+            if (is_64 && n != 1) || (!is_64 && n != 0) || opc == 3 {
+                return Err(Arm64Error::UnsupportedInstruction(instruction));
+            }
+            let r = immr & (width - 1);
+            let s = imms & (width - 1);
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+            let source = read_reg(cpu, rn, is_64, false)?;
+            let ones = if s == 63 { u64::MAX } else { (1u64 << (s + 1)) - 1 };
+            let width_mask = if is_64 { u64::MAX } else { u32::MAX as u64 };
+            let write_mask = if r == 0 {
+                ones
+            } else {
+                ((ones >> r) | (ones << (width - r))) & width_mask
+            };
+            let rotated = if r == 0 {
+                source & width_mask
+            } else {
+                ((source >> r) | (source << (width - r))) & width_mask
+            };
+            let mut result = rotated & write_mask;
+            match opc {
+                0 => {
+                    if s < width - 1 && ((source >> s) & 1) != 0 {
+                        result |= width_mask & !((1u64 << (s + 1)) - 1);
+                    }
+                }
+                1 => {
+                    let old = read_reg(cpu, rd, is_64, false)?;
+                    result = (old & !write_mask) | result;
+                }
+                2 => {}
+                _ => unreachable!(),
+            }
+            write_reg(cpu, rd, result, is_64, false)?;
+            continue;
+        }
+
         // Logical immediate: AND/ORR/EOR/ANDS and MOV/ TST aliases.
         if instruction & 0x1F80_0000 == 0x1200_0000 {
             let is_64 = instruction >> 31 != 0;
@@ -612,14 +658,26 @@ pub fn run_aarch64(
         if instruction & 0x3B00_0000 == 0x3900_0000 && instruction & 0x0400_0000 == 0 {
             let size_code = instruction >> 30;
             let width = 1usize << size_code;
-            let load = instruction & 0x0040_0000 != 0;
+            let opc = (instruction >> 22) & 0x3;
+            let load = opc != 0;
             let imm = ((instruction >> 10) & 0xFFF) as u64;
             let address_offset = imm.checked_mul(width as u64).ok_or(Arm64Error::AddressOverflow)?;
             let rn = (instruction >> 5) & 0x1F;
             let rt = instruction & 0x1F;
             let base = read_reg(cpu, rn, true, true)?;
             let address = base.checked_add(address_offset).ok_or(Arm64Error::AddressOverflow)?;
-            if load {
+            if opc >= 2 {
+                if !load || width == 8 {
+                    return Err(Arm64Error::UnsupportedInstruction(instruction));
+                }
+                let signed = match width {
+                    1 => memory.read_u8(address)? as i8 as i64 as u64,
+                    2 => memory.read_u16(address)? as i16 as i64 as u64,
+                    4 => memory.read_u32(address)? as i32 as i64 as u64,
+                    _ => unreachable!(),
+                };
+                write_reg(cpu, rt, signed, opc == 2, false)?;
+            } else if load {
                 let value = match width {
                     1 => memory.read_u8(address)? as u64,
                     2 => memory.read_u16(address)? as u64,
