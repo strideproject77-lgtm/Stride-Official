@@ -1008,7 +1008,7 @@ mod tests {
     #[test]
     fn failed_dynamic_metadata_does_not_consume_guest_address_space() {
         let mut elf = vec![0u8; 0x200];
-        elf[0..4].copy_from_slice(b"\\x7fELF");
+        elf[0..4].copy_from_slice(b"\x7fELF");
         elf[4] = 2; // ELF64
         elf[5] = 1; // little endian
         elf[6] = 1; // ELF version
