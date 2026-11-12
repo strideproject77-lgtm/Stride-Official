@@ -13,6 +13,7 @@ use stride_native_loader::{
     apply_relocations, materialize_native_image, plan_native_image, NativeImagePlan,
     PageProtection, RelocationError, LoadImageError, LoadPlanError,
 };
+use crate::bionic::LoadedNativeModule;
 use crate::arm64_guest::{
     run_aarch64, Arm64Cpu, Arm64Error, Arm64RunReport, GuestMemory, MemoryProtection,
 };
@@ -57,6 +58,76 @@ pub struct NativeGuestImage {
 }
 
 impl NativeGuestImage {
+    /// Build an executable guest image from Stride's existing NativeLinker output.
+    /// The caller must run NativeLinker::apply_relocations first and verify that
+    /// the module has no unresolved relocation diagnostics.
+    pub fn from_linked_module(module: &LoadedNativeModule) -> Result<Self, NativeExecutionError> {
+        if module.architecture != ElfArchitecture::Aarch64 { return Err(NativeExecutionError::UnsupportedArchitecture); }
+        let image_base = module.load_bias.checked_add(module.plan.image_virtual_start)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let image_size = module.mapped_image.len() as u64;
+        let stack_base = image_base.checked_add(image_size).ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let stack_top = stack_base.checked_add(GUEST_NATIVE_STACK_SIZE as u64)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)? & !0xF;
+        let mut image = module.mapped_image.clone();
+        image.try_reserve_exact(GUEST_NATIVE_STACK_SIZE)
+            .map_err(|_| NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit))?;
+        image.resize(image.len() + GUEST_NATIVE_STACK_SIZE, 0);
+        let mut memory = GuestMemory::from_bytes(image_base, image)
+            .map_err(NativeExecutionError::GuestMemory)?;
+        memory.enable_strict_protections();
+        for page in &module.plan.pages {
+            let address = image_base.checked_add(page.image_offset)
+                .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+            memory.map_protection(address, stride_native_loader::IOS_PAGE_SIZE as usize, MemoryProtection {
+                readable: page.protection.readable,
+                writable: page.protection.writable,
+                executable: page.protection.executable,
+            }).map_err(NativeExecutionError::GuestMemory)?;
+        }
+        memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection {
+            readable: true, writable: true, executable: false,
+        }).map_err(NativeExecutionError::GuestMemory)?;
+        let entry_point = module.jni_onload_address.unwrap_or(0);
+        let report = NativeImageReport {
+            soname: Some(module.name.clone()),
+            needed_libraries: module.needed_libraries.clone(),
+            image_base, image_size: module.plan.image_size, entry_point,
+            mapped_pages: module.plan.pages.len(), relocated_symbols: module.relocations.len(),
+        };
+        Ok(Self {
+            memory, plan: module.plan.clone(), entry_point, report,
+            exports: module.exported_symbols.clone(), stack_base, stack_top,
+        })
+    }
+
+    /// Invoke JNI_OnLoad with guest JavaVM* and reserved arguments. The return
+    /// value is read from x0 after guest execution; the JavaVM bridge itself
+    /// must be provided by a compatible guest-side JNI implementation.
+    pub fn run_jni_onload(
+        &mut self, java_vm: u64, reserved: u64, cpu: &mut Arm64Cpu, instruction_budget: u64,
+    ) -> Result<(Arm64RunReport, i32), NativeExecutionError> {
+        let report = self.run_export("JNI_OnLoad", &[java_vm, reserved], cpu, instruction_budget)?;
+        Ok((report, cpu.x[0] as u32 as i32))
+    }
+
+    /// Invoke a statically-mangled JNI native export with guest handles and
+    /// integer/pointer ABI words. This does not convert host JniEnv objects.
+    pub fn run_jni_native(
+        &mut self, class_descriptor: &str, method_name: &str, prototype: &str,
+        jni_env: u64, receiver_or_class: u64, arguments: &[u64],
+        cpu: &mut Arm64Cpu, instruction_budget: u64,
+    ) -> Result<(Arm64RunReport, u64), NativeExecutionError> {
+        let symbol = Self::jni_export_candidates(class_descriptor, method_name, prototype)
+            .into_iter().find(|candidate| self.resolve_export(candidate).is_some())
+            .ok_or(NativeExecutionError::MissingExecutableEntry)?;
+        let mut abi_arguments = Vec::with_capacity(arguments.len() + 2);
+        abi_arguments.push(jni_env);
+        abi_arguments.push(receiver_or_class);
+        abi_arguments.extend_from_slice(arguments);
+        let report = self.run_export(&symbol, &abi_arguments, cpu, instruction_budget)?;
+        Ok((report, cpu.x[0]))
+    }
     /// Parse, plan, materialize, relocate, and permission-map one ARM64 ELF image.
     /// Undefined symbols are resolved by the caller to guest addresses; returning
     /// None fails relocation rather than installing a fake function address.
