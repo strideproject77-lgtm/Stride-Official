@@ -21,6 +21,7 @@ materializer in `dex-runtime::arm64_guest` and
 
 - Logical-immediate AND/ORR/EOR/ANDS forms (including MOV/TST aliases)
 - Conditional select family: CSEL, CSINC, CSINV and CSNEG
+- Added SBFM/BFM/UBFM bitfield instructions and sign-extending LDRSB/LDRSH/LDRSW unsigned-offset forms.
 - Unsigned-offset byte/halfword/word/doubleword LDR/STR
 - Unscaled-offset LDUR/STUR byte/halfword/word/doubleword
 
