@@ -134,9 +134,9 @@ impl NativeGuestImage {
             let end = start.saturating_add(stride_native_loader::IOS_PAGE_SIZE);
             entry_point >= start && entry_point < end
         });
-        if !entry_is_executable {
-            return Err(NativeExecutionError::MissingExecutableEntry);
-        }
+        // Shared libraries normally have no process entry point (e_entry == 0).
+        // Their exported JNI/NativeActivity functions are invoked by symbol instead.
+        let _entry_is_executable = entry_is_executable;
 
         memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection { readable: true, writable: true, executable: false })
             .map_err(NativeExecutionError::GuestMemory)?;
@@ -154,15 +154,14 @@ impl NativeGuestImage {
     }
 
     /// Execute the ELF entry point using the current bounded interpreter subset.
-    /// The caller must provide a guest stack pointer only after a writable stack
-    /// region has been mapped into the same guest address space.
+    /// Uses the writable guest stack region allocated alongside this image.
     pub fn run_entry(
         &mut self,
         cpu: &mut Arm64Cpu,
         stack_pointer: u64,
         instruction_budget: u64,
     ) -> Result<Arm64RunReport, NativeExecutionError> {
-        if stack_pointer & 0xF != 0 || stack_pointer < self.stack_base || stack_pointer > self.stack_top {
+        if !self.is_executable_address(self.entry_point) || stack_pointer & 0xF != 0 || stack_pointer < self.stack_base || stack_pointer > self.stack_top {
             return Err(NativeExecutionError::InvalidEntryPoint);
         }
         cpu.pc = self.entry_point;
@@ -185,6 +184,9 @@ impl NativeGuestImage {
         if arguments.len() > 8 { return Err(NativeExecutionError::InvalidEntryPoint); }
         let target = self.resolve_export(symbol).ok_or(NativeExecutionError::MissingExecutableEntry)?;
         if !self.is_executable_address(target) { return Err(NativeExecutionError::MissingExecutableEntry); }
+        cpu.x = [0; 31];
+        cpu.flags = Default::default();
+        cpu.halted = false;
         cpu.pc = target;
         cpu.sp = self.stack_top;
         cpu.x[30] = 0;
@@ -283,5 +285,13 @@ mod tests {
         NativeGuestImage::prepare_aapcs64_arguments(&mut cpu, &[1, 2, 3]).unwrap();
         assert_eq!(&cpu.x[..3], &[1, 2, 3]);
         assert!(NativeGuestImage::prepare_aapcs64_arguments(&mut cpu, &[0; 9]).is_err());
+    }
+    #[test]
+    fn generates_jni_short_and_long_symbol_names() {
+        let names = NativeGuestImage::jni_export_candidates(
+            "Lcom/example/Game_Native;", "nativeInit", "(Ljava/lang/String;I)V",
+        );
+        assert_eq!(names[0], "Java_com_example_Game_1Native_nativeInit");
+        assert_eq!(names[1], "Java_com_example_Game_1Native_nativeInit__Ljava_lang_String_2I");
     }
 }
