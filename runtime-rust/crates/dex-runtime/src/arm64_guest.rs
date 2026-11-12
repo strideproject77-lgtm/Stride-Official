@@ -259,15 +259,16 @@ pub fn run_aarch64(
         return Err(Arm64Error::InvalidEntryPoint);
     }
     cpu.halted = false;
-    let start_count = cpu.instructions_executed;
+    let mut executed_this_run = 0u64;
 
-    while cpu.instructions_executed - start_count < instruction_budget {
+    while executed_this_run < instruction_budget {
         if cpu.pc & 3 != 0 { return Err(Arm64Error::MisalignedProgramCounter); }
         let instruction = memory.fetch_instruction(cpu.pc)?;
         let current_pc = cpu.pc;
         let next_pc = current_pc.checked_add(4).ok_or(Arm64Error::AddressOverflow)?;
         cpu.pc = next_pc;
         cpu.instructions_executed = cpu.instructions_executed.saturating_add(1);
+        executed_this_run += 1;
 
         if instruction == 0xD503201F { continue; } // NOP
 
@@ -495,7 +496,7 @@ pub fn run_aarch64(
             if branch_kind == 0xD63F_0000 { cpu.x[30] = next_pc; }
             if branch_kind == 0xD65F_0000 && target == 0 {
                 cpu.halted = true;
-                return Ok(Arm64RunReport { stop_reason: Arm64StopReason::Halted, instructions_executed: cpu.instructions_executed - start_count, final_pc: cpu.pc });
+                return Ok(Arm64RunReport { stop_reason: Arm64StopReason::Halted, instructions_executed: executed_this_run, final_pc: cpu.pc });
             }
             cpu.pc = target;
             continue;
@@ -506,7 +507,7 @@ pub fn run_aarch64(
 
     Ok(Arm64RunReport {
         stop_reason: Arm64StopReason::InstructionBudget,
-        instructions_executed: cpu.instructions_executed - start_count,
+        instructions_executed: executed_this_run,
         final_pc: cpu.pc,
     })
 }
