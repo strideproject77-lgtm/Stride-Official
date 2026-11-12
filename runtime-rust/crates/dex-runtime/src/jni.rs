@@ -439,6 +439,88 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(env.new_string_utf(&rendered)?)))
         });
 
+        // android.view.MotionEvent accessors. The host queues pointer coordinates
+        // on the managed MotionEvent object; guest DEX must read those exact values
+        // through the Android API rather than receiving default zero values.
+        self.register("Landroid/view/MotionEvent;", "getAction", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getAction receiver is null")?;
+            let action = env.get_object_field(receiver, "action")
+                .map(|value| value.as_int()).unwrap_or(0);
+            Ok(Some(Value::Int(action)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getActionMasked", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getActionMasked receiver is null")?;
+            let action = env.get_object_field(receiver, "action")
+                .map(|value| value.as_int()).unwrap_or(0);
+            Ok(Some(Value::Int(action & 0xff)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getX", "()F", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getX receiver is null")?;
+            let x = env.get_object_field(receiver, "x")
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(x)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getY", "()F", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getY receiver is null")?;
+            let y = env.get_object_field(receiver, "y")
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(y)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getX", "(I)F", |env, args| {
+            if args.get(1).map(Value::as_int).unwrap_or(0) != 0 {
+                return Err("MotionEvent.getX only has one pointer in the current input bridge".into());
+            }
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getX receiver is null")?;
+            let x = env.get_object_field(receiver, "x")
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(x)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getY", "(I)F", |env, args| {
+            if args.get(1).map(Value::as_int).unwrap_or(0) != 0 {
+                return Err("MotionEvent.getY only has one pointer in the current input bridge".into());
+            }
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getY receiver is null")?;
+            let y = env.get_object_field(receiver, "y")
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(y)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getRawX", "()F", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getRawX receiver is null")?;
+            let x = env.get_object_field(receiver, "rawX")
+                .or_else(|_| env.get_object_field(receiver, "x"))
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(x)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getRawY", "()F", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getRawY receiver is null")?;
+            let y = env.get_object_field(receiver, "rawY")
+                .or_else(|_| env.get_object_field(receiver, "y"))
+                .map(|value| value.as_float()).unwrap_or(0.0);
+            Ok(Some(Value::Float(y)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getPressure", "()F", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("MotionEvent.getPressure receiver is null")?;
+            let pressure = env.get_object_field(receiver, "pressure")
+                .map(|value| value.as_float()).unwrap_or(1.0);
+            Ok(Some(Value::Float(pressure)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getPointerCount", "()I", |_env, _args| {
+            Ok(Some(Value::Int(1)))
+        });
+        self.register("Landroid/view/MotionEvent;", "getPointerId", "(I)I", |_env, args| {
+            let index = args.get(1).map(Value::as_int).unwrap_or(0);
+            Ok(Some(Value::Int(if index == 0 { 0 } else { -1 })))
+        });
+
         // java.lang.Math standard operations
         self.register("Ljava/lang/Math;", "abs", "(I)I", |_env, args| {
             let v = args.first().map(|v| v.as_int()).unwrap_or(0);
@@ -503,6 +585,32 @@ mod tests {
         reg.register("Landroid/view/View;", "getWindow", "()Landroid/view/Window;",
             |_env, _args| Ok(None));
         assert!(reg.find_unique_framework_signature("getWindow", "()Landroid/view/Window;").is_none());
+    }
+
+    #[test]
+    fn motion_event_accessors_return_host_queued_action_and_coordinates() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let event = env.heap.allocate_instance("Landroid/view/MotionEvent;").unwrap();
+        env.set_object_field(event, "action", Value::Int(0x105)).unwrap();
+        env.set_object_field(event, "x", Value::Float(435.75)).unwrap();
+        env.set_object_field(event, "y", Value::Float(1287.5)).unwrap();
+        env.set_object_field(event, "pressure", Value::Float(0.75)).unwrap();
+
+        let action = registry.find("Landroid/view/MotionEvent;", "getAction", "()I").unwrap().clone();
+        let masked = registry.find("Landroid/view/MotionEvent;", "getActionMasked", "()I").unwrap().clone();
+        let x = registry.find("Landroid/view/MotionEvent;", "getX", "()F").unwrap().clone();
+        let y = registry.find("Landroid/view/MotionEvent;", "getY", "()F").unwrap().clone();
+        let indexed_y = registry.find("Landroid/view/MotionEvent;", "getY", "(I)F").unwrap().clone();
+        let pressure = registry.find("Landroid/view/MotionEvent;", "getPressure", "()F").unwrap().clone();
+
+        assert_eq!(action(&mut env, &[Value::Object(event)]).unwrap(), Some(Value::Int(0x105)));
+        assert_eq!(masked(&mut env, &[Value::Object(event)]).unwrap(), Some(Value::Int(5)));
+        assert_eq!(x(&mut env, &[Value::Object(event)]).unwrap(), Some(Value::Float(435.75)));
+        assert_eq!(y(&mut env, &[Value::Object(event)]).unwrap(), Some(Value::Float(1287.5)));
+        assert_eq!(indexed_y(&mut env, &[Value::Object(event), Value::Int(0)]).unwrap(), Some(Value::Float(1287.5)));
+        assert_eq!(pressure(&mut env, &[Value::Object(event)]).unwrap(), Some(Value::Float(0.75)));
     }
 
     #[test]
