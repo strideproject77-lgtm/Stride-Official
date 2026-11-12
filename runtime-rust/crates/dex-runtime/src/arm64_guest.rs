@@ -5,8 +5,6 @@
 //! integer/control-flow/memory subset over Stride-owned guest memory. Unknown
 //! instructions fail closed; host pointers and host code execution are never used.
 
-use std::collections::BTreeMap;
-
 pub const MAX_GUEST_MEMORY: usize = 64 * 1024 * 1024;
 pub const MAX_INSTRUCTIONS_PER_RUN: u64 = 10_000_000;
 
