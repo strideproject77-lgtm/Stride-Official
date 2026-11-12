@@ -56,8 +56,66 @@ pub struct NativeGuestImage {
     pub report: NativeImageReport,
     pub exports: HashMap<String, u64>,
     pub registered_natives: HashMap<(String, String, String), u64>,
+    pub init_function: Option<u64>,
+    pub init_array: Vec<u64>,
     pub stack_base: u64,
     pub stack_top: u64,
+}
+
+fn collect_native_initializers(
+    memory: &GuestMemory,
+    image_base: u64,
+    plan: &NativeImagePlan,
+    load_bias: u64,
+    dynamic_tags: &[(i64, u64)],
+) -> Result<(Option<u64>, Vec<u64>), NativeExecutionError> {
+    const DT_INIT: i64 = 12;
+    const DT_INIT_ARRAY: i64 = 25;
+    const DT_INIT_ARRAYSZ: i64 = 27;
+    const MAX_INIT_ARRAY_BYTES: u64 = 32 * 1024;
+
+    let tag = |kind| dynamic_tags.iter().find(|(key, _)| *key == kind).map(|(_, value)| *value);
+    let is_executable = |address: u64| plan.pages.iter().any(|page| {
+        if !page.protection.executable { return false; }
+        let start = image_base.saturating_add(page.image_offset);
+        let end = start.saturating_add(stride_native_loader::IOS_PAGE_SIZE);
+        address >= start && address < end
+    });
+
+    let init_function = match tag(DT_INIT).unwrap_or(0) {
+        0 => None,
+        value => {
+            let address = load_bias.checked_add(value).ok_or(NativeExecutionError::EntryAddressOverflow)?;
+            if !is_executable(address) {
+                return Err(NativeExecutionError::InvalidEntryPoint);
+            }
+            Some(address)
+        }
+    };
+
+    let array_size = tag(DT_INIT_ARRAYSZ).unwrap_or(0);
+    let mut init_array = Vec::new();
+    if array_size != 0 {
+        if array_size > MAX_INIT_ARRAY_BYTES || array_size % 8 != 0 {
+            return Err(NativeExecutionError::DynamicInfo("invalid or oversized DT_INIT_ARRAYSZ".into()));
+        }
+        let array_vaddr = tag(DT_INIT_ARRAY)
+            .ok_or_else(|| NativeExecutionError::DynamicInfo("DT_INIT_ARRAYSZ is present without DT_INIT_ARRAY".into()))?;
+        let array_address = load_bias.checked_add(array_vaddr).ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let count = usize::try_from(array_size / 8).map_err(|_| NativeExecutionError::EntryAddressOverflow)?;
+        init_array.try_reserve_exact(count).map_err(|_| NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit))?;
+        for index in 0..count {
+            let slot = array_address.checked_add((index as u64) * 8)
+                .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+            let target = memory.read_u64(slot).map_err(NativeExecutionError::GuestMemory)?;
+            if target == 0 || target == u64::MAX { continue; }
+            if !is_executable(target) {
+                return Err(NativeExecutionError::InvalidEntryPoint);
+            }
+            init_array.push(target);
+        }
+    }
+    Ok((init_function, init_array))
 }
 
 impl NativeGuestImage {
@@ -103,6 +161,9 @@ impl NativeGuestImage {
         memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection {
             readable: true, writable: true, executable: false,
         }).map_err(NativeExecutionError::GuestMemory)?;
+        let (init_function, init_array) = collect_native_initializers(
+            &memory, image_base, &module.plan, module.load_bias, &module.dynamic_tags,
+        )?;
         let entry_point = module.jni_onload_address.unwrap_or(0);
         let report = NativeImageReport {
             soname: Some(module.name.clone()),
@@ -112,7 +173,7 @@ impl NativeGuestImage {
         };
         Ok(Self {
             memory, plan: module.plan.clone(), entry_point, report,
-            exports: module.exported_symbols.clone(), registered_natives: HashMap::new(), stack_base, stack_top,
+            exports: module.exported_symbols.clone(), registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top,
         })
     }
 
@@ -170,10 +231,11 @@ impl NativeGuestImage {
         let mut image = materialize_native_image(bytes, &plan).map_err(NativeExecutionError::Materialize)?;
 
         let mut exports = HashMap::new();
-        let (needed_libraries, relocated_symbols) = if info.dynamic_segment.is_some() {
+        let (needed_libraries, relocated_symbols, dynamic_tags) = if info.dynamic_segment.is_some() {
             let dynamic = inspect_elf_dynamic(bytes, &info)
                 .map_err(|error| NativeExecutionError::DynamicInfo(format!("{error:?}")))?;
             let needed = dynamic.needed_libraries.clone();
+            let dynamic_tags = dynamic.dynamic_tags.clone();
             for symbol in &dynamic.symbols {
                 if symbol.section_index != 0 && !symbol.name.is_empty() && (symbol.binding == 1 || symbol.binding == 2) {
                     if let Some(address) = load_bias.checked_add(symbol.value) {
@@ -188,9 +250,9 @@ impl NativeGuestImage {
                 info.byte_order,
                 &mut resolve_import,
             ).map_err(NativeExecutionError::Relocation)?;
-            (needed, count)
+            (needed, count, dynamic_tags)
         } else {
-            (Vec::new(), 0)
+            (Vec::new(), 0, Vec::new())
         };
 
         let image_base = load_bias.checked_add(plan.image_virtual_start)
@@ -221,6 +283,9 @@ impl NativeGuestImage {
         memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection { readable: true, writable: true, executable: false })
             .map_err(NativeExecutionError::GuestMemory)?;
 
+        let (init_function, init_array) = collect_native_initializers(
+            &memory, image_base, &plan, load_bias, &dynamic_tags,
+        )?;
         let report = NativeImageReport {
             soname: None,
             needed_libraries,
@@ -230,7 +295,25 @@ impl NativeGuestImage {
             mapped_pages: plan.pages.len(),
             relocated_symbols,
         };
-        Ok(Self { memory, plan, entry_point, report, exports, registered_natives: HashMap::new(), stack_base, stack_top })
+        Ok(Self { memory, plan, entry_point, report, exports, registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top })
+    }
+
+    /// Run DT_INIT followed by DT_INIT_ARRAY entries after dependencies have
+    /// been relocated and initialized. Each constructor receives no arguments.
+    /// The caller is responsible for invoking this once per module in dependency order.
+    pub fn run_initializers(
+        &mut self,
+        cpu: &mut Arm64Cpu,
+        instruction_budget_per_constructor: u64,
+    ) -> Result<Vec<Arm64RunReport>, NativeExecutionError> {
+        let mut targets = Vec::with_capacity(self.init_array.len() + usize::from(self.init_function.is_some()));
+        if let Some(address) = self.init_function { targets.push(address); }
+        targets.extend(self.init_array.iter().copied());
+        let mut reports = Vec::with_capacity(targets.len());
+        for target in targets {
+            reports.push(self.run_address(target, &[], cpu, instruction_budget_per_constructor)?);
+        }
+        Ok(reports)
     }
 
     /// Execute the ELF entry point using the current bounded interpreter subset.
