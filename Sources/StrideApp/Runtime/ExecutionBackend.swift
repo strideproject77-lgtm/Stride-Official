@@ -334,10 +334,26 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             else { onLog("[WARN] Resource table decode unavailable (status \(resourceStatus)); literal UI text remains available") }
         }
         if !resourceTableData.isEmpty {
+            // Android resource tables in games can contain hundreds or thousands of
+            // file references. Eagerly decoding every image before DEX/native startup
+            // can stall launch and allocate several large temporary pixel buffers.
+            // Keep this compatibility path bounded; Cocos game assets are loaded via
+            // the package asset/native path rather than this UI-resource cache.
             let fileCount = stride_runtime_resource_file_count(runtime)
+            let maxResourceFilesToScan: UInt32 = 1_024
+            let maxDecodedResourceImages = 128
+            let maxTotalResourceImagePixels = 8_388_608
+            let scanCount = min(fileCount, maxResourceFilesToScan)
             var decodedImages = 0
-            for index in 0..<min(fileCount, 4096) {
+            var decodedImagePixels = 0
+            var scannedResourceFiles = 0
+            onLog("[INFO] Resource image scan: \(fileCount) entries; bounded to \(scanCount) entries, \(maxDecodedResourceImages) images and \(maxTotalResourceImagePixels) pixels")
+            for index in 0..<scanCount {
                 try Task.checkCancellation()
+                scannedResourceFiles += 1
+                if scannedResourceFiles.isMultiple(of: 128) {
+                    onLog("[INFO] Resource image scan progress: \(scannedResourceFiles)/\(scanCount)")
+                }
                 var resourceID: UInt32 = 0
                 var pathBuffer = [UInt8](repeating: 0, count: 1024)
                 let pathLength = pathBuffer.withUnsafeMutableBufferPointer { buffer in
@@ -354,8 +370,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 _ = try resourceArchive.extract(entry) { encoded.append($0) }
                 guard let image = UIImage(data: encoded), let cgImage = image.cgImage else { continue }
                 let width = cgImage.width, height = cgImage.height
-                guard width > 0, height > 0, width * height <= 4_194_304 else { continue }
-                var rgba = [UInt8](repeating: 0, count: width * height * 4)
+                let pixelCountResult = width.multipliedReportingOverflow(by: height)
+                guard width > 0, height > 0, !pixelCountResult.overflow,
+                      pixelCountResult.partialValue <= 4_194_304 else { continue }
+                let pixelCount = pixelCountResult.partialValue
+                guard decodedImages < maxDecodedResourceImages,
+                      pixelCount <= maxTotalResourceImagePixels - decodedImagePixels else { continue }
+                var rgba = [UInt8](repeating: 0, count: pixelCount * 4)
                 let rendered = rgba.withUnsafeMutableBytes { raw -> Bool in
                     guard let context = CGContext(data: raw.baseAddress, width: width, height: height,
                         bitsPerComponent: 8, bytesPerRow: width * 4,
@@ -365,17 +386,21 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                     return true
                 }
                 guard rendered else { continue }
-                var argb = [UInt32](repeating: 0, count: width * height)
-                for pixel in 0..<(width * height) {
+                var argb = [UInt32](repeating: 0, count: pixelCount)
+                for pixel in 0..<pixelCount {
                     let p = pixel * 4
                     argb[pixel] = (UInt32(rgba[p + 3]) << 24) | (UInt32(rgba[p]) << 16) | (UInt32(rgba[p + 1]) << 8) | UInt32(rgba[p + 2])
                 }
                 let status = argb.withUnsafeBufferPointer { buffer in
                     stride_runtime_set_resource_image(runtime, resourceID, UInt32(width), UInt32(height), buffer.baseAddress, buffer.count)
                 }
-                if status == 0 { decodedImages += 1 }
+                if status == 0 {
+                    decodedImages += 1
+                    decodedImagePixels += pixelCount
+                }
             }
-            onLog("[INFO] Decoded \(decodedImages) Android image resources")
+            let skippedEntries = fileCount - scanCount
+            onLog("[INFO] Decoded \(decodedImages) Android image resources (\(decodedImagePixels) pixels); scanned \(scannedResourceFiles)/\(fileCount), deferred \(skippedEntries) entries")
         }
         // A manifest without executable DEX code cannot enter the managed runtime.
         guard !dexDataList.isEmpty else {
