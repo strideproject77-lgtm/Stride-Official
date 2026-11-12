@@ -539,7 +539,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         let session = APKRuntimeSession(runtime: runtime)
         runtimeOwnershipTransferred = true
         onLog("[INFO] Runtime handle retained after lifecycle dispatch")
-        onLog("[WARN] Guest frame scheduler and Android event-loop dispatch are not active yet")
+        onLog("[INFO] Runtime session retained; host display-link will pump queued guest input and refresh the guest surface")
         return APKExecutionResult(
             statusCode: report.status_code,
             totalClassesLoaded: report.total_classes_loaded,

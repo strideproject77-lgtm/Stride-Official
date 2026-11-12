@@ -1512,7 +1512,12 @@ private struct APKDetailSheet: View {
 
     private func measureGuestTouchDispatch(action: Int32, point: CGPoint) {
         guard let session = executionResult?.session else { return }
-        _ = session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
+        let accepted = session.dispatchTouch(action: action, x: Float(point.x), y: Float(point.y))
+        if action != 2 {
+            appendSessionLog(accepted
+                ? "[INPUT] Host touch queued: action=\(action) x=\(Int(point.x)) y=\(Int(point.y))"
+                : "[ERROR] Host touch could not be queued: action=\(action)")
+        }
     }
 
     private func executionMetric(_ title: String, value: String) -> some View {
