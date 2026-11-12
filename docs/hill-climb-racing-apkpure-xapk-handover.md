@@ -231,3 +231,52 @@ An APKMirror listing published 2026-10-29 identifies Hill Climb Racing **1.73.2 
 - OWASP MASTG-TECH-0145 (XAPK layout, base/split/OBB handling): https://mas.owasp.org/MASTG/techniques/android/MASTG-TECH-0145/
 - Android ABI guidance: https://developer.android.com/games/optimize/64-bit
 
+
+
+---
+
+## 2026-11-12 — ARM64 guest execution foundation added (implementation-only)
+
+The feature branch now contains an initial bounded ARM64 interpreter and an
+ELF-backed guest image path. This advances the previous prerequisite from
+“no guest ARM64 execution pipeline” to “limited guest instruction execution is
+available, but it is not yet sufficient for HCR.”
+
+### Added in this batch
+
+- AArch64 integer/control-flow instruction coverage expanded: MOVZ/MOVK,
+  ADD/SUB immediate and shifted-register, logical shifted-register, ADR/ADRP,
+  B/BL/B.cond, CBZ/CBNZ, BR/BLR/RET, LDR literal/LDRSW, unsigned-offset LDR/STR,
+  and integer LDP/STP addressing forms.
+- Guest memory now supports strict mapped-range permissions and executable
+  instruction fetch checks; read-only and non-executable pages reject writes or
+  instruction fetches respectively.
+- Added an overflow-safe per-call instruction budget and bounded guest stack.
+- Added `NativeGuestImage` to materialize PT_LOAD images, apply supported
+  transactional relocations, map ELF page permissions, and expose guest export
+  addresses.
+- Added an adapter from the existing `NativeLinker` output. The linker must
+  complete dependency loading and `apply_relocations()` without diagnostics
+  before its image is handed to the execution adapter.
+- Added AAPCS64 x0-x7 integer/pointer argument setup, JNI short/long mangled
+  symbol lookup, and bounded guest invocation helpers for exported functions,
+  `JNI_OnLoad`, and statically-mangled JNI methods.
+
+### Still not established
+
+- Full ARMv8-A/SIMD/FP support, stack-passed and floating-point ABI arguments,
+  Android JavaVM/JNIEnv object/reference semantics, RegisterNatives, JNI callbacks,
+  guest threads/TLS/syscalls/signals, and complete Bionic are incomplete.
+- Native constructors/init arrays are not yet executed by this path.
+- Cocos2d-x initialization, NativeActivity callbacks, EGL/GLES2 real rendering,
+  APK-backed Cocos FileUtils semantics, audio/input integration and a persistent
+  render loop remain unfinished.
+- The HCR-specific ELF dependency graph, exports/imports and actual target archive
+  still need to be validated against the user's exact five-component package.
+- No HCR loading screen or gameplay success is claimed.
+
+### Validation policy
+
+Regression tests were added but intentionally not run in this batch, per the
+user's implementation-only instruction. No iOS workflow was run and no IPA was
+built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
