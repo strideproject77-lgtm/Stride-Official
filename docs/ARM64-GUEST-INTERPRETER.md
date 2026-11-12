@@ -80,3 +80,12 @@ argument bounds, and JNI symbol mangling. They have intentionally not been run
 in this implementation-only batch.
 
 - Added `NativeLinker::dependency_initialization_order` to expose dependency-first ordering for already-loaded native modules. Missing DT_NEEDED entries remain explicit and must be checked before constructor execution; cross-module guest memory and call bridging are still incomplete.
+
+
+### JNI validation and registration follow-up
+
+- Added strict JNI method descriptor parsing for primitive, object and array parameter/return types. Malformed descriptors and void parameters are rejected.
+- Added checked JNI_OnLoad version negotiation for JNI 1.1, 1.2 and 1.4; unsupported version returns are rejected rather than accepted as success.
+- Added class-scoped UnregisterNatives state handling and duplicate-entry rejection inside one RegisterNatives table. Registration remains staged atomically.
+- These are validation/state-management foundations, not a real guest JNIEnv/JavaVM function table. Guest-callable JNI trampolines, callback dispatch, managed-object/reference conversion and native-to-managed callbacks remain unimplemented.
+- Regression tests were added but not run. No workflow or IPA build was started.
