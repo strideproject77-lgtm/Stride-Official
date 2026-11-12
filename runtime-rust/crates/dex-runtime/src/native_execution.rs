@@ -4,7 +4,7 @@
 //! bounded AArch64 interpreter. It does not call host function pointers or claim
 //! full Android ABI/JNI support.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use stride_elf_inspector::{
     inspect_elf, inspect_elf_dynamic, DynamicSymbol, ElfArchitecture, ElfByteOrder,
     ElfProgramInfo,
@@ -417,6 +417,7 @@ impl NativeGuestImage {
             return Err(NativeExecutionError::InvalidJniRegistration("class descriptor must use L...; form".into()));
         }
         let mut staged = Vec::with_capacity(count);
+        let mut seen = HashSet::with_capacity(count);
         for index in 0..count {
             let offset = (index as u64).checked_mul(24).ok_or(NativeExecutionError::EntryAddressOverflow)?;
             let record = methods_address.checked_add(offset).ok_or(NativeExecutionError::EntryAddressOverflow)?;
@@ -435,10 +436,22 @@ impl NativeGuestImage {
             if name.is_empty() || !is_valid_jni_method_descriptor(&signature) {
                 return Err(NativeExecutionError::InvalidJniRegistration(format!("malformed JNI method declaration at entry {index}")));
             }
-            staged.push(((class_descriptor.to_owned(), name, signature), function_ptr));
+            let key = (class_descriptor.to_owned(), name, signature);
+            if !seen.insert(key.clone()) {
+                return Err(NativeExecutionError::InvalidJniRegistration(format!("duplicate JNI method declaration at entry {index}")));
+            }
+            staged.push((key, function_ptr));
         }
         for (key, address) in staged.iter() { self.registered_natives.insert(key.clone(), *address); }
         Ok(staged.len())
+    }
+
+    /// Implements the state change requested by JNI UnregisterNatives.
+    /// Returns the number of guest native bindings removed for this class.
+    pub fn unregister_jni_natives(&mut self, class_descriptor: &str) -> usize {
+        let before = self.registered_natives.len();
+        self.registered_natives.retain(|(class, _, _), _| class != class_descriptor);
+        before - self.registered_natives.len()
     }
 
     pub fn resolve_registered_native(&self, class_descriptor: &str, method_name: &str, prototype: &str) -> Option<u64> {
@@ -585,6 +598,30 @@ mod tests {
         assert_eq!(&cpu.x[..3], &[1, 2, 3]);
         assert!(NativeGuestImage::prepare_aapcs64_arguments(&mut cpu, &[0; 9]).is_err());
     }
+    #[test]
+    fn unregisters_only_the_requested_classes_native_methods() {
+        let mut image = NativeGuestImage {
+            memory: GuestMemory::new(DEFAULT_GUEST_LOAD_BIAS, 4096).unwrap(),
+            plan: NativeImagePlan { image_virtual_start: 0, image_size: 4096, pages: Vec::new() },
+            entry_point: 0, report: NativeImageReport {
+                soname: None, needed_libraries: Vec::new(), image_base: DEFAULT_GUEST_LOAD_BIAS,
+                image_size: 4096, entry_point: 0, mapped_pages: 0, relocated_symbols: 0,
+            },
+            exports: HashMap::new(),
+            registered_natives: HashMap::from([
+                (("Lcom/example/A;".into(), "start".into(), "()V".into()), 1),
+                (("Lcom/example/A;".into(), "stop".into(), "()V".into()), 2),
+                (("Lcom/example/B;".into(), "start".into(), "()V".into()), 3),
+            ]),
+            init_function: None, init_array: Vec::new(),
+            stack_base: DEFAULT_GUEST_LOAD_BIAS, stack_top: DEFAULT_GUEST_LOAD_BIAS + 4096,
+        };
+        assert_eq!(image.unregister_jni_natives("Lcom/example/A;"), 2);
+        assert_eq!(image.registered_natives.len(), 1);
+        assert_eq!(image.resolve_registered_native("Lcom/example/B;", "start", "()V"), Some(3));
+        assert_eq!(image.unregister_jni_natives("Lmissing;"), 0);
+    }
+
     #[test]
     fn generates_jni_short_and_long_symbol_names() {
         let names = NativeGuestImage::jni_export_candidates(
