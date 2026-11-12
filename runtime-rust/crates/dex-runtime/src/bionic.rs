@@ -631,8 +631,9 @@ impl NativeLinker {
                         relocation.offset, soname
                     ))?;
                 let width = match (plan.architecture, relocation.relocation_type) {
-                    (ElfArchitecture::Aarch64, 1027) => Some(8u64),
-                    (ElfArchitecture::Aarch64, 257 | 1025 | 1026) => Some(8),
+                    (ElfArchitecture::Aarch64, 1027 | 257 | 1025 | 1026 | 260) => Some(8u64),
+                    (ElfArchitecture::Aarch64, 258 | 261) => Some(4),
+                    (ElfArchitecture::Aarch64, 259 | 262) => Some(2),
                     (ElfArchitecture::Arm, 23) => Some(4),
                     (ElfArchitecture::Arm, 2 | 21 | 22) => Some(4),
                     _ => None,
@@ -753,18 +754,23 @@ impl NativeLinker {
             for planned in relocations {
                 let Some(offset) = planned.image_offset else { continue };
                 let kind = planned.relocation.relocation_type;
-                let (width, relative) = match architecture {
+                let (width, relative, pc_relative) = match architecture {
                     ElfArchitecture::Aarch64 => match kind {
-                        1027 => (8usize, true),       // R_AARCH64_RELATIVE
-                        257 | 1025 | 1026 => (8, false), // ABS64, GLOB_DAT, JUMP_SLOT
+                        1027 => (8usize, true, false), // R_AARCH64_RELATIVE
+                        257 | 1025 | 1026 => (8, false, false), // ABS64, GLOB_DAT, JUMP_SLOT
+                        258 => (4, false, false), // ABS32
+                        259 => (2, false, false), // ABS16
+                        260 => (8, false, true), // PREL64
+                        261 => (4, false, true), // PREL32
+                        262 => (2, false, true), // PREL16
                         _ => {
                             module_issues.push(format!("{}: unsupported AArch64 relocation {}", soname, kind));
                             break;
                         }
                     },
                     ElfArchitecture::Arm => match kind {
-                        23 => (4usize, true), // R_ARM_RELATIVE
-                        2 | 21 | 22 => (4, false), // ABS32, GLOB_DAT, JUMP_SLOT
+                        23 => (4usize, true, false), // R_ARM_RELATIVE
+                        2 | 21 | 22 => (4, false, false), // ABS32, GLOB_DAT, JUMP_SLOT
                         _ => {
                             module_issues.push(format!("{}: unsupported ARM relocation {}", soname, kind));
                             break;
@@ -797,10 +803,11 @@ impl NativeLinker {
                     explicit
                 } else {
                     let image = &self.modules.get(&soname).unwrap().mapped_image;
-                    if width == 8 {
-                        i64::from_le_bytes(image[start..end].try_into().unwrap())
-                    } else {
-                        i32::from_le_bytes(image[start..end].try_into().unwrap()) as i64
+                    match width {
+                        8 => i64::from_le_bytes(image[start..end].try_into().unwrap()),
+                        4 => i32::from_le_bytes(image[start..end].try_into().unwrap()) as i64,
+                        2 => i16::from_le_bytes(image[start..end].try_into().unwrap()) as i64,
+                        _ => unreachable!(),
                     }
                 };
 
@@ -836,10 +843,28 @@ impl NativeLinker {
 
                 let value = if relative {
                     base as i128 + addend as i128
+                } else if pc_relative {
+                    symbol_address as i128 + addend as i128
+                        - (base as i128 + planned.relocation.offset as i128)
                 } else {
                     symbol_address as i128 + addend as i128
                 };
-                if value < 0 || (width == 4 && value > u32::MAX as i128) || value > u64::MAX as i128 {
+                let in_range = if pc_relative {
+                    match width {
+                        8 => value >= i64::MIN as i128 && value <= i64::MAX as i128,
+                        4 => value >= i32::MIN as i128 && value <= i32::MAX as i128,
+                        2 => value >= i16::MIN as i128 && value <= i16::MAX as i128,
+                        _ => false,
+                    }
+                } else {
+                    match width {
+                        8 => value >= 0 && value <= u64::MAX as i128,
+                        4 => value >= 0 && value <= u32::MAX as i128,
+                        2 => value >= 0 && value <= u16::MAX as i128,
+                        _ => false,
+                    }
+                };
+                if !in_range {
                     module_issues.push(format!(
                         "{}: relocation result overflow for type {}",
                         soname, kind
@@ -847,10 +872,11 @@ impl NativeLinker {
                     break;
                 }
 
-                let patch = if width == 8 {
-                    (value as u64).to_le_bytes().to_vec()
-                } else {
-                    (value as u32).to_le_bytes().to_vec()
+                let patch = match width {
+                    8 => (value as u64).to_le_bytes().to_vec(),
+                    4 => (value as u32).to_le_bytes().to_vec(),
+                    2 => (value as u16).to_le_bytes().to_vec(),
+                    _ => unreachable!(),
                 };
                 patches.push((start, patch));
             }
