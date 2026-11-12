@@ -82,7 +82,7 @@ impl GuestMemory {
     pub fn from_bytes(base: u64, bytes: Vec<u8>) -> Result<Self, Arm64Error> {
         if bytes.len() > MAX_GUEST_MEMORY { return Err(Arm64Error::MemoryLimit); }
         base.checked_add(bytes.len() as u64).ok_or(Arm64Error::AddressOverflow)?;
-        Ok(Self { base, bytes })
+        Ok(Self { base, bytes, protected_ranges: Vec::new(), strict_protections: false })
     }
 
     pub fn base(&self) -> u64 { self.base }
