@@ -59,6 +59,17 @@ int32_t stride_runtime_load_so(
 );
 
 /*
+ * Register one APK assets/ entry with the guest Android AssetManager.
+ * The path is relative to assets/. Returns 0 on success.
+ */
+int32_t stride_runtime_add_asset(
+    AndroidRuntime *runtime,
+    const char *path,
+    const uint8_t *data,
+    size_t len
+);
+
+/*
  * Apply supported native relocations after all package .so files are loaded.
  * Returns the number of modules with unresolved DT_NEEDED dependencies;
  * UINT32_MAX indicates invalid runtime or a panic.
