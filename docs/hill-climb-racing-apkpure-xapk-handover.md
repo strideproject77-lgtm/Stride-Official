@@ -280,3 +280,11 @@ available, but it is not yet sufficient for HCR.”
 Regression tests were added but intentionally not run in this batch, per the
 user's implementation-only instruction. No iOS workflow was run and no IPA was
 built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
+
+
+### JNI registration follow-up (same implementation-only batch)
+
+- Added bounded parsing of guest `JNINativeMethod` records (24-byte AArch64 layout), validating readable name/signature strings, executable function pointers, descriptor shape and count limits.
+- Added staged/atomic registration storage and dispatch lookup ahead of static JNI-mangled symbol lookup.
+- This is a guest metadata/dispatch primitive only. It is not yet connected to the actual `JNIEnv->RegisterNatives` function-table callback; cross-library function pointers and JNI object/reference conversion remain unsupported.
+- Tests remain unrun and no IPA was built.
