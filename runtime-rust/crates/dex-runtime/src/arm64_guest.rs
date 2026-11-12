@@ -677,6 +677,15 @@ mod tests {
     }
 
     #[test]
+    fn decodes_replicated_logical_immediate_masks() {
+        assert_eq!(decode_logical_immediate(false, 0, 0, 7), Some(0xFF));
+        assert_eq!(decode_logical_immediate(true, 1, 0, 7), Some(0xFF));
+        assert_eq!(decode_logical_immediate(true, 1, 8, 7), Some(0xFF00_0000_0000_0000));
+        assert_eq!(decode_logical_immediate(true, 1, 0, 63), None);
+        assert_eq!(decode_logical_immediate(false, 1, 0, 7), None);
+    }
+
+    #[test]
     fn executes_movz_add_and_return() {
         // MOVZ X0, #7; ADD X0, X0, #5; RET X30 (zero halts).
         let mut memory = words(0x1000, &[0xD28000E0, 0x91001400, 0xD65F03C0]);
