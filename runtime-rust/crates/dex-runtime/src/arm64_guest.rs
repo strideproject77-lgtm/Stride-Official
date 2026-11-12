@@ -26,6 +26,30 @@ pub enum Arm64Error {
     InvalidRegister,
     InvalidBranchTarget,
     MemoryLimit,
+
+    #[test]
+    fn rejects_data_fetch_from_non_executable_guest_page() {
+        let mut memory = words(0x5000, &[0xD503201F]);
+        memory.enable_strict_protections();
+        memory.map_protection(0x5000, 4, MemoryProtection { readable: true, writable: false, executable: false }).unwrap();
+        let mut cpu = Arm64Cpu::default();
+        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x5000, 1), Err(Arm64Error::MemoryOutOfBounds));
+    }
+
+    #[test]
+    fn rejects_writes_to_read_only_guest_page() {
+        let mut memory = words(0x6000, &[0xD503201F]);
+        memory.enable_strict_protections();
+        memory.map_protection(0x6000, 4, MemoryProtection { readable: true, writable: false, executable: true }).unwrap();
+        assert_eq!(memory.write_u32(0x6000, 0), Err(Arm64Error::MemoryOutOfBounds));
+    }
+
+    #[test]
+    fn enforces_global_instruction_budget_ceiling() {
+        let mut memory = words(0x7000, &[0xD503201F]);
+        let mut cpu = Arm64Cpu::default();
+        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x7000, MAX_INSTRUCTIONS_PER_RUN + 1), Err(Arm64Error::InstructionLimit));
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -412,7 +436,7 @@ pub fn run_aarch64(
         }
 
         // LDR literal / LDRSW literal.
-        if instruction & 0x3B00_0000 == 0x1800_0000 {
+        if instruction & 0x3B00_0000 == 0x1800_0000 && instruction & 0x0400_0000 == 0 {
             let opc = instruction >> 30;
             if opc == 3 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
             let delta = sign_extend(((instruction >> 5) & 0x7FFFF) as u64, 19) << 2;
@@ -428,7 +452,7 @@ pub fn run_aarch64(
         }
 
         // Load/store pair (LDP/STP), signed-offset, pre-index and post-index.
-        if instruction & 0x3A00_0000 == 0x2800_0000 {
+        if instruction & 0x3A00_0000 == 0x2800_0000 && instruction & 0x0400_0000 == 0 {
             let is_64 = instruction >> 31 != 0;
             let load = instruction & 0x0040_0000 != 0;
             let mode = (instruction >> 23) & 0x3;
@@ -460,7 +484,7 @@ pub fn run_aarch64(
             continue;
         }
         // Unsigned-offset LDR/STR (integer, 32/64-bit).
-        if instruction & 0x3B00_0000 == 0x3900_0000 {
+        if instruction & 0x3B00_0000 == 0x3900_0000 && instruction & 0x0400_0000 == 0 {
             let size_code = instruction >> 30;
             if size_code != 2 && size_code != 3 {
                 return Err(Arm64Error::UnsupportedInstruction(instruction));
