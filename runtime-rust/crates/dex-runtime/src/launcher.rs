@@ -144,6 +144,35 @@ impl AndroidRuntime {
         Ok(())
     }
 
+    /// Adds one APK assets/ entry to the guest Android AssetManager.
+    /// Paths are stored relative to assets/ and reject traversal or absolute forms.
+    pub fn add_package_asset(&mut self, path: &str, data: &[u8]) -> Result<(), String> {
+        let normalized = path.trim_start_matches('/');
+        if normalized.is_empty()
+            || normalized.contains('\\')
+            || normalized.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+            || normalized.as_bytes().contains(&0)
+        {
+            return Err("invalid Android asset path".into());
+        }
+        const MAX_ASSET_BYTES: usize = 64 * 1024 * 1024;
+        const MAX_TOTAL_ASSET_BYTES: usize = 256 * 1024 * 1024;
+        if data.len() > MAX_ASSET_BYTES {
+            return Err("Android asset exceeds the per-file memory limit".into());
+        }
+        let existing_total = self.environment.assets.assets.values().try_fold(0usize, |total, asset| {
+            total.checked_add(asset.len())
+        }).ok_or("Android asset store size overflow")?;
+        let replaced_size = self.environment.assets.assets.get(normalized).map(Vec::len).unwrap_or(0);
+        let updated_total = existing_total.checked_sub(replaced_size)
+            .and_then(|total| total.checked_add(data.len()))
+            .filter(|total| *total <= MAX_TOTAL_ASSET_BYTES)
+            .ok_or("Android asset store exceeds the package memory limit")?;
+        let _ = updated_total;
+        self.environment.assets.add_asset(normalized, data.to_vec());
+        Ok(())
+    }
+
     /// Call once after every package .so has been offered to the linker, so
     /// dependencies loaded later in archive order are not reported as missing.
     pub fn finish_native_loading(&mut self) -> usize {
