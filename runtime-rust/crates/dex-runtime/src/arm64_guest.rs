@@ -27,29 +27,6 @@ pub enum Arm64Error {
     InvalidBranchTarget,
     MemoryLimit,
 
-    #[test]
-    fn rejects_data_fetch_from_non_executable_guest_page() {
-        let mut memory = words(0x5000, &[0xD503201F]);
-        memory.enable_strict_protections();
-        memory.map_protection(0x5000, 4, MemoryProtection { readable: true, writable: false, executable: false }).unwrap();
-        let mut cpu = Arm64Cpu::default();
-        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x5000, 1), Err(Arm64Error::MemoryOutOfBounds));
-    }
-
-    #[test]
-    fn rejects_writes_to_read_only_guest_page() {
-        let mut memory = words(0x6000, &[0xD503201F]);
-        memory.enable_strict_protections();
-        memory.map_protection(0x6000, 4, MemoryProtection { readable: true, writable: false, executable: true }).unwrap();
-        assert_eq!(memory.write_u32(0x6000, 0), Err(Arm64Error::MemoryOutOfBounds));
-    }
-
-    #[test]
-    fn enforces_global_instruction_budget_ceiling() {
-        let mut memory = words(0x7000, &[0xD503201F]);
-        let mut cpu = Arm64Cpu::default();
-        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x7000, MAX_INSTRUCTIONS_PER_RUN + 1), Err(Arm64Error::InstructionLimit));
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -576,5 +553,28 @@ mod tests {
         let mut memory = words(0x4000, &[0xFFFFFFFF]);
         let mut cpu = Arm64Cpu::default();
         assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x4000, 1), Err(Arm64Error::UnsupportedInstruction(0xFFFFFFFF)));
+    }
+    #[test]
+    fn rejects_data_fetch_from_non_executable_guest_page() {
+        let mut memory = words(0x5000, &[0xD503201F]);
+        memory.enable_strict_protections();
+        memory.map_protection(0x5000, 4, MemoryProtection { readable: true, writable: false, executable: false }).unwrap();
+        let mut cpu = Arm64Cpu::default();
+        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x5000, 1), Err(Arm64Error::MemoryOutOfBounds));
+    }
+
+    #[test]
+    fn rejects_writes_to_read_only_guest_page() {
+        let mut memory = words(0x6000, &[0xD503201F]);
+        memory.enable_strict_protections();
+        memory.map_protection(0x6000, 4, MemoryProtection { readable: true, writable: false, executable: true }).unwrap();
+        assert_eq!(memory.write_u32(0x6000, 0), Err(Arm64Error::MemoryOutOfBounds));
+    }
+
+    #[test]
+    fn enforces_global_instruction_budget_ceiling() {
+        let mut memory = words(0x7000, &[0xD503201F]);
+        let mut cpu = Arm64Cpu::default();
+        assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x7000, MAX_INSTRUCTIONS_PER_RUN + 1), Err(Arm64Error::InstructionLimit));
     }
 }
