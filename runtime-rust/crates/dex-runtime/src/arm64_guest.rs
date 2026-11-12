@@ -126,6 +126,11 @@ impl GuestMemory {
         self.check_permission(address, 1, false, false)?;
         Ok(self.bytes[self.range(address, 1)?.start])
     }
+    pub fn read_u16(&self, address: u64) -> Result<u16, Arm64Error> {
+        self.check_permission(address, 2, false, false)?;
+        let r = self.range(address, 2)?;
+        Ok(u16::from_le_bytes(self.bytes[r].try_into().map_err(|_| Arm64Error::MemoryOutOfBounds)?))
+    }
     pub fn read_u32(&self, address: u64) -> Result<u32, Arm64Error> {
         self.check_permission(address, 4, false, false)?;
         let r = self.range(address, 4)?;
@@ -140,6 +145,12 @@ impl GuestMemory {
         self.check_permission(address, 1, false, true)?;
         let i = self.range(address, 1)?.start;
         self.bytes[i] = value;
+        Ok(())
+    }
+    pub fn write_u16(&mut self, address: u64, value: u16) -> Result<(), Arm64Error> {
+        self.check_permission(address, 2, false, true)?;
+        let r = self.range(address, 2)?;
+        self.bytes[r].copy_from_slice(&value.to_le_bytes());
         Ok(())
     }
     pub fn write_u32(&mut self, address: u64, value: u32) -> Result<(), Arm64Error> {
@@ -209,6 +220,35 @@ fn sub_flags(a: u64, b: u64, result: u64, is_64: bool) -> Arm64Flags {
     let sign = if is_64 { 1u64 << 63 } else { 1u64 << 31 };
     let overflow = (((a ^ b) & (a ^ r)) & sign) != 0;
     Arm64Flags { negative: r & sign != 0, zero: r == 0, carry: a >= b, overflow }
+}
+
+fn decode_logical_immediate(is_64: bool, n: u32, immr: u32, imms: u32) -> Option<u64> {
+    let width = if is_64 { 64u32 } else { 32u32 };
+    if !is_64 && n != 0 { return None; }
+    let combined = (n << 6) | ((!imms) & 0x3f);
+    if combined == 0 { return None; }
+    let len = 31 - combined.leading_zeros();
+    if len < 1 { return None; }
+    let element_size = 1u32.checked_shl(len)?;
+    if element_size > width { return None; }
+    let levels = element_size - 1;
+    let s = imms & levels;
+    let r = immr & levels;
+    if s == levels { return None; }
+    let ones = (1u64 << (s + 1)) - 1;
+    let element_mask = if element_size == 64 { u64::MAX } else { (1u64 << element_size) - 1 };
+    let element = if r == 0 {
+        ones & element_mask
+    } else {
+        ((ones >> r) | (ones << (element_size - r))) & element_mask
+    };
+    let mut result = 0u64;
+    let mut shift = 0u32;
+    while shift < width {
+        result |= element << shift;
+        shift += element_size;
+    }
+    Some(result)
 }
 
 fn condition_holds(flags: Arm64Flags, cond: u32) -> bool {
@@ -474,12 +514,103 @@ pub fn run_aarch64(
             }
             continue;
         }
+        // Logical immediate: AND/ORR/EOR/ANDS and MOV/ TST aliases.
+        if instruction & 0x1F80_0000 == 0x1200_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let opc = (instruction >> 29) & 0x3;
+            let n = (instruction >> 22) & 1;
+            let immr = (instruction >> 16) & 0x3F;
+            let imms = (instruction >> 10) & 0x3F;
+            let mask = decode_logical_immediate(is_64, n, immr, imms)
+                .ok_or(Arm64Error::UnsupportedInstruction(instruction))?;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+            let lhs = read_reg(cpu, rn, is_64, false)?;
+            let result = match opc {
+                0 => lhs & mask,
+                1 => lhs | mask,
+                2 => lhs ^ mask,
+                3 => lhs & mask,
+                _ => unreachable!(),
+            };
+            if opc == 3 {
+                let sign = if is_64 { 1u64 << 63 } else { 1u64 << 31 };
+                cpu.flags = Arm64Flags {
+                    negative: result & sign != 0,
+                    zero: if is_64 { result == 0 } else { result as u32 == 0 },
+                    carry: false,
+                    overflow: false,
+                };
+            }
+            write_reg(cpu, rd, result, is_64, false)?;
+            continue;
+        }
+
+        // Conditional select family: CSEL, CSINC, CSINV and CSNEG.
+        if instruction & 0x1FE0_0C00 == 0x1A80_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let op = (instruction >> 29) & 0x3;
+            let op2 = (instruction >> 10) & 0x3;
+            if op != 0 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
+            let rm = (instruction >> 16) & 0x1F;
+            let cond = (instruction >> 12) & 0xF;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+            let selected = if condition_holds(cpu.flags, cond) {
+                read_reg(cpu, rn, is_64, false)?
+            } else {
+                let value = read_reg(cpu, rm, is_64, false)?;
+                match op2 {
+                    0 => value,
+                    1 => value.wrapping_add(1),
+                    2 => !value,
+                    3 => value.wrapping_neg(),
+                    _ => unreachable!(),
+                }
+            };
+            write_reg(cpu, rd, selected, is_64, false)?;
+            continue;
+        }
+
+        // Unscaled immediate integer loads/stores: LDUR/STUR B/H/W/X.
+        // Pre/post-index and signed-load variants are deliberately rejected.
+        if instruction & 0x3B20_0000 == 0x3800_0000
+            && instruction & 0x0400_0000 == 0
+            && instruction & 0x0080_0000 == 0
+            && (instruction >> 10) & 0x3 == 0 {
+            let size_code = instruction >> 30;
+            let width = 1usize << size_code;
+            let load = instruction & 0x0040_0000 != 0;
+            let immediate = sign_extend(((instruction >> 12) & 0x1FF) as u64, 9);
+            let rn = (instruction >> 5) & 0x1F;
+            let rt = instruction & 0x1F;
+            let base = read_reg(cpu, rn, true, true)?;
+            let address = base.checked_add_signed(immediate).ok_or(Arm64Error::AddressOverflow)?;
+            if load {
+                let value = match width {
+                    1 => memory.read_u8(address)? as u64,
+                    2 => memory.read_u16(address)? as u64,
+                    4 => memory.read_u32(address)? as u64,
+                    8 => memory.read_u64(address)?,
+                    _ => unreachable!(),
+                };
+                write_reg(cpu, rt, value, width == 8, false)?;
+            } else {
+                let value = read_reg(cpu, rt, width == 8, false)?;
+                match width {
+                    1 => memory.write_u8(address, value as u8)?,
+                    2 => memory.write_u16(address, value as u16)?,
+                    4 => memory.write_u32(address, value as u32)?,
+                    8 => memory.write_u64(address, value)?,
+                    _ => unreachable!(),
+                }
+            }
+            continue;
+        }
+
         // Unsigned-offset LDR/STR (integer, 32/64-bit).
         if instruction & 0x3B00_0000 == 0x3900_0000 && instruction & 0x0400_0000 == 0 {
             let size_code = instruction >> 30;
-            if size_code != 2 && size_code != 3 {
-                return Err(Arm64Error::UnsupportedInstruction(instruction));
-            }
             let width = 1usize << size_code;
             let load = instruction & 0x0040_0000 != 0;
             let imm = ((instruction >> 10) & 0xFFF) as u64;
@@ -489,12 +620,23 @@ pub fn run_aarch64(
             let base = read_reg(cpu, rn, true, true)?;
             let address = base.checked_add(address_offset).ok_or(Arm64Error::AddressOverflow)?;
             if load {
-                let value = if width == 8 { memory.read_u64(address)? } else { memory.read_u32(address)? as u64 };
+                let value = match width {
+                    1 => memory.read_u8(address)? as u64,
+                    2 => memory.read_u16(address)? as u64,
+                    4 => memory.read_u32(address)? as u64,
+                    8 => memory.read_u64(address)?,
+                    _ => unreachable!(),
+                };
                 write_reg(cpu, rt, value, width == 8, false)?;
             } else {
                 let value = read_reg(cpu, rt, width == 8, false)?;
-                if width == 8 { memory.write_u64(address, value)?; }
-                else { memory.write_u32(address, value as u32)?; }
+                match width {
+                    1 => memory.write_u8(address, value as u8)?,
+                    2 => memory.write_u16(address, value as u16)?,
+                    4 => memory.write_u32(address, value as u32)?,
+                    8 => memory.write_u64(address, value)?,
+                    _ => unreachable!(),
+                }
             }
             continue;
         }
