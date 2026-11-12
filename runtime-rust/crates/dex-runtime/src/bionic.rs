@@ -1005,4 +1005,48 @@ mod tests {
         assert!(linker.modules.is_empty());
     }
 
+    #[test]
+    fn failed_dynamic_metadata_does_not_consume_guest_address_space() {
+        let mut elf = vec![0u8; 0x200];
+        elf[0..4].copy_from_slice(b"\\x7fELF");
+        elf[4] = 2; // ELF64
+        elf[5] = 1; // little endian
+        elf[6] = 1; // ELF version
+        elf[16..18].copy_from_slice(&3u16.to_le_bytes()); // ET_DYN
+        elf[18..20].copy_from_slice(&183u16.to_le_bytes()); // AArch64
+        elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes()); // e_phoff
+        elf[52..54].copy_from_slice(&64u16.to_le_bytes());
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes());
+        elf[56..58].copy_from_slice(&2u16.to_le_bytes());
+
+        // One file-backed PT_LOAD segment containing the dynamic table.
+        let load = 64usize;
+        elf[load..load + 4].copy_from_slice(&1u32.to_le_bytes());
+        elf[load + 4..load + 8].copy_from_slice(&5u32.to_le_bytes());
+        elf[load + 8..load + 16].copy_from_slice(&0u64.to_le_bytes());
+        elf[load + 16..load + 24].copy_from_slice(&0x1000u64.to_le_bytes());
+        elf[load + 32..load + 40].copy_from_slice(&0x200u64.to_le_bytes());
+        elf[load + 40..load + 48].copy_from_slice(&0x200u64.to_le_bytes());
+        elf[load + 48..load + 56].copy_from_slice(&0x1000u64.to_le_bytes());
+
+        // PT_DYNAMIC contains only DT_NULL, so dynamic metadata validation fails
+        // after the image plan has been prepared but before module registration.
+        let dynamic = load + 56;
+        elf[dynamic..dynamic + 4].copy_from_slice(&2u32.to_le_bytes());
+        elf[dynamic + 4..dynamic + 8].copy_from_slice(&4u32.to_le_bytes());
+        elf[dynamic + 8..dynamic + 16].copy_from_slice(&0x100u64.to_le_bytes());
+        elf[dynamic + 16..dynamic + 24].copy_from_slice(&0x1100u64.to_le_bytes());
+        elf[dynamic + 32..dynamic + 40].copy_from_slice(&16u64.to_le_bytes());
+        elf[dynamic + 40..dynamic + 48].copy_from_slice(&16u64.to_le_bytes());
+        elf[dynamic + 48..dynamic + 56].copy_from_slice(&8u64.to_le_bytes());
+
+        let mut linker = NativeLinker::new();
+        let initial_base = linker.next_guest_base;
+        let error = linker.load_library("libbad-dynamic.so", &elf).unwrap_err();
+        assert!(error.contains("ELF dynamic inspection failed"), "{error}");
+        assert!(linker.modules.is_empty());
+        assert_eq!(linker.next_guest_base, initial_base);
+    }
+
 }
