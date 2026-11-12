@@ -13,7 +13,7 @@ use stride_native_loader::{
     apply_relocations, materialize_native_image, plan_native_image, NativeImagePlan,
     PageProtection, RelocationError, LoadImageError, LoadPlanError,
 };
-use crate::bionic::LoadedNativeModule;
+use crate::bionic::{LoadedNativeModule, NativeLinker};
 use crate::arm64_guest::{
     run_aarch64, Arm64Cpu, Arm64Error, Arm64RunReport, GuestMemory, MemoryProtection,
 };
@@ -31,6 +31,7 @@ pub enum NativeExecutionError {
     Relocation(RelocationError),
     GuestMemory(Arm64Error),
     MissingExecutableEntry,
+    NativeModuleNotFound(String),
     EntryAddressOverflow,
     InvalidEntryPoint,
 }
@@ -58,6 +59,14 @@ pub struct NativeGuestImage {
 }
 
 impl NativeGuestImage {
+    /// Resolve an already-loaded NativeLinker module by SONAME and create its
+    /// guest execution view. Call apply_relocations() first and reject the
+    /// module if the linker returned any relocation diagnostics.
+    pub fn from_native_linker(linker: &NativeLinker, soname: &str) -> Result<Self, NativeExecutionError> {
+        let module = linker.modules.get(soname)
+            .ok_or_else(|| NativeExecutionError::NativeModuleNotFound(soname.to_owned()))?;
+        Self::from_linked_module(module)
+    }
     /// Build an executable guest image from Stride's existing NativeLinker output.
     /// The caller must run NativeLinker::apply_relocations first and verify that
     /// the module has no unresolved relocation diagnostics.
@@ -198,16 +207,6 @@ impl NativeGuestImage {
             memory.map_protection(address, stride_native_loader::IOS_PAGE_SIZE as usize, protection)
                 .map_err(NativeExecutionError::GuestMemory)?;
         }
-
-        let entry_is_executable = plan.pages.iter().any(|page| {
-            if !page.protection.executable { return false; }
-            let start = image_base.saturating_add(page.image_offset);
-            let end = start.saturating_add(stride_native_loader::IOS_PAGE_SIZE);
-            entry_point >= start && entry_point < end
-        });
-        // Shared libraries normally have no process entry point (e_entry == 0).
-        // Their exported JNI/NativeActivity functions are invoked by symbol instead.
-        let _entry_is_executable = entry_is_executable;
 
         memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection { readable: true, writable: true, executable: false })
             .map_err(NativeExecutionError::GuestMemory)?;
