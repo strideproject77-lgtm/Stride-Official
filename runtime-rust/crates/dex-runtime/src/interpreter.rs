@@ -1809,10 +1809,10 @@ mod tests {
         let mut jni = JniNativeRegistry::new();
         let event = heap.allocate_instance("Landroid/view/MotionEvent;").unwrap();
         heap.set_instance_field(event, "x", Value::Float(318.75)).unwrap();
+        heap.set_instance_field(event, "y", Value::Float(1287.5)).unwrap();
 
-        let methods = HashMap::from([(
-            1u32,
-            MethodCode {
+        let methods = HashMap::from([
+            (1u32, MethodCode {
                 class_descriptor: "Ltest/Touch;".into(),
                 name: "readXAsInt".into(),
                 prototype: "(Landroid/view/MotionEvent;)I".into(),
@@ -1822,14 +1822,32 @@ mod tests {
                 registers_size: 2,
                 ins_size: 1,
                 try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/Touch;".into(),
+                name: "readYAsInt".into(),
+                prototype: "(Landroid/view/MotionEvent;)I".into(),
+                // Same DEX sequence for MotionEvent.getY()F.
+                code_units: vec![0x106e, 0x0001, 0x0001, 0x000a, 0x0087, 0x000f],
+                registers_size: 2,
+                ins_size: 1,
+                try_blocks: vec![],
+            }),
+        ]);
+        let references = vec![
+            MethodReference {
+                method_index: 0,
+                class_descriptor: "Landroid/view/MotionEvent;".into(),
+                name: "getX".into(),
+                prototype: "()F".into(),
             },
-        )]);
-        let references = vec![MethodReference {
-            method_index: 0,
-            class_descriptor: "Landroid/view/MotionEvent;".into(),
-            name: "getX".into(),
-            prototype: "()F".into(),
-        }];
+            MethodReference {
+                method_index: 1,
+                class_descriptor: "Landroid/view/MotionEvent;".into(),
+                name: "getY".into(),
+                prototype: "()F".into(),
+            },
+        ];
         let lookup = HashMap::new();
         let types = Vec::new();
         let fields = Vec::new();
@@ -1837,9 +1855,12 @@ mod tests {
         vm.attach_dex_metadata(&types, &fields);
         vm.attach_method_resolver(&references, &lookup);
 
-        let report = vm.execute_method(1, &[Value::Object(event)], 32)
+        let x_report = vm.execute_method(1, &[Value::Object(event)], 32)
             .expect("MotionEvent.getX float result should execute");
-        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(318)));
+        assert_eq!(x_report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(318)));
+        let y_report = vm.execute_method(2, &[Value::Object(event)], 32)
+            .expect("MotionEvent.getY float result should execute");
+        assert_eq!(y_report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1287)));
     }
 
     #[test]
