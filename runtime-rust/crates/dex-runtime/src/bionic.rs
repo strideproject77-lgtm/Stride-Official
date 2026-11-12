@@ -538,6 +538,8 @@ pub struct LoadedNativeModule {
     pub load_bias: u64,
     pub exported_symbols: HashMap<String, u64>,
     pub needed_libraries: Vec<String>,
+    /// Preserved DT_* values needed for native constructor execution.
+    pub dynamic_tags: Vec<(i64, u64)>,
     pub has_jni_onload: bool,
     pub jni_onload_address: Option<u64>,
 }
@@ -606,6 +608,7 @@ impl NativeLinker {
         let dynamic_info = inspect_elf_dynamic(elf_bytes, &elf_info)
             .map_err(|error| format!("ELF dynamic inspection failed for {}: {:?}", soname, error))?;
 
+        let dynamic_tags = dynamic_info.dynamic_tags.clone();
         let needed_libraries = dynamic_info.needed_libraries;
         let dynamic_symbols = dynamic_info.symbols.clone();
         let mut relocations = Vec::with_capacity(dynamic_info.relocations.len());
@@ -687,6 +690,7 @@ impl NativeLinker {
             load_bias,
             exported_symbols,
             needed_libraries,
+            dynamic_tags,
             has_jni_onload,
             jni_onload_address,
         };
