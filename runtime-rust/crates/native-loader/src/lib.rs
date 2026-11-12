@@ -220,6 +220,17 @@ mod relocation_tests {
         assert_eq!(&image[0x30..0x38],&[0;8]);
     }
     #[test]
+    fn relocation_failure_does_not_partially_patch_image() {
+        let mut image=vec![0u8;0x4000];
+        let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![
+            Relocation{kind:RelocationKind::Rela,offset:0x2010,symbol_index:0,relocation_type:1027,addend:Some(0x88)},
+            Relocation{kind:RelocationKind::Rela,offset:0x2020,symbol_index:0,relocation_type:9999,addend:Some(0)},
+        ],needed_libraries:vec![],dynamic_tags:vec![]};
+        let mut resolver=|_:&DynamicSymbol|None;
+        assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Err(RelocationError::UnsupportedRelocation(9999)));
+        assert_eq!(&image[0x10..0x18],&[0;8]);
+    }
+    #[test]
     fn rejects_relocation_outside_image() {
         let mut image=vec![0u8;0x4000];
         let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![Relocation{kind:RelocationKind::Rela,offset:0x7000,symbol_index:0,relocation_type:1027,addend:Some(0)}],needed_libraries:vec![],dynamic_tags:vec![]};
