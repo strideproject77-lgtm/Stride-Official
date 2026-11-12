@@ -8,6 +8,12 @@
 pub const MAX_GUEST_MEMORY: usize = 64 * 1024 * 1024;
 pub const MAX_INSTRUCTIONS_PER_RUN: u64 = 10_000_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MemoryProtection { pub readable: bool, pub writable: bool, pub executable: bool }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProtectedRange { start: u64, end: u64, protection: MemoryProtection }
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arm64Error {
     EmptyCode,
@@ -58,6 +64,8 @@ impl Default for Arm64Cpu {
 pub struct GuestMemory {
     base: u64,
     bytes: Vec<u8>,
+    protected_ranges: Vec<ProtectedRange>,
+    strict_protections: bool,
 }
 
 impl GuestMemory {
@@ -67,7 +75,7 @@ impl GuestMemory {
         let mut bytes = Vec::new();
         bytes.try_reserve_exact(size).map_err(|_| Arm64Error::MemoryLimit)?;
         bytes.resize(size, 0);
-        Ok(Self { base, bytes })
+        Ok(Self { base, bytes, protected_ranges: Vec::new(), strict_protections: false })
     }
 
     pub fn from_bytes(base: u64, bytes: Vec<u8>) -> Result<Self, Arm64Error> {
@@ -80,6 +88,31 @@ impl GuestMemory {
     pub fn len(&self) -> usize { self.bytes.len() }
     pub fn is_empty(&self) -> bool { self.bytes.is_empty() }
 
+    /// Enable page/segment permission enforcement. Unmapped bytes become inaccessible.
+    pub fn enable_strict_protections(&mut self) { self.strict_protections = true; }
+
+    /// Assign permissions to a non-overlapping guest range.
+    pub fn map_protection(&mut self, address: u64, length: usize, protection: MemoryProtection) -> Result<(), Arm64Error> {
+        if length == 0 { return Err(Arm64Error::MemoryOutOfBounds); }
+        let range = self.range(address, length)?;
+        let end = self.base.checked_add(range.end as u64).ok_or(Arm64Error::AddressOverflow)?;
+        if self.protected_ranges.iter().any(|region| address < region.end && end > region.start) {
+            return Err(Arm64Error::MemoryOutOfBounds);
+        }
+        self.protected_ranges.push(ProtectedRange { start: address, end, protection });
+        self.protected_ranges.sort_by_key(|region| region.start);
+        Ok(())
+    }
+
+    fn check_permission(&self, address: u64, width: usize, executable: bool, write: bool) -> Result<(), Arm64Error> {
+        if !self.strict_protections { return Ok(()); }
+        let end = address.checked_add(width as u64).ok_or(Arm64Error::AddressOverflow)?;
+        let region = self.protected_ranges.iter().find(|region| address >= region.start && end <= region.end)
+            .ok_or(Arm64Error::MemoryOutOfBounds)?;
+        let allowed = if executable { region.protection.executable } else if write { region.protection.writable } else { region.protection.readable };
+        if allowed { Ok(()) } else { Err(Arm64Error::MemoryOutOfBounds) }
+    }
+
     fn range(&self, address: u64, width: usize) -> Result<std::ops::Range<usize>, Arm64Error> {
         let offset = address.checked_sub(self.base).ok_or(Arm64Error::MemoryOutOfBounds)?;
         let start = usize::try_from(offset).map_err(|_| Arm64Error::MemoryOutOfBounds)?;
@@ -89,30 +122,42 @@ impl GuestMemory {
     }
 
     pub fn read_u8(&self, address: u64) -> Result<u8, Arm64Error> {
+        self.check_permission(address, 1, false, false)?;
         Ok(self.bytes[self.range(address, 1)?.start])
     }
     pub fn read_u32(&self, address: u64) -> Result<u32, Arm64Error> {
+        self.check_permission(address, 4, false, false)?;
         let r = self.range(address, 4)?;
         Ok(u32::from_le_bytes(self.bytes[r].try_into().map_err(|_| Arm64Error::MemoryOutOfBounds)?))
     }
     pub fn read_u64(&self, address: u64) -> Result<u64, Arm64Error> {
+        self.check_permission(address, 8, false, false)?;
         let r = self.range(address, 8)?;
         Ok(u64::from_le_bytes(self.bytes[r].try_into().map_err(|_| Arm64Error::MemoryOutOfBounds)?))
     }
     pub fn write_u8(&mut self, address: u64, value: u8) -> Result<(), Arm64Error> {
+        self.check_permission(address, 1, false, true)?;
         let i = self.range(address, 1)?.start;
         self.bytes[i] = value;
         Ok(())
     }
     pub fn write_u32(&mut self, address: u64, value: u32) -> Result<(), Arm64Error> {
+        self.check_permission(address, 4, false, true)?;
         let r = self.range(address, 4)?;
         self.bytes[r].copy_from_slice(&value.to_le_bytes());
         Ok(())
     }
     pub fn write_u64(&mut self, address: u64, value: u64) -> Result<(), Arm64Error> {
+        self.check_permission(address, 8, false, true)?;
         let r = self.range(address, 8)?;
         self.bytes[r].copy_from_slice(&value.to_le_bytes());
         Ok(())
+    }
+
+    fn fetch_instruction(&self, address: u64) -> Result<u32, Arm64Error> {
+        self.check_permission(address, 4, true, false)?;
+        let r = self.range(address, 4)?;
+        Ok(u32::from_le_bytes(self.bytes[r].try_into().map_err(|_| Arm64Error::MemoryOutOfBounds)?))
     }
 }
 
@@ -204,6 +249,8 @@ pub fn run_aarch64(
     instruction_budget: u64,
 ) -> Result<Arm64RunReport, Arm64Error> {
     if instruction_budget == 0 { return Err(Arm64Error::InstructionLimit); }
+    if instruction_budget > MAX_INSTRUCTIONS_PER_RUN { return Err(Arm64Error::InstructionLimit); }
+    if memory.is_empty() { return Err(Arm64Error::EmptyCode); }
     if cpu.pc == 0 { cpu.pc = code_start; }
     if cpu.pc & 3 != 0 { return Err(Arm64Error::MisalignedProgramCounter); }
     let code_end = memory.base().checked_add(memory.len() as u64).ok_or(Arm64Error::AddressOverflow)?;
@@ -215,7 +262,7 @@ pub fn run_aarch64(
 
     while cpu.instructions_executed - start_count < instruction_budget {
         if cpu.pc & 3 != 0 { return Err(Arm64Error::MisalignedProgramCounter); }
-        let instruction = memory.read_u32(cpu.pc)?;
+        let instruction = memory.fetch_instruction(cpu.pc)?;
         let current_pc = cpu.pc;
         let next_pc = current_pc.checked_add(4).ok_or(Arm64Error::AddressOverflow)?;
         cpu.pc = next_pc;
