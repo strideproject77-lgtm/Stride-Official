@@ -1322,7 +1322,27 @@ impl<'a> ArtVm<'a> {
                     if target_method.is_none() {
                         if let Some(handler) = native_handler {
                             let mut env = crate::jni::JniEnv::new(self.heap);
-                            pending_result = handler(&mut env, &args).map_err(|e| format!("{:?}", e))?;
+                            let bridge_result = handler(&mut env, &args)
+                                .map_err(|e| format!("{:?}", e))?;
+                            drop(env);
+                            if target_class == "Landroid/view/MotionEvent;"
+                                && matches!(target_name, "getAction" | "getActionMasked" | "getX" | "getY" | "getRawX" | "getRawY" | "getPressure")
+                            {
+                                if let Some(diagnostics) = self.diagnostics {
+                                    diagnostics.record_detailed(
+                                        DiagnosticSeverity::Info,
+                                        "Input",
+                                        "MOTION_EVENT_ACCESSOR",
+                                        "Guest MotionEvent accessor returned a host-queued event value",
+                                        Some(&format!(
+                                            "method={}{} result={:?}",
+                                            target_name, target_proto, bridge_result
+                                        )),
+                                        None,
+                                    );
+                                }
+                            }
+                            pending_result = bridge_result;
                             pc += 3;
                             continue;
                         }
