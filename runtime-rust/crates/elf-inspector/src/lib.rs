@@ -153,6 +153,47 @@ pub fn inspect_elf_dynamic(bytes:&[u8],info:&ElfProgramInfo)->Result<ElfDynamicI
  if let (Some(a),Some(s))=(get(17),get(18)){parse_reloc(a,s,RelocationKind::Rel)?;}
  if let (Some(a),Some(s))=(get(7),get(8)){parse_reloc(a,s,RelocationKind::Rela)?;}
  if let (Some(a),Some(s))=(get(23),get(2)){let k=if get(20)==Some(7){RelocationKind::PltRela}else{RelocationKind::PltRel};parse_reloc(a,s,k)?;}
+ // Android linker-packed relative relocations (DT_RELR) are common in modern
+ // ARM64 app bundles. Expand the address/bitmap stream into ordinary REL
+ // records so the native linker can process them through the same checked path.
+ let relr_addr=get(36);
+ let relr_size=get(35);
+ let relr_ent=get(37);
+ if relr_addr.is_some()||relr_size.is_some()||relr_ent.is_some(){
+  let (addr,size)=(relr_addr.ok_or(DynamicError::InvalidRelocationTable)?,
+                   relr_size.ok_or(DynamicError::InvalidRelocationTable)?);
+  let word=if is64{8u64}else{4u64};
+  if relr_ent.unwrap_or(word)!=word||size%word!=0{return Err(DynamicError::InvalidRelocationTable);}
+  let relr_off=vaddr_offset(info,addr,size).map_err(|_|DynamicError::InvalidRelocationTable)?;
+  let relr_end=relr_off.checked_add(usize::try_from(size).map_err(|_|DynamicError::InvalidRelocationTable)?)
+      .filter(|end|*end<=bytes.len()).ok_or(DynamicError::InvalidRelocationTable)?;
+  let relative_type=if is64{1027}else{23};
+  let word_bits=if is64{64u32}else{32u32};
+  let mut cursor=relr_off;
+  let mut next_address=0u64;
+  while cursor<relr_end{
+   let entry=if is64{u64v(bytes,cursor,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)?}
+       else{u32v(bytes,cursor,info.byte_order).map_err(|_|DynamicError::InvalidRelocationTable)? as u64};
+   cursor=cursor.checked_add(word as usize).ok_or(DynamicError::InvalidRelocationTable)?;
+   if entry&1==0{
+    if entry%word!=0{return Err(DynamicError::InvalidRelocationTable);}
+    relocations.push(Relocation{kind:RelocationKind::Rel,offset:entry,symbol_index:0,relocation_type:relative_type,addend:None});
+    next_address=entry.checked_add(word).ok_or(DynamicError::InvalidRelocationTable)?;
+   }else{
+    for bit in 1..word_bits{
+     if entry&(1u64<<bit)!=0{
+      let offset=next_address.checked_add((bit as u64-1).checked_mul(word).ok_or(DynamicError::InvalidRelocationTable)?)
+          .ok_or(DynamicError::InvalidRelocationTable)?;
+      relocations.push(Relocation{kind:RelocationKind::Rel,offset,symbol_index:0,relocation_type:relative_type,addend:None});
+      if relocations.len()>1_000_000{return Err(DynamicError::InvalidRelocationTable);}
+     }
+    }
+    next_address=next_address.checked_add((word_bits as u64-1).checked_mul(word).ok_or(DynamicError::InvalidRelocationTable)?)
+        .ok_or(DynamicError::InvalidRelocationTable)?;
+   }
+   if relocations.len()>1_000_000{return Err(DynamicError::InvalidRelocationTable);}
+  }
+ }
  Ok(ElfDynamicInfo{symbols,relocations,needed_libraries,dynamic_tags:tags})
 }
 
