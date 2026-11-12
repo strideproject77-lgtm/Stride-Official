@@ -96,3 +96,131 @@ pub fn materialize_native_image(bytes:&[u8],plan:&NativeImagePlan)->Result<Vec<u
  #[test]fn rejects_empty_image(){assert_eq!(plan_native_image(&image(vec![]),0),Err(LoadPlanError::NoLoadableSegments));}
  #[test]fn rejects_address_overflow(){let i=image(vec![seg(0,u64::MAX-10,0,32,4)]);assert_eq!(plan_native_image(&i,0),Err(LoadPlanError::AddressOverflow));}
 }
+
+// Bounded relocation application for the small, architecture-neutral subset
+// needed by Android shared objects. This patches a data buffer only; it does
+// not create executable memory or run guest instructions.
+use stride_elf_inspector::{DynamicSymbol, ElfByteOrder, ElfDynamicInfo, Relocation, RelocationKind};
+
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+pub enum RelocationError {
+    UnsupportedArchitecture,
+    UnsupportedByteOrder,
+    UnsupportedRelocation(u32),
+    InvalidSymbolIndex,
+    UnresolvedSymbol,
+    TargetOutOfBounds,
+    AddressOverflow,
+    ValueOutOfRange,
+    InvalidImage,
+}
+pub type SymbolResolver<'a> = dyn FnMut(&DynamicSymbol) -> Option<u64> + 'a;
+
+fn relocation_target(plan:&NativeImagePlan,rel:&Relocation,width:usize,image_len:usize)->Result<usize,RelocationError>{
+    let offset=rel.offset.checked_sub(plan.image_virtual_start).ok_or(RelocationError::TargetOutOfBounds)?;
+    let start=usize::try_from(offset).map_err(|_|RelocationError::TargetOutOfBounds)?;
+    let end=start.checked_add(width).filter(|e|*e<=image_len).ok_or(RelocationError::TargetOutOfBounds)?;
+    let _=end;
+    Ok(start)
+}
+fn signed_add(base:u64,addend:i64)->Result<u64,RelocationError>{
+    if addend>=0 { base.checked_add(addend as u64).ok_or(RelocationError::AddressOverflow) }
+    else { base.checked_sub(addend.unsigned_abs()).ok_or(RelocationError::AddressOverflow) }
+}
+
+/// Applies supported Android ARM64/ARM32 relocations to a previously materialized
+/// image. The resolver must return the guest address of undefined imports.
+/// Defined symbols are resolved from their ELF value plus load bias.
+/// Unsupported relocation kinds fail closed instead of being silently skipped.
+pub fn apply_relocations(
+    image:&mut [u8],
+    plan:&NativeImagePlan,
+    dynamic:&ElfDynamicInfo,
+    byte_order:ElfByteOrder,
+    resolver:&mut SymbolResolver<'_>,
+)->Result<usize,RelocationError>{
+    if byte_order!=ElfByteOrder::Little { return Err(RelocationError::UnsupportedByteOrder); }
+    let is64=match plan.architecture {
+        ElfArchitecture::Aarch64=>true,
+        ElfArchitecture::Arm=>false,
+        _=>return Err(RelocationError::UnsupportedArchitecture),
+    };
+    if plan.image_size as usize != image.len() { return Err(RelocationError::InvalidImage); }
+    let mut applied=0usize;
+    for rel in &dynamic.relocations {
+        let width=if is64 {8usize}else{4usize};
+        let target=relocation_target(plan,rel,width,image.len())?;
+        let implicit=if is64 {
+            u64::from_le_bytes(image[target..target+8].try_into().map_err(|_|RelocationError::TargetOutOfBounds)?)
+        } else {
+            u32::from_le_bytes(image[target..target+4].try_into().map_err(|_|RelocationError::TargetOutOfBounds)?) as u64
+        };
+        let addend=rel.addend.unwrap_or(implicit as i64);
+        let sym=dynamic.symbols.get(rel.symbol_index as usize).ok_or(RelocationError::InvalidSymbolIndex)?;
+        let (relative,absolute,glob,jump)=if is64 {(1027,257,1025,1026)} else {(23,2,21,22)};
+        let value=if rel.relocation_type==relative {
+            if rel.symbol_index!=0 { return Err(RelocationError::InvalidSymbolIndex); }
+            signed_add(plan.load_bias,addend)?
+        } else if [absolute,glob,jump].contains(&rel.relocation_type) {
+            let symbol_address=if sym.section_index==0 {
+                resolver(sym).ok_or(RelocationError::UnresolvedSymbol)?
+            } else {
+                plan.load_bias.checked_add(sym.value).ok_or(RelocationError::AddressOverflow)?
+            };
+            signed_add(symbol_address,addend)?
+        } else {
+            return Err(RelocationError::UnsupportedRelocation(rel.relocation_type));
+        };
+        if is64 {
+            image[target..target+8].copy_from_slice(&value.to_le_bytes());
+        } else {
+            let narrowed=u32::try_from(value).map_err(|_|RelocationError::ValueOutOfRange)?;
+            image[target..target+4].copy_from_slice(&narrowed.to_le_bytes());
+        }
+        applied+=1;
+    }
+    Ok(applied)
+}
+
+#[cfg(test)]
+mod relocation_tests {
+    use super::*;
+    use stride_elf_inspector::{DynamicSymbol,Relocation};
+    fn plan()->NativeImagePlan {
+        NativeImagePlan{load_bias:0x1000,image_virtual_start:0x2000,image_size:0x4000,pages:vec![],segment_copies:vec![],architecture:ElfArchitecture::Aarch64}
+    }
+    fn sym(index:u32,value:u64,section_index:u16)->DynamicSymbol {
+        DynamicSymbol{index,name:"test".into(),value,size:8,binding:1,symbol_type:1,section_index}
+    }
+    #[test]
+    fn applies_aarch64_relative_rela() {
+        let mut image=vec![0u8;0x4000];
+        let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![Relocation{kind:RelocationKind::Rela,offset:0x2010,symbol_index:0,relocation_type:1027,addend:Some(0x88)}],needed_libraries:vec![],dynamic_tags:vec![]};
+        let mut resolver=|_:&DynamicSymbol|None;
+        assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Ok(1));
+        assert_eq!(u64::from_le_bytes(image[0x10..0x18].try_into().unwrap()),0x1088);
+    }
+    #[test]
+    fn resolves_undefined_aarch64_jump_slot() {
+        let mut image=vec![0u8;0x4000];
+        let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![Relocation{kind:RelocationKind::PltRela,offset:0x2020,symbol_index:0,relocation_type:1026,addend:Some(4)}],needed_libraries:vec![],dynamic_tags:vec![]};
+        let mut resolver=|_:&DynamicSymbol|Some(0x5000);
+        assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Ok(1));
+        assert_eq!(u64::from_le_bytes(image[0x20..0x28].try_into().unwrap()),0x5004);
+    }
+    #[test]
+    fn rejects_unknown_relocation_without_mutating_target() {
+        let mut image=vec![0u8;0x4000];
+        let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![Relocation{kind:RelocationKind::Rela,offset:0x2030,symbol_index:0,relocation_type:9999,addend:Some(0)}],needed_libraries:vec![],dynamic_tags:vec![]};
+        let mut resolver=|_:&DynamicSymbol|None;
+        assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Err(RelocationError::UnsupportedRelocation(9999)));
+        assert_eq!(&image[0x30..0x38],&[0;8]);
+    }
+    #[test]
+    fn rejects_relocation_outside_image() {
+        let mut image=vec![0u8;0x4000];
+        let dyninfo=ElfDynamicInfo{symbols:vec![sym(0,0,0)],relocations:vec![Relocation{kind:RelocationKind::Rela,offset:0x7000,symbol_index:0,relocation_type:1027,addend:Some(0)}],needed_libraries:vec![],dynamic_tags:vec![]};
+        let mut resolver=|_:&DynamicSymbol|None;
+        assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Err(RelocationError::TargetOutOfBounds));
+    }
+}
