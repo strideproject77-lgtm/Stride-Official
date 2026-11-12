@@ -78,3 +78,5 @@ Regression tests have been added for the supported execution primitives,
 permission enforcement, budget enforcement, ELF input rejection, AAPCS64
 argument bounds, and JNI symbol mangling. They have intentionally not been run
 in this implementation-only batch.
+
+- Added `NativeLinker::dependency_initialization_order` to expose dependency-first ordering for already-loaded native modules. Missing DT_NEEDED entries remain explicit and must be checked before constructor execution; cross-module guest memory and call bridging are still incomplete.
