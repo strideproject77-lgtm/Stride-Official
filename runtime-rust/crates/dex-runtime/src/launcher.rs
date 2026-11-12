@@ -147,8 +147,8 @@ impl AndroidRuntime {
     /// Adds one APK assets/ entry to the guest Android AssetManager.
     /// Paths are stored relative to assets/ and reject traversal or absolute forms.
     pub fn add_package_asset(&mut self, path: &str, data: &[u8]) -> Result<(), String> {
-        let normalized = path.trim_start_matches('/');
-        if normalized.is_empty()
+        let normalized = path;
+        if normalized.is_empty() || normalized.starts_with('/')
             || normalized.contains('\\')
             || normalized.split('/').any(|part| part.is_empty() || part == "." || part == "..")
             || normalized.as_bytes().contains(&0)
