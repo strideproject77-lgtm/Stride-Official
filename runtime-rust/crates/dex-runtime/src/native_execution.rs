@@ -33,6 +33,7 @@ pub enum NativeExecutionError {
     MissingExecutableEntry,
     NativeModuleNotFound(String),
     InvalidJniRegistration(String),
+    UnsupportedJniVersion(u32),
     EntryAddressOverflow,
     InvalidEntryPoint,
 }
@@ -60,6 +61,52 @@ pub struct NativeGuestImage {
     pub init_array: Vec<u64>,
     pub stack_base: u64,
     pub stack_top: u64,
+}
+
+/// JNI method descriptor validator. Accepts primitive, object and array
+/// types, rejects void parameters, malformed object names and trailing bytes.
+fn is_valid_jni_method_descriptor(descriptor: &str) -> bool {
+    fn parse_type(bytes: &[u8], cursor: &mut usize, allow_void: bool) -> bool {
+        if *cursor >= bytes.len() { return false; }
+        match bytes[*cursor] {
+            b'V' if allow_void => { *cursor += 1; true }
+            b'Z' | b'B' | b'C' | b'S' | b'I' | b'J' | b'F' | b'D' => {
+                *cursor += 1; true
+            }
+            b'L' => {
+                *cursor += 1;
+                let start = *cursor;
+                while *cursor < bytes.len() && bytes[*cursor] != b';' {
+                    let ch = bytes[*cursor];
+                    if ch == b'.' || ch == b'[' || ch == b'(' || ch == b')' { return false; }
+                    *cursor += 1;
+                }
+                if *cursor == start || *cursor >= bytes.len() { return false; }
+                *cursor += 1;
+                true
+            }
+            b'[' => {
+                let mut dimensions = 0;
+                while *cursor < bytes.len() && bytes[*cursor] == b'[' {
+                    *cursor += 1;
+                    dimensions += 1;
+                    if dimensions > 255 { return false; }
+                }
+                parse_type(bytes, cursor, false)
+            }
+            _ => false,
+        }
+    }
+
+    let bytes = descriptor.as_bytes();
+    if bytes.first() != Some(&b'(') { return false; }
+    let mut cursor = 1;
+    while cursor < bytes.len() && bytes[cursor] != b')' {
+        if !parse_type(bytes, &mut cursor, false) { return false; }
+    }
+    if cursor >= bytes.len() || bytes[cursor] != b')' { return false; }
+    cursor += 1;
+    parse_type(bytes, &mut cursor, true) && cursor == bytes.len()
 }
 
 fn collect_native_initializers(
@@ -175,6 +222,28 @@ impl NativeGuestImage {
             memory, plan: module.plan.clone(), entry_point, report,
             exports: module.exported_symbols.clone(), registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top,
         })
+    }
+
+    /// Validate the version returned by JNI_OnLoad against versions supported
+    /// by this compatibility layer (JNI 1.1, 1.2 and 1.4).
+    pub fn validate_jni_version(version: i32) -> Result<u32, NativeExecutionError> {
+        const JNI_VERSION_1_1: u32 = 0x0001_0001;
+        const JNI_VERSION_1_2: u32 = 0x0001_0002;
+        const JNI_VERSION_1_4: u32 = 0x0001_0004;
+        let value = version as u32;
+        match value {
+            JNI_VERSION_1_1 | JNI_VERSION_1_2 | JNI_VERSION_1_4 => Ok(value),
+            _ => Err(NativeExecutionError::UnsupportedJniVersion(value)),
+        }
+    }
+
+    /// Invoke JNI_OnLoad and reject unsupported/invalid version returns.
+    pub fn run_jni_onload_checked(
+        &mut self, java_vm: u64, reserved: u64, cpu: &mut Arm64Cpu, instruction_budget: u64,
+    ) -> Result<(Arm64RunReport, u32), NativeExecutionError> {
+        let (report, version) = self.run_jni_onload(java_vm, reserved, cpu, instruction_budget)?;
+        let version = Self::validate_jni_version(version)?;
+        Ok((report, version))
     }
 
     /// Invoke JNI_OnLoad with guest JavaVM* and reserved arguments. The return
@@ -363,7 +432,7 @@ impl NativeGuestImage {
                 .map_err(|_| NativeExecutionError::InvalidJniRegistration(format!("method name {index} is not UTF-8")))?;
             let signature = String::from_utf8(self.memory.read_c_string(signature_ptr, 1024).map_err(NativeExecutionError::GuestMemory)?)
                 .map_err(|_| NativeExecutionError::InvalidJniRegistration(format!("method signature {index} is not UTF-8")))?;
-            if name.is_empty() || !signature.starts_with('(') || !signature.contains(')') {
+            if name.is_empty() || !is_valid_jni_method_descriptor(&signature) {
                 return Err(NativeExecutionError::InvalidJniRegistration(format!("malformed JNI method declaration at entry {index}")));
             }
             staged.push(((class_descriptor.to_owned(), name, signature), function_ptr));
@@ -481,6 +550,25 @@ pub fn plan_guest_native_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_jni_method_descriptors_strictly() {
+        for valid in ["()V", "(I)I", "(Ljava/lang/String;[I)Z", "([[Ljava/lang/Object;)Ljava/lang/String;"] {
+            assert!(is_valid_jni_method_descriptor(valid), "expected valid descriptor: {valid}");
+        }
+        for invalid in ["", "I)V", "(V)V", "(Ljava/lang/String)V", "([V)V", "()VV", "(L;)V", "(I)"] {
+            assert!(!is_valid_jni_method_descriptor(invalid), "expected invalid descriptor: {invalid}");
+        }
+    }
+
+    #[test]
+    fn accepts_only_supported_jni_onload_versions() {
+        assert_eq!(NativeGuestImage::validate_jni_version(0x0001_0001).unwrap(), 0x0001_0001);
+        assert_eq!(NativeGuestImage::validate_jni_version(0x0001_0002).unwrap(), 0x0001_0002);
+        assert_eq!(NativeGuestImage::validate_jni_version(0x0001_0004).unwrap(), 0x0001_0004);
+        assert!(NativeGuestImage::validate_jni_version(0x0001_0008).is_err());
+        assert!(NativeGuestImage::validate_jni_version(0).is_err());
+    }
 
     #[test]
     fn rejects_non_aarch64_image_before_mapping() {
