@@ -34,6 +34,7 @@ pub mod unity;
 pub mod audio;
 pub mod handler;
 pub mod native_activity;
+pub mod arm64_guest;
 pub mod view;
 pub mod layout;
 pub mod resources;
@@ -72,6 +73,7 @@ pub use unity::{UnityPlayerBridge, UnityEngineState, UnityMessage};
 pub use audio::AudioSession;
 pub use handler::LooperCoordinator;
 pub use native_activity::NativeActivityLauncher;
+pub use arm64_guest::{run_aarch64, Arm64Cpu, Arm64Error, Arm64Flags, Arm64RunReport, Arm64StopReason, GuestMemory};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
