@@ -397,3 +397,5 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added regression tests and updated runtime/HCR documentation. These tests were **not run**; no IPA workflow was started and no IPA was built.
 - Important boundary: this is a limited interpreter, not full ARM64/ART/Android. SIMD/FP, JavaVM/JNIEnv semantics, RegisterNatives, JNI reference conversion/callbacks, native constructors, guest threads/TLS/syscalls, complete Bionic, Cocos2d-x, EGL/GLES2 rendering and the HCR frame loop remain incomplete. HCR has not yet reached its original loading screen.
 - Implementation commits in this batch: `b9875d5`, `151c5ca`, `51d2238`, `44d0e84`, `28da0aa`, `7d7440f`, `2f6635f`, `24d0e8d`, `6bd242f`, `8a2f966`, `e03feea`, `a91f01d`.
+
+- Follow-up in the same batch: added bounded `JNINativeMethod` array parsing and staged dynamic native registration lookup. It is not yet connected to the actual `JNIEnv->RegisterNatives` callback; cross-module pointers and JNI reference conversion remain incomplete. No tests/workflows/IPA were run.
