@@ -165,6 +165,31 @@ pub unsafe extern "C" fn stride_runtime_load_so(
 }
 
 
+/// Adds one package assets/ entry to the guest Android AssetManager.
+/// The path is relative to assets/; data is copied into bounded runtime storage.
+#[no_mangle]
+pub unsafe extern "C" fn stride_runtime_add_asset(
+    runtime: *mut AndroidRuntime,
+    path: *const c_char,
+    data: *const u8,
+    len: usize,
+) -> i32 {
+    if runtime.is_null() || path.is_null() || (data.is_null() && len != 0)
+        || len > 64 * 1024 * 1024 || len > isize::MAX as usize {
+        return 1;
+    }
+    let path = match unsafe { CStr::from_ptr(path) }.to_str() {
+        Ok(value) => value,
+        Err(_) => return 2,
+    };
+    let bytes = if len == 0 { &[][..] } else { unsafe { slice::from_raw_parts(data, len) } };
+    match catch_unwind(AssertUnwindSafe(|| unsafe { (&mut *runtime).add_package_asset(path, bytes) })) {
+        Ok(Ok(())) => 0,
+        Ok(Err(_)) => 3,
+        Err(_) => 4,
+    }
+}
+
 /// Finalizes the current native-library batch and records dependencies
 /// that remain unresolved after all package splits have been loaded.
 #[no_mangle]
