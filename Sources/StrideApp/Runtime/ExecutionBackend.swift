@@ -218,6 +218,11 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         var manifestData = Data()
         var dexDataList: [(source: String, path: String, data: Data)] = []
         var soDataList: [(source: String, name: String, data: Data)] = []
+        var assetDataList: [(source: String, path: String, data: Data)] = []
+        var assetTotalBytes = 0
+        let maxPackageAssetBytes = 256 * 1024 * 1024
+        let maxSingleAssetBytes = 64 * 1024 * 1024
+        let maxPackageAssetCount = 20_000
         var resourceTableData = Data()
         var splitManifestData: [(source: String, data: Data)] = []
 
@@ -283,6 +288,28 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                         ? packageArchiveNames[archiveIndex]
                         : "package-component-\(archiveIndex)"
                     dexDataList.append((source: sourceName, path: entry.path, data: dex))
+                } else if entry.path.hasPrefix("assets/") && entry.path.count > "assets/".count {
+                    let declaredSize = Int(entry.uncompressedSize)
+                    guard assetDataList.count < maxPackageAssetCount,
+                          declaredSize >= 0,
+                          declaredSize <= maxSingleAssetBytes,
+                          declaredSize <= maxPackageAssetBytes - assetTotalBytes else {
+                        onLog("[WARN] Skipping oversized or excess package asset: \(entry.path)")
+                        continue
+                    }
+                    var asset = Data()
+                    _ = try packageArchive.extract(entry) { chunk in asset.append(chunk) }
+                    guard asset.count <= maxSingleAssetBytes,
+                          asset.count <= maxPackageAssetBytes - assetTotalBytes else {
+                        onLog("[WARN] Extracted package asset exceeded memory budget: \(entry.path)")
+                        continue
+                    }
+                    let relativeAssetPath = String(entry.path.dropFirst("assets/".count))
+                    let sourceName = packageArchiveNames.indices.contains(archiveIndex)
+                        ? packageArchiveNames[archiveIndex]
+                        : "package-component-\(archiveIndex)"
+                    assetTotalBytes += asset.count
+                    assetDataList.append((source: sourceName, path: relativeAssetPath, data: asset))
                 } else if entry.path.hasPrefix("lib/arm64-v8a/") && entry.path.hasSuffix(".so") {
                     var so = Data()
                     _ = try packageArchive.extract(entry) { chunk in so.append(chunk) }
@@ -297,7 +324,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
 
-        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count), APK components=\(packageArchives.count)")
+        onLog("[INFO] Archive scan complete: manifest=\(!manifestData.isEmpty), manifest_bytes=\(manifestData.count), DEX=\(dexDataList.count), native libraries=\(soDataList.count), assets=\(assetDataList.count) (\(assetTotalBytes) bytes), APK components=\(packageArchives.count)")
         guard !manifestData.isEmpty else {
             onLog("[ERROR] AndroidManifest.xml is absent or empty")
             throw RuntimeExecutionError.missingManifest
@@ -360,6 +387,28 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
         try Task.checkCancellation()
+        var registeredAssets = 0
+        for (index, asset) in assetDataList.enumerated() {
+            try Task.checkCancellation()
+            let status = asset.path.withCString { pathPointer in
+                asset.data.withUnsafeBytes { raw in
+                    stride_runtime_add_asset(
+                        runtime, pathPointer,
+                        raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        raw.count
+                    )
+                }
+            }
+            if status == 0 {
+                registeredAssets += 1
+            } else {
+                onLog("[WARN] Could not register package asset \(asset.source)!assets/\(asset.path) (status \(status))")
+            }
+            if (index + 1).isMultiple(of: 256) {
+                onLog("[INFO] Package asset registration progress: \(index + 1)/\(assetDataList.count)")
+            }
+        }
+        onLog("[INFO] Registered \(registeredAssets)/\(assetDataList.count) package assets for Android AssetManager (\(assetTotalBytes) bytes scanned)")
         if !resourceTableData.isEmpty {
             let resourceStatus = resourceTableData.withUnsafeBytes { raw in
                 stride_runtime_load_resource_table(runtime, raw.bindMemory(to: UInt8.self).baseAddress, resourceTableData.count)
