@@ -1,8 +1,9 @@
 ﻿//! A deliberately small, bounds-checked Dalvik integer interpreter.
 //!
-//! This is an execution primitive, not ART. It supports a limited integer opcode
-//! subset and a metadata-only class/method registry. It does not provide Android
-//! framework classes, inheritance dispatch, JNI, or native library execution.
+//! This crate provides a limited Dalvik integer interpreter, Android API scaffolds,
+//! a metadata class/method registry, and a bounded AArch64 guest execution bridge.
+//! It is not ART or a complete Android runtime; JNI object conversion, full native
+//! ABI coverage, and production game compatibility remain incomplete.
 
 pub mod types;
 pub mod heap;
