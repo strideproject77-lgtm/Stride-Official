@@ -595,8 +595,10 @@ impl NativeLinker {
             .and_then(|v| v.checked_add(0x1_0000))
             .and_then(|v| v.checked_add(0xffff).map(|sum| sum & !0xffff))
             .ok_or_else(|| format!("Guest address space exhausted while loading {}", soname))?;
-        self.next_guest_base = next_base;
 
+        // Keep address allocation transactional: malformed dynamic metadata or
+        // relocation records must not consume guest address space when the module
+        // is rejected before registration.
         let mut exported_symbols = HashMap::new();
         let mut has_jni_onload = false;
         let mut jni_onload_address = None;
@@ -689,6 +691,7 @@ impl NativeLinker {
         };
 
         self.modules.insert(soname.to_string(), module);
+        self.next_guest_base = next_base;
         if !self.loaded_order.contains(&soname.to_string()) {
             self.loaded_order.push(soname.to_string());
         }
