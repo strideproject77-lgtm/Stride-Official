@@ -219,6 +219,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         var dexDataList: [(source: String, path: String, data: Data)] = []
         var soDataList: [(source: String, name: String, data: Data)] = []
         var resourceTableData = Data()
+        var splitManifestData: [(source: String, data: Data)] = []
 
         // XAPK/APKS/APKM imports are normalized to <package>/base.apk and
         // <package>/components/*.apk. Read the base first, then each retained split.
@@ -246,12 +247,14 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             try Task.checkCancellation()
             if let splitArchive = Archive(url: splitURL, accessMode: .read) {
                 packageArchives.append(splitArchive)
-                packageArchiveNames.append(splitURL.lastPathComponent)
+                let relativePath = splitURL.path.replacingOccurrences(of: componentsURL.path + "/", with: "")
+                packageArchiveNames.append(relativePath)
             } else {
-                onLog("[WARN] Could not open preserved split APK: \(splitURL.lastPathComponent)")
+                onLog("[ERROR] Could not open preserved split APK: \(splitURL.lastPathComponent); refusing partial package execution")
+                throw RuntimeExecutionError.unreadableArchive
             }
         }
-        onLog("[INFO] Package components discovered: \(packageArchives.count) APK(s), \(splitURLs.count) split(s)")
+        onLog("[INFO] Package components discovered: \(packageArchives.count) APK(s), \(max(0, packageArchives.count - 1)) split(s)")
 
         for (archiveIndex, packageArchive) in packageArchives.enumerated() {
             try Task.checkCancellation()
@@ -265,6 +268,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
                 } else if entry.path == "AndroidManifest.xml" {
                     if archiveIndex == 0 && manifestData.isEmpty {
                         _ = try packageArchive.extract(entry) { chunk in manifestData.append(chunk) }
+                    } else if archiveIndex > 0 {
+                        var splitManifest = Data()
+                        _ = try packageArchive.extract(entry) { chunk in splitManifest.append(chunk) }
+                        let sourceName = packageArchiveNames.indices.contains(archiveIndex)
+                            ? packageArchiveNames[archiveIndex]
+                            : "package-component-\(archiveIndex)"
+                        splitManifestData.append((source: sourceName, data: splitManifest))
                     }
                 } else if entry.path == "classes.dex" || entry.path.range(of: #"^classes[0-9]+\.dex$"#, options: .regularExpression) != nil {
                     var dex = Data()
@@ -312,6 +322,30 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         } else {
             onLog("[WARN] Could not resolve package identity from manifest; using archive fallback")
+        }
+        // A split APK is part of the base package only when its manifest identity
+        // matches. Never feed DEX/native code from an unrelated or accidentally
+        // mixed archive into this package's runtime.
+        for splitManifest in splitManifestData {
+            var splitPackageNameBuffer = [CChar](repeating: 0, count: 512)
+            let splitPackageNameLength = splitManifest.data.withUnsafeBytes { manifestBuffer -> Int in
+                guard let manifestBytes = manifestBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return 0 }
+                return splitPackageNameBuffer.withUnsafeMutableBufferPointer { output in
+                    Int(stride_manifest_package_name(
+                        manifestBytes, manifestBuffer.count, output.baseAddress, output.count
+                    ))
+                }
+            }
+            guard splitPackageNameLength > 1, splitPackageNameLength <= splitPackageNameBuffer.count else {
+                onLog("[ERROR] Could not verify package identity for split \(splitManifest.source)")
+                throw RuntimeExecutionError.manifestError("Could not verify package identity for split \(splitManifest.source)")
+            }
+            let splitPackageName = String(cString: splitPackageNameBuffer)
+            guard splitPackageName == packageName else {
+                onLog("[ERROR] Split package mismatch: \(splitManifest.source) belongs to \(splitPackageName), expected \(packageName)")
+                throw RuntimeExecutionError.manifestError("Split \(splitManifest.source) belongs to \(splitPackageName), expected \(packageName)")
+            }
+            onLog("[INFO] Split package identity verified: \(splitManifest.source) -> \(splitPackageName)")
         }
         onLog("[INFO] Resource table: \(resourceTableData.count) bytes")
         onLog("[INFO] Initializing ART-compatible runtime")
