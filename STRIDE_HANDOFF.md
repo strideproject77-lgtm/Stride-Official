@@ -387,3 +387,13 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
   - No native `.so` libraries were found in this XAPK; prioritize DEX class resolution, XAPK/resource assembly, Activity/AppCompat startup, Canvas 2D, touch, lifecycle, and persistence before native ELF work for this target.
   - **Static scan only**: this is not evidence that Stride has launched or supports the APK. Real-device gameplay and save/restore tests remain required.
 
+
+
+## Nov 12 — HCR ARM64 native execution foundation (implementation-only; not tested)
+- Added a bounded AArch64 guest interpreter with address generation, integer arithmetic/logical operations, branches, literal/unsigned loads and stores, and integer register-pair stack operations.
+- Added strict guest memory page permissions, execute-only instruction fetch checks, bounded guest stack allocation, and a hard per-call instruction budget.
+- Added ELF-backed guest image materialization with PT_LOAD mapping, supported relocation application, page permission mapping, exported-symbol indexing, and an adapter for already-relocated NativeLinker modules.
+- Added AAPCS64 x0-x7 integer/pointer argument setup, JNI short/long symbol name resolution, and guest invocation entry points for exported functions, JNI_OnLoad and statically-mangled JNI methods.
+- Added regression tests and updated runtime/HCR documentation. These tests were **not run**; no IPA workflow was started and no IPA was built.
+- Important boundary: this is a limited interpreter, not full ARM64/ART/Android. SIMD/FP, JavaVM/JNIEnv semantics, RegisterNatives, JNI reference conversion/callbacks, native constructors, guest threads/TLS/syscalls, complete Bionic, Cocos2d-x, EGL/GLES2 rendering and the HCR frame loop remain incomplete. HCR has not yet reached its original loading screen.
+- Implementation commits in this batch: `b9875d5`, `151c5ca`, `51d2238`, `44d0e84`, `28da0aa`, `7d7440f`, `2f6635f`, `24d0e8d`, `6bd242f`, `8a2f966`, `e03feea`, `a91f01d`.
