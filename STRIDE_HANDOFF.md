@@ -399,3 +399,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Implementation commits in this batch: `b9875d5`, `151c5ca`, `51d2238`, `44d0e84`, `28da0aa`, `7d7440f`, `2f6635f`, `24d0e8d`, `6bd242f`, `8a2f966`, `e03feea`, `a91f01d`.
 
 - Follow-up in the same batch: added bounded `JNINativeMethod` array parsing and staged dynamic native registration lookup. It is not yet connected to the actual `JNIEnv->RegisterNatives` callback; cross-module pointers and JNI reference conversion remain incomplete. No tests/workflows/IPA were run.
+
+
+### Follow-up implementation batch — ARM64 coverage and ELF constructors
+
+- Extended the bounded interpreter with logical-immediate operations, conditional-select instructions, narrow byte/halfword memory operations, and unscaled LDUR/STUR forms. Added a regression test for logical-immediate mask decoding.
+- Preserved DT_* dynamic metadata in loaded native modules; guest-image creation now discovers and validates DT_INIT and DT_INIT_ARRAY entries against mapped executable pages.
+- Added an explicit constructor invocation method. The higher-level loader must call it only after successful dependency relocation and in dependency-first order; this method does not itself load missing dependencies or implement a thread scheduler.
+- This is still a limited integer AArch64 interpreter. SIMD/FP, atomics, TLS, syscalls, real JavaVM/JNIEnv callbacks, cross-module guest pointer space, complete Bionic, NativeActivity and EGL/GLES rendering remain blockers.
+- Tests were added but not run. No workflow or IPA build was started.
