@@ -145,7 +145,11 @@ pub fn apply_relocations(
         ElfArchitecture::Arm=>false,
         _=>return Err(RelocationError::UnsupportedArchitecture),
     };
-    if plan.image_size as usize != image.len() { return Err(RelocationError::InvalidImage); }
+    let expected_len=usize::try_from(plan.image_size).map_err(|_|RelocationError::InvalidImage)?;
+    if expected_len != image.len() { return Err(RelocationError::InvalidImage); }
+    // Stage every patch first. A late unsupported relocation must not leave a
+    // half-relocated image behind.
+    let mut patches:Vec<(usize,Vec<u8>)>=Vec::with_capacity(dynamic.relocations.len());
     let mut applied=0usize;
     for rel in &dynamic.relocations {
         let width=if is64 {8usize}else{4usize};
@@ -171,14 +175,13 @@ pub fn apply_relocations(
         } else {
             return Err(RelocationError::UnsupportedRelocation(rel.relocation_type));
         };
-        if is64 {
-            image[target..target+8].copy_from_slice(&value.to_le_bytes());
-        } else {
-            let narrowed=u32::try_from(value).map_err(|_|RelocationError::ValueOutOfRange)?;
-            image[target..target+4].copy_from_slice(&narrowed.to_le_bytes());
-        }
+        let patch=if is64 { value.to_le_bytes().to_vec() } else {
+            u32::try_from(value).map_err(|_|RelocationError::ValueOutOfRange)?.to_le_bytes().to_vec()
+        };
+        patches.push((target,patch));
         applied+=1;
     }
+    for (target,patch) in patches { image[target..target+patch.len()].copy_from_slice(&patch); }
     Ok(applied)
 }
 
