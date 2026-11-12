@@ -140,3 +140,94 @@ The archive format is accepted by the existing importer in principle, and previo
 - Independent HCR PortMaster compatibility-loader notes (describes ARM64 libgame.so, Android bridges, GLES2, assets, audio and limitations): https://github.com/serdarbayram/Hill-Climb-Racing-Portmaster-Version
 - Independent HCR native-port notes and historical ARMv7 libgame.so layout: https://github.com/memory-hunter/hill-climb-racing-vita
 - Android ABI/native-library packaging documentation: https://developer.android.com/games/optimize/64-bit
+
+
+---
+
+## Version 1.73.2 research update (2026-11-12)
+
+### Public release identity — independent listing evidence
+
+An APKMirror listing published 2026-10-29 identifies Hill Climb Racing **1.73.2 (versionCode 1016)**:
+
+- Package: `com.fingersoft.hillclimb`
+- Minimum Android API varies by bundle variant: API 24, API 29, or API 32.
+- Target SDK: API 36.
+- Listing includes an ARM64-only variant and ARM64 + ARMv7 variants.
+- The ARM64-only 480–640 dpi variant is listed at 111.14 MB (116,543,297 bytes).
+- The ARM64 + ARMv7 120–480 dpi bundle is listed at 115.11 MB (120,697,508 bytes), with 32 splits.
+- That bundle's APK signing certificate SHA-1 is `9aa52cc5c1ea649b45f295611417b4b6da6324ea`; bundle SHA-256 is `b82460e397fdfcf2e15dd180aed5c11a66b6d6deb7bfe0271a02fd1c606c06e2`.
+
+**Do not assume those APKMirror values identify the user's APKPure archive.** The user's diagnostic log is the strongest evidence for their installed/imported package: it reports 5 APK components (base + 4 splits), 16 DEX files, 7 native libraries and a 571,000-byte resource table. This differs from the public APKMirror 32-split bundle and must be preserved as a distinct package variant until the exact archive manifest is available.
+
+### Engine research — corroborated
+
+- The target is a native-engine game, not Unity/IL2CPP.
+- A public compatibility implementation reports successful execution of **HCR 1.67.0** on its own platform and documents the Cocos2d-x JNI render entry point:
+  `Java_org_cocos2dx_lib_Cocos2dxRenderer_nativeRender`.
+- The same implementation describes JNI entry-point discovery fallback: stock Cocos2d-x symbol, alternate `org.cocos2dx.cpp` spelling, package/class/method-derived Java symbol matching, then `JNI_OnLoad`/native registration.
+- It documents APK-backed asset streaming through Cocos2d-x FileUtils and the importance of caching ZIP central-directory reads to avoid repeated linear archive scans on the render thread.
+- This is **reference evidence from HCR 1.67.0 and another platform**, not proof that 1.73.2 has identical symbols or can run in Stride. Every symbol and workaround must be revalidated against the target binary before implementation.
+
+### New HCR-specific implementation requirements
+
+1. **Split-aware package view**
+   - Treat the base and every split as one logical package, while retaining each component's original archive path.
+   - Build one deterministic asset/resource lookup index across all APK components.
+   - Resolve duplicate asset paths with Android split/resource precedence rather than arbitrary first-match order.
+   - Include all component DEX files in the class path and detect duplicate class descriptors.
+   - Select native libraries by device ABI and ensure the chosen `libgame.so` and dependencies all come from a compatible ABI set.
+   - Do not use the public 32-split inventory as a substitute for the observed five-component import.
+
+2. **Native symbol and registration discovery**
+   - At inspection time, record ELF class, `e_machine`, endianness, SONAME, DT_NEEDED, PT_LOAD, dynamic symbol table, undefined imports, relocation types, GNU build ID, init arrays and exported JNI names.
+   - Search for Cocos2d-x renderer hooks including `nativeInit`, `nativeRender`, `nativeOnPause`, `nativeOnResume`, `nativeOnSurfaceCreated`, `nativeOnSurfaceChanged` and input callbacks; treat these as candidate names only, not confirmed exports.
+   - Inspect DEX declarations and correlate them with exported JNI symbols and any `RegisterNatives` calls from `JNI_OnLoad`.
+   - Preserve exact mangled symbol names and signatures in diagnostics.
+
+3. **Asset I/O**
+   - Cocos2d-x may read assets directly from the APK as a ZIP archive. Provide a stable guest-visible APK path and implement correct seek/read/stat/close semantics.
+   - Avoid reopening and linearly scanning the ZIP central directory for every small asset read; use a validated central-directory index and bounded caches.
+   - Keep asset reads off the UI thread where possible, but preserve ordering and thread-safety expected by the game.
+   - Distinguish APK assets, Android resources, expansion/OBB data and writable save data.
+
+4. **Native execution prerequisites**
+   - The current Stride native loader is not yet a complete guest ARM64 executor. Do not treat ELF parsing, a dependency inventory, or a resolved symbol name as execution.
+   - Required stages remain: guest virtual address mapping; relocation; dependency linking; constructor execution; JNI environment/object/reference semantics; Bionic/libc; real guest threading; EGL/GLES2; audio; input; persistent frame loop.
+   - Keep unsupported pthread/memory/JNI calls fail-closed with exact diagnostics until real semantics exist. Do not replace them with success-returning no-op stubs.
+
+### Revised acceptance gates for HCR
+
+- Gate A: exact package identity, component inventory, version consistency and selected ABI verified.
+- Gate B: every required ELF dependency and relocation is resolved or explicitly reported; no false-success native loads.
+- Gate C: native library constructors and JNI initialization complete without crash.
+- Gate D: actual Cocos2d-x surface callbacks and native render loop run; frame output changes over time.
+- Gate E: title/menu appears from the guest game, not Stride's host UI; touch input affects the game.
+- Gate F: gameplay, pause/resume, orientation, audio, save/load and clean exit are verified.
+- Only Gate F permits a “playable” label. Report intermediate gates separately.
+
+### Updated evidence matrix
+
+| Item | Evidence | Confidence |
+|---|---|---|
+| Package name | User's diagnostic log | High |
+| Imported version 1.73.2 | User's filename/session label | Medium; package version code not logged |
+| 5 APK components / 4 splits | User's diagnostic log | High |
+| 16 DEX files | User's diagnostic log | High |
+| 7 native libraries | User's diagnostic log | High |
+| 571,000-byte resource table | User's diagnostic log | High |
+| Native Cocos2d-x path | Prior crash report + independent HCR port research | High |
+| Exact 1.73.2 ELF exports / imports | Not inspected | Unknown |
+| Exact five-component split mapping | Not inspected | Unknown |
+| Exact APKPure archive hash | Not available | Unknown |
+| HCR playable in Stride | Not yet tested | Not established |
+
+### Sources
+
+- APKMirror 1.73.2 ARM64-only variant (release/version/SDK/size): https://www.apkmirror.com/apk/fingersoft/hill-climb-racing/hill-climb-racing-1-73-2-release/hill-climb-racing-1-73-2-2-android-apk-download/
+- APKMirror 1.73.2 ARM64 + ARMv7 bundle (32-split example, certificate and bundle hash): https://www.apkmirror.com/apk/fingersoft/hill-climb-racing/hill-climb-racing-1-73-2-release/hill-climb-racing-1-73-2-3-android-apk-download/
+- VNX Translation Core (independent HCR 1.67.0 compatibility implementation; JNI and APK asset I/O notes): https://github.com/Viridite/VNX-Translation-Core
+- VNX compatibility log (HCR 1.67.0 runtime evidence): https://github.com/Viridite/VNX-Translation-Core/blob/main/compat_log.txt
+- OWASP MASTG-TECH-0145 (XAPK layout, base/split/OBB handling): https://mas.owasp.org/MASTG/techniques/android/MASTG-TECH-0145/
+- Android ABI guidance: https://developer.android.com/games/optimize/64-bit
+
