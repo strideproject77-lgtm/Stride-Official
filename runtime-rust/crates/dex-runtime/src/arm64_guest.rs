@@ -340,6 +340,125 @@ pub fn run_aarch64(
             continue;
         }
 
+        // ADR / ADRP address generation.
+        if instruction & 0x9F00_0000 == 0x1000_0000 || instruction & 0x9F00_0000 == 0x9000_0000 {
+            let page_relative = instruction & 0x8000_0000 != 0;
+            let immlo = ((instruction >> 29) & 0x3) as u64;
+            let immhi = ((instruction >> 5) & 0x7FFFF) as u64;
+            let immediate = sign_extend((immhi << 2) | immlo, 21);
+            let base = if page_relative { current_pc & !0xFFF } else { current_pc };
+            let delta = if page_relative { immediate.checked_shl(12).ok_or(Arm64Error::AddressOverflow)? } else { immediate };
+            let value = base.checked_add_signed(delta).ok_or(Arm64Error::AddressOverflow)?;
+            write_reg(cpu, instruction & 0x1F, value, true, false)?;
+            continue;
+        }
+
+        // ADD/SUB shifted register (LSL, LSR and ASR forms).
+        if instruction & 0x1F20_0000 == 0x0B00_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let subtract = instruction & 0x4000_0000 != 0;
+            let set_flags = instruction & 0x2000_0000 != 0;
+            let shift_type = (instruction >> 22) & 0x3;
+            let amount = (instruction >> 10) & 0x3F;
+            let width = if is_64 { 64 } else { 32 };
+            if amount >= width || shift_type == 3 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
+            let rm = (instruction >> 16) & 0x1F;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+            let source = read_reg(cpu, rm, is_64, false)?;
+            let rhs = match shift_type {
+                0 => source.wrapping_shl(amount),
+                1 => source.wrapping_shr(amount),
+                2 => if is_64 { ((source as i64) >> amount) as u64 } else { ((source as u32 as i32) >> amount) as u32 as u64 },
+                _ => unreachable!(),
+            };
+            let lhs = read_reg(cpu, rn, is_64, !set_flags)?;
+            let result = if subtract { lhs.wrapping_sub(rhs) } else { lhs.wrapping_add(rhs) };
+            if set_flags {
+                cpu.flags = if subtract { sub_flags(lhs, rhs, result, is_64) } else { add_flags(lhs, rhs, result, is_64) };
+                write_reg(cpu, rd, result, is_64, false)?;
+            } else { write_reg(cpu, rd, result, is_64, true)?; }
+            continue;
+        }
+
+        // Logical shifted register: AND, ORR, EOR and ANDS (including MOV aliases).
+        if instruction & 0x1F00_0000 == 0x0A00_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let opc = (instruction >> 29) & 0x3;
+            let invert = instruction & 0x0020_0000 != 0;
+            let shift_type = (instruction >> 22) & 0x3;
+            let amount = (instruction >> 10) & 0x3F;
+            let width = if is_64 { 64 } else { 32 };
+            if amount >= width || shift_type == 3 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
+            let rm = (instruction >> 16) & 0x1F;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+            let source = read_reg(cpu, rm, is_64, false)?;
+            let mut rhs = match shift_type {
+                0 => source.wrapping_shl(amount),
+                1 => source.wrapping_shr(amount),
+                2 => if is_64 { ((source as i64) >> amount) as u64 } else { ((source as u32 as i32) >> amount) as u32 as u64 },
+                _ => unreachable!(),
+            };
+            if invert { rhs = !rhs; }
+            let lhs = read_reg(cpu, rn, is_64, false)?;
+            let result = match opc { 0 => lhs & rhs, 1 => lhs | rhs, 2 => lhs ^ rhs, 3 => lhs & rhs, _ => unreachable!() };
+            if opc == 3 {
+                let sign = if is_64 { 1u64 << 63 } else { 1u64 << 31 };
+                cpu.flags = Arm64Flags { negative: result & sign != 0, zero: (if is_64 { result } else { result as u32 as u64 }) == 0, carry: false, overflow: false };
+            }
+            write_reg(cpu, rd, result, is_64, false)?;
+            continue;
+        }
+
+        // LDR literal / LDRSW literal.
+        if instruction & 0x3B00_0000 == 0x1800_0000 {
+            let opc = instruction >> 30;
+            if opc == 3 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
+            let delta = sign_extend(((instruction >> 5) & 0x7FFFF) as u64, 19) << 2;
+            let address = current_pc.checked_add_signed(delta).ok_or(Arm64Error::AddressOverflow)?;
+            let value = match opc {
+                0 => memory.read_u32(address)? as u64,
+                1 => memory.read_u64(address)?,
+                2 => (memory.read_u32(address)? as i32 as i64) as u64,
+                _ => unreachable!(),
+            };
+            write_reg(cpu, instruction & 0x1F, value, opc != 0, false)?;
+            continue;
+        }
+
+        // Load/store pair (LDP/STP), signed-offset, pre-index and post-index.
+        if instruction & 0x3A00_0000 == 0x2800_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let load = instruction & 0x0040_0000 != 0;
+            let mode = (instruction >> 23) & 0x3;
+            if mode == 0 { return Err(Arm64Error::UnsupportedInstruction(instruction)); }
+            let width = if is_64 { 8u64 } else { 4u64 };
+            let immediate = sign_extend(((instruction >> 15) & 0x7F) as u64, 7)
+                .checked_mul(width as i64).ok_or(Arm64Error::AddressOverflow)?;
+            let rn = (instruction >> 5) & 0x1F;
+            let rt2 = (instruction >> 10) & 0x1F;
+            let rt = instruction & 0x1F;
+            let base = read_reg(cpu, rn, true, true)?;
+            let address = if mode == 3 { base.checked_add_signed(immediate).ok_or(Arm64Error::AddressOverflow)? } else { base };
+            let second = address.checked_add(width).ok_or(Arm64Error::AddressOverflow)?;
+            if load {
+                let first_value = if is_64 { memory.read_u64(address)? } else { memory.read_u32(address)? as u64 };
+                let second_value = if is_64 { memory.read_u64(second)? } else { memory.read_u32(second)? as u64 };
+                write_reg(cpu, rt, first_value, is_64, false)?;
+                write_reg(cpu, rt2, second_value, is_64, false)?;
+            } else {
+                let first_value = read_reg(cpu, rt, is_64, false)?;
+                let second_value = read_reg(cpu, rt2, is_64, false)?;
+                if is_64 { memory.write_u64(address, first_value)?; memory.write_u64(second, second_value)?; }
+                else { memory.write_u32(address, first_value as u32)?; memory.write_u32(second, second_value as u32)?; }
+            }
+            if mode == 1 || mode == 3 {
+                let updated = base.checked_add_signed(immediate).ok_or(Arm64Error::AddressOverflow)?;
+                write_reg(cpu, rn, updated, true, true)?;
+            }
+            continue;
+        }
         // Unsigned-offset LDR/STR (integer, 32/64-bit).
         if instruction & 0x3B00_0000 == 0x3900_0000 {
             let size_code = instruction >> 30;
