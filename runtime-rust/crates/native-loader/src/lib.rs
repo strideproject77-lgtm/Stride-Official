@@ -238,3 +238,80 @@ mod relocation_tests {
         assert_eq!(apply_relocations(&mut image,&plan(),&dyninfo,ElfByteOrder::Little,&mut resolver),Err(RelocationError::TargetOutOfBounds));
     }
 }
+
+
+// Dependency ordering for Android DT_NEEDED graphs. The caller supplies the
+// archive/SONAME index; this routine validates the full dependency closure and
+// returns libraries in dependency-first constructor order.
+use std::collections::{BTreeMap, BTreeSet};
+
+#[derive(Debug,Clone,PartialEq,Eq)]
+pub enum DependencyError {
+    MissingLibrary(String),
+    DependencyCycle(Vec<String>),
+}
+fn visit_dependency(
+    name:&str,
+    graph:&BTreeMap<String,Vec<String>>,
+    visiting:&mut Vec<String>,
+    visited:&mut BTreeSet<String>,
+    ordered:&mut Vec<String>,
+)->Result<(),DependencyError>{
+    if visited.contains(name) { return Ok(()); }
+    if let Some(position)=visiting.iter().position(|item|item==name) {
+        let mut cycle=visiting[position..].to_vec();
+        cycle.push(name.to_string());
+        return Err(DependencyError::DependencyCycle(cycle));
+    }
+    let dependencies=graph.get(name).ok_or_else(||DependencyError::MissingLibrary(name.to_string()))?;
+    visiting.push(name.to_string());
+    for dependency in dependencies {
+        visit_dependency(dependency,graph,visiting,visited,ordered)?;
+    }
+    visiting.pop();
+    visited.insert(name.to_string());
+    ordered.push(name.to_string());
+    Ok(())
+}
+/// Returns a dependency-first load/constructor order for the root and its full
+/// transitive closure. It does not open archives, map memory, or run constructors.
+pub fn dependency_load_order(
+    root:&str,
+    graph:&BTreeMap<String,Vec<String>>,
+)->Result<Vec<String>,DependencyError>{
+    let mut visiting=Vec::new();
+    let mut visited=BTreeSet::new();
+    let mut ordered=Vec::new();
+    visit_dependency(root,graph,&mut visiting,&mut visited,&mut ordered)?;
+    Ok(ordered)
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+    #[test]
+    fn returns_transitive_dependency_first_order() {
+        let graph=BTreeMap::from([
+            ("libgame.so".to_string(),vec!["libcocos.so".to_string(),"libandroid.so".to_string()]),
+            ("libcocos.so".to_string(),vec!["libc.so".to_string()]),
+            ("libandroid.so".to_string(),vec!["libc.so".to_string()]),
+            ("libc.so".to_string(),vec![]),
+        ]);
+        assert_eq!(dependency_load_order("libgame.so",&graph),Ok(vec![
+            "libc.so".to_string(),"libcocos.so".to_string(),"libandroid.so".to_string(),"libgame.so".to_string()
+        ]));
+    }
+    #[test]
+    fn reports_missing_transitive_library() {
+        let graph=BTreeMap::from([("libgame.so".to_string(),vec!["libmissing.so".to_string()])]);
+        assert_eq!(dependency_load_order("libgame.so",&graph),Err(DependencyError::MissingLibrary("libmissing.so".to_string())));
+    }
+    #[test]
+    fn rejects_dependency_cycles() {
+        let graph=BTreeMap::from([
+            ("liba.so".to_string(),vec!["libb.so".to_string()]),
+            ("libb.so".to_string(),vec!["liba.so".to_string()]),
+        ]);
+        assert_eq!(dependency_load_order("liba.so",&graph),Err(DependencyError::DependencyCycle(vec!["liba.so".to_string(),"libb.so".to_string(),"liba.so".to_string()])));
+    }
+}
