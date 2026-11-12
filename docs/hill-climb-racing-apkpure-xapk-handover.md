@@ -288,3 +288,12 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 - Added staged/atomic registration storage and dispatch lookup ahead of static JNI-mangled symbol lookup.
 - This is a guest metadata/dispatch primitive only. It is not yet connected to the actual `JNIEnv->RegisterNatives` function-table callback; cross-library function pointers and JNI object/reference conversion remain unsupported.
 - Tests remain unrun and no IPA was built.
+
+
+### Follow-up implementation batch — ARM64 coverage and ELF constructors
+
+- Extended the bounded interpreter with logical-immediate operations, conditional-select instructions, narrow byte/halfword memory operations, and unscaled LDUR/STUR forms. Added a regression test for logical-immediate mask decoding.
+- Preserved DT_* dynamic metadata in loaded native modules; guest-image creation now discovers and validates DT_INIT and DT_INIT_ARRAY entries against mapped executable pages.
+- Added an explicit constructor invocation method. The higher-level loader must call it only after successful dependency relocation and in dependency-first order; this method does not itself load missing dependencies or implement a thread scheduler.
+- This is still a limited integer AArch64 interpreter. SIMD/FP, atomics, TLS, syscalls, real JavaVM/JNIEnv callbacks, cross-module guest pointer space, complete Bionic, NativeActivity and EGL/GLES rendering remain blockers.
+- Tests were added but not run. No workflow or IPA build was started.
