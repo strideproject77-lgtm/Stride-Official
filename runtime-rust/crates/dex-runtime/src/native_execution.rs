@@ -32,6 +32,7 @@ pub enum NativeExecutionError {
     GuestMemory(Arm64Error),
     MissingExecutableEntry,
     NativeModuleNotFound(String),
+    InvalidJniRegistration(String),
     EntryAddressOverflow,
     InvalidEntryPoint,
 }
@@ -54,6 +55,7 @@ pub struct NativeGuestImage {
     pub entry_point: u64,
     pub report: NativeImageReport,
     pub exports: HashMap<String, u64>,
+    pub registered_natives: HashMap<(String, String, String), u64>,
     pub stack_base: u64,
     pub stack_top: u64,
 }
@@ -110,7 +112,7 @@ impl NativeGuestImage {
         };
         Ok(Self {
             memory, plan: module.plan.clone(), entry_point, report,
-            exports: module.exported_symbols.clone(), stack_base, stack_top,
+            exports: module.exported_symbols.clone(), registered_natives: HashMap::new(), stack_base, stack_top,
         })
     }
 
@@ -131,14 +133,14 @@ impl NativeGuestImage {
         jni_env: u64, receiver_or_class: u64, arguments: &[u64],
         cpu: &mut Arm64Cpu, instruction_budget: u64,
     ) -> Result<(Arm64RunReport, u64), NativeExecutionError> {
-        let symbol = Self::jni_export_candidates(class_descriptor, method_name, prototype)
-            .into_iter().find(|candidate| self.resolve_export(candidate).is_some())
+        let target = self.resolve_registered_native(class_descriptor, method_name, prototype)
+            .or_else(|| Self::jni_export_candidates(class_descriptor, method_name, prototype).iter().find_map(|name| self.resolve_export(name)))
             .ok_or(NativeExecutionError::MissingExecutableEntry)?;
         let mut abi_arguments = Vec::with_capacity(arguments.len() + 2);
         abi_arguments.push(jni_env);
         abi_arguments.push(receiver_or_class);
         abi_arguments.extend_from_slice(arguments);
-        let report = self.run_export(&symbol, &abi_arguments, cpu, instruction_budget)?;
+        let report = self.run_address(target, &abi_arguments, cpu, instruction_budget)?;
         Ok((report, cpu.x[0]))
     }
     /// Parse, plan, materialize, relocate, and permission-map one ARM64 ELF image.
@@ -228,7 +230,7 @@ impl NativeGuestImage {
             mapped_pages: plan.pages.len(),
             relocated_symbols,
         };
-        Ok(Self { memory, plan, entry_point, report, exports, stack_base, stack_top })
+        Ok(Self { memory, plan, entry_point, report, exports, registered_natives: HashMap::new(), stack_base, stack_top })
     }
 
     /// Execute the ELF entry point using the current bounded interpreter subset.
@@ -249,6 +251,47 @@ impl NativeGuestImage {
             .map_err(NativeExecutionError::GuestMemory)
     }
 
+    /// Parse a guest JNINativeMethod array and register its function pointers.
+    /// Each AArch64 record is { name*, signature*, fnPtr } (24 bytes). All
+    /// strings must be readable guest memory and each function must belong to
+    /// an executable page in this image. Registration is staged atomically.
+    pub fn register_jni_natives(
+        &mut self, class_descriptor: &str, methods_address: u64, count: usize,
+    ) -> Result<usize, NativeExecutionError> {
+        if count > 4096 || (count > 0 && methods_address == 0) {
+            return Err(NativeExecutionError::InvalidJniRegistration("invalid method count or null method table".into()));
+        }
+        if !class_descriptor.starts_with('L') || !class_descriptor.ends_with(';') {
+            return Err(NativeExecutionError::InvalidJniRegistration("class descriptor must use L...; form".into()));
+        }
+        let mut staged = Vec::with_capacity(count);
+        for index in 0..count {
+            let offset = (index as u64).checked_mul(24).ok_or(NativeExecutionError::EntryAddressOverflow)?;
+            let record = methods_address.checked_add(offset).ok_or(NativeExecutionError::EntryAddressOverflow)?;
+            let name_ptr = self.memory.read_u64(record).map_err(NativeExecutionError::GuestMemory)?;
+            let signature_ptr = self.memory.read_u64(record.checked_add(8).ok_or(NativeExecutionError::EntryAddressOverflow)?)
+                .map_err(NativeExecutionError::GuestMemory)?;
+            let function_ptr = self.memory.read_u64(record.checked_add(16).ok_or(NativeExecutionError::EntryAddressOverflow)?)
+                .map_err(NativeExecutionError::GuestMemory)?;
+            if name_ptr == 0 || signature_ptr == 0 || function_ptr == 0 || !self.is_executable_address(function_ptr) {
+                return Err(NativeExecutionError::InvalidJniRegistration(format!("invalid JNI method pointer at entry {index}")));
+            }
+            let name = String::from_utf8(self.memory.read_c_string(name_ptr, 256).map_err(NativeExecutionError::GuestMemory)?)
+                .map_err(|_| NativeExecutionError::InvalidJniRegistration(format!("method name {index} is not UTF-8")))?;
+            let signature = String::from_utf8(self.memory.read_c_string(signature_ptr, 1024).map_err(NativeExecutionError::GuestMemory)?)
+                .map_err(|_| NativeExecutionError::InvalidJniRegistration(format!("method signature {index} is not UTF-8")))?;
+            if name.is_empty() || !signature.starts_with('(') || !signature.contains(')') {
+                return Err(NativeExecutionError::InvalidJniRegistration(format!("malformed JNI method declaration at entry {index}")));
+            }
+            staged.push(((class_descriptor.to_owned(), name, signature), function_ptr));
+        }
+        for (key, address) in staged.iter() { self.registered_natives.insert(key.clone(), *address); }
+        Ok(staged.len())
+    }
+
+    pub fn resolve_registered_native(&self, class_descriptor: &str, method_name: &str, prototype: &str) -> Option<u64> {
+        self.registered_natives.get(&(class_descriptor.to_owned(), method_name.to_owned(), prototype.to_owned())).copied()
+    }
     /// Resolve a globally/weakly exported ELF symbol to its guest virtual address.
     pub fn resolve_export(&self, symbol: &str) -> Option<u64> {
         self.exports.get(symbol).copied()
@@ -261,7 +304,15 @@ impl NativeGuestImage {
     ) -> Result<Arm64RunReport, NativeExecutionError> {
         if arguments.len() > 8 { return Err(NativeExecutionError::InvalidEntryPoint); }
         let target = self.resolve_export(symbol).ok_or(NativeExecutionError::MissingExecutableEntry)?;
-        if !self.is_executable_address(target) { return Err(NativeExecutionError::MissingExecutableEntry); }
+        self.run_address(target, arguments, cpu, instruction_budget)
+    }
+
+    fn run_address(
+        &mut self, target: u64, arguments: &[u64], cpu: &mut Arm64Cpu, instruction_budget: u64,
+    ) -> Result<Arm64RunReport, NativeExecutionError> {
+        if arguments.len() > 8 || !self.is_executable_address(target) {
+            return Err(NativeExecutionError::MissingExecutableEntry);
+        }
         cpu.x = [0; 31];
         cpu.flags = Default::default();
         cpu.halted = false;
@@ -272,7 +323,6 @@ impl NativeGuestImage {
         run_aarch64(cpu, &mut self.memory, target, instruction_budget)
             .map_err(NativeExecutionError::GuestMemory)
     }
-
     /// JNI short/long native symbol candidates using JNI name-escaping rules.
     pub fn jni_export_candidates(class_descriptor: &str, method_name: &str, prototype: &str) -> Vec<String> {
         fn encode(value: &str) -> String {
