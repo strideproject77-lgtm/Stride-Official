@@ -901,6 +901,47 @@ impl NativeLinker {
         issues
     }
 
+    /// Return the loaded dependency closure in constructor order (dependencies
+    /// before the requested module). Missing DT_NEEDED entries are not silently
+    /// treated as initialized; callers must inspect unresolved_dependencies()
+    /// for every returned module before executing constructors.
+    pub fn dependency_initialization_order(&self, root_soname: &str) -> Result<Vec<String>, String> {
+        if !self.modules.contains_key(root_soname) {
+            return Err(format!("Native module {} is not loaded", root_soname));
+        }
+
+        fn visit(
+            linker: &NativeLinker,
+            soname: &str,
+            visiting: &mut HashSet<String>,
+            visited: &mut HashSet<String>,
+            order: &mut Vec<String>,
+        ) -> Result<(), String> {
+            if visited.contains(soname) { return Ok(()); }
+            // ELF dependency cycles are tolerated: finish the current DFS edge
+            // without recursing forever, then emit each module exactly once.
+            if !visiting.insert(soname.to_owned()) { return Ok(()); }
+            let module = linker.modules.get(soname)
+                .ok_or_else(|| format!("Native module {} disappeared during dependency walk", soname))?;
+            for dependency in &module.needed_libraries {
+                if linker.modules.contains_key(dependency) {
+                    visit(linker, dependency, visiting, visited, order)?;
+                }
+            }
+            visiting.remove(soname);
+            if visited.insert(soname.to_owned()) {
+                order.push(soname.to_owned());
+            }
+            Ok(())
+        }
+
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        let mut order = Vec::new();
+        visit(self, root_soname, &mut visiting, &mut visited, &mut order)?;
+        Ok(order)
+    }
+
     /// Returns DT_NEEDED libraries that have not yet been loaded into this
     /// process. System libraries are intentionally not hidden by name: until a
     /// real Bionic module or ABI-compatible provider is registered, they remain
