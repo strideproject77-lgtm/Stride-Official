@@ -497,6 +497,9 @@ struct ContentView: View {
                     statusCard("Launcher Intent resolution", detail: "Manifest-backed MAIN / LAUNCHER Intent and ComponentName", symbol: "arrow.up.right.square", good: true)
                     statusCard("Intent construction and mutation", detail: "Action, package, class, categories and flags", symbol: "arrow.left.arrow.right", good: true)
                     statusCard("Intent extras", detail: "String, integer, long and boolean values with Bundle reads", symbol: "tray.full", good: true)
+                    statusCard("URI and Intent data", detail: "android.net.Uri parsing, scheme/host/path/query and MIME data", symbol: "link", good: true)
+                    statusCard("Bundle management", detail: "containsKey, remove, clear, size and typed defaults", symbol: "shippingbox", good: true)
+                    statusCard("Intent filter semantics", detail: "Data/type exclusivity, categories and filterEquals", symbol: "line.3.horizontal.decrease.circle", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }

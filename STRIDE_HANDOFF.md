@@ -821,19 +821,65 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 23 — Guest Uri parsing and Intent data/MIME bridge
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added guest-managed android.net.Uri StringUri objects and Uri.parse(String).
+- Added toString(), getScheme(), getAuthority(), getHost(), getPath(), getQuery(), getFragment(), isAbsolute() and isHierarchical().
+- Added Intent.setData(), getData(), getDataString(), getScheme(), setType(), getType() and setDataAndType().
+- Enforced Android's data/type mutual-clearing rules for setData() and setType(); setDataAndType() preserves both.
+- URI parsing rejects NUL/control characters, supports opaque URIs and authority/host/path/query/fragment extraction.
+- Added regression tests for content/web/opaque URI parsing, Intent data round-trip, MIME type clearing and malformed control input.
+- Extra UI: Runtime Status now lists URI parsing and Intent data/MIME support separately.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: no URI permission grants, percent-decoding/encoding helpers, Parcelable serialization, ContentResolver or provider dispatch.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
+### Phase 24 — Bundle key lifecycle and typed defaults
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added ManagedHeap.remove_instance_field() and deterministic instance_field_names() support.
+- Added Bundle.containsKey(), remove(), clear(), size(), isEmpty(), and getString/getInt overloads with caller-supplied defaults.
+- Added Intent.removeExtra() and replaceExtras(Bundle).
+- Bundle operations are restricted to Stride's namespaced Intent-extra fields so runtime-owned guest fields are not erased accidentally.
+- Added regression tests for key presence, removal, size/empty transitions, and typed default behavior.
+- Extra bug fix: field enumeration is deterministic and missing keys are distinguished from explicit zero/null values.
+- Extra UI: Runtime Status now surfaces Bundle lifecycle management as a separate capability.
+- Files: runtime-rust/crates/dex-runtime/src/heap.rs, runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: primitive/object arrays, nested Bundles, Parcelable values and Android Parcel wire format remain unsupported.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
+### Phase 25 — Framework Intent data/type and filter semantics
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Extended the typed framework Intent model with MIME type metadata.
+- Added set_data(), set_type(), set_data_and_type() and get_scheme() with Android-compatible data/type clearing behavior.
+- Added filter_equals(), which compares action, data URI, MIME type, component and categories while intentionally ignoring extras and flags.
+- Added remove_category() for category lifecycle management.
+- Added regression coverage for data/type transitions, URI scheme extraction, category removal and filter comparison behavior.
+- Extra bug fix: filter matching no longer treats extras or launch flags as identity-defining filter fields.
+- Extra UI: Runtime Status now distinguishes framework Intent filter behavior from guest JNI Intent mutation.
+- Files: runtime-rust/crates/dex-runtime/src/framework.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: no full Android resolver, MIME database, URI grant matching, IntentSender, chooser, cross-package dispatch or host activity navigation.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
-- Final consolidated workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`: complete Rust workspace test suite **passed**.
-- The workflow's unsigned iOS IPA job was **skipped**. No IPA was built, signed or exported.
-- Phases 16–22 are included in this validated source revision. Swift UI compilation remains unverified because the IPA/Xcode build was not run.
-- The first validation attempts exposed and fixed the array-length method mismatch and Intent extras default/presence bug. The final consolidated Rust run passed after those corrections.
-- All implementation changes remain on `feat/dex-class-method-loader`; `main` is untouched. The feature branch is substantially diverged from `main` (752 commits ahead and 12 behind at review time), so no broad merge was attempted without a separate reconciliation/review.
+- Previous consolidated workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`: Rust workspace tests passed for Phases 16–22.
+- Phases 23–25 are implemented in the current feature-branch working revision and require the next single consolidated Rust workspace test pass.
+- The unsigned iOS IPA job was skipped in the previous validation. No IPA was built, signed or exported.
+- Swift UI compilation remains unverified because no Xcode/IPA build was run.
+- All work remains on `feat/dex-class-method-loader`; `main` remains untouched. The branch has substantial divergence from `main`, so no merge is attempted without a separate reconciliation and review.
 - Do not build, sign or export an IPA without explicit user authorization.
 
 ### Next small implementation batches
-These are candidates, not completed work. Start only when implementing each phase:
-- Intent data and URI handling: getData(), setData(), setDataAndType(), scheme/host accessors with URI validation.
-- Bundle completeness: string/int/long/boolean defaults, containsKey(), remove(), and safe primitive-array support.
+These are candidates, not completed work:
 - Activity navigation: connect guest startActivity() to the existing in-process activity dispatcher, with explicit unsupported results for external/system targets.
 - Graphics/input: one bounded Canvas, MotionEvent multi-pointer, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.

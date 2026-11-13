@@ -210,6 +210,35 @@ impl ManagedHeap {
         }
     }
 
+
+    /// Remove one explicitly stored instance field and return its previous value.
+    pub fn remove_instance_field(&mut self, object_id: u32, field_name: &str) -> Result<Option<Value>, HeapError> {
+        let obj = self.get_mut(object_id)?;
+        match obj {
+            HeapObject::Instance(inst) => Ok(inst.fields.remove(field_name)),
+            _ => Err(HeapError::TypeMismatch {
+                expected: "InstanceObject".into(),
+                actual: obj.class_descriptor().into(),
+            }),
+        }
+    }
+
+    /// Return stable, sorted field names for bounded runtime metadata operations.
+    pub fn instance_field_names(&self, object_id: u32) -> Result<Vec<String>, HeapError> {
+        let obj = self.get(object_id)?;
+        match obj {
+            HeapObject::Instance(inst) => {
+                let mut names: Vec<String> = inst.fields.keys().cloned().collect();
+                names.sort_unstable();
+                Ok(names)
+            }
+            _ => Err(HeapError::TypeMismatch {
+                expected: "InstanceObject".into(),
+                actual: obj.class_descriptor().into(),
+            }),
+        }
+    }
+
     pub fn set_instance_field(&mut self, object_id: u32, field_name: &str, value: Value) -> Result<(), HeapError> {
         // Never allow a dangling object handle into the object graph: GC traces
         // these values as strong edges, and reads must not expose reclaimed IDs.
@@ -563,6 +592,19 @@ mod tests {
         assert!(heap.has_instance_field(object, "zero").unwrap());
         assert!(heap.has_instance_field(object, "null").unwrap());
         assert!(!heap.has_instance_field(object, "stillMissing").unwrap());
+    }
+
+
+    #[test]
+    fn instance_fields_can_be_removed_and_enumerated_deterministically() {
+        let mut heap = ManagedHeap::default();
+        let object = heap.allocate_instance("Lfixture/Bundle;").unwrap();
+        heap.set_instance_field(object, "mStrideExtra:z", Value::Int(1)).unwrap();
+        heap.set_instance_field(object, "mStrideExtra:a", Value::Int(2)).unwrap();
+        assert_eq!(heap.instance_field_names(object).unwrap(), vec!["mStrideExtra:a", "mStrideExtra:z"]);
+        assert_eq!(heap.remove_instance_field(object, "mStrideExtra:z").unwrap(), Some(Value::Int(1)));
+        assert!(!heap.has_instance_field(object, "mStrideExtra:z").unwrap());
+        assert_eq!(heap.remove_instance_field(object, "missing").unwrap(), None);
     }
 
     #[test]

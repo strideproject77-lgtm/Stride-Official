@@ -65,6 +65,7 @@ pub struct Intent {
     pub component_package: Option<String>,
     pub component_class: Option<String>,
     pub data_uri: Option<String>,
+    pub mime_type: Option<String>,
     pub flags: u32,
     pub extras: Bundle,
 }
@@ -82,6 +83,7 @@ impl Intent {
             component_package: None,
             component_class: None,
             data_uri: None,
+            mime_type: None,
             flags: 0,
             extras: Bundle::new(),
         }
@@ -98,6 +100,50 @@ impl Intent {
             self.categories.push(category.to_string());
         }
     }
+
+    /// Set a data URI and clear the MIME type, matching Android Intent semantics.
+    pub fn set_data(&mut self, uri: Option<&str>) {
+        self.data_uri = uri.map(str::to_owned);
+        self.mime_type = None;
+    }
+
+    /// Set a MIME type and clear the data URI, matching Android Intent semantics.
+    pub fn set_type(&mut self, mime_type: Option<&str>) {
+        self.mime_type = mime_type.map(str::to_owned);
+        self.data_uri = None;
+    }
+
+    /// Set both data URI and MIME type without clearing either value.
+    pub fn set_data_and_type(&mut self, uri: Option<&str>, mime_type: Option<&str>) {
+        self.data_uri = uri.map(str::to_owned);
+        self.mime_type = mime_type.map(str::to_owned);
+    }
+
+    pub fn get_scheme(&self) -> Option<&str> {
+        let uri = self.data_uri.as_deref()?;
+        let colon = uri.find(':')?;
+        let scheme = &uri[..colon];
+        let mut chars = scheme.chars();
+        let first = chars.next()?;
+        (first.is_ascii_alphabetic()
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.')))
+            .then_some(scheme)
+    }
+
+    /// Android Intent.filterEquals ignores extras and flags.
+    pub fn filter_equals(&self, other: &Self) -> bool {
+        self.action == other.action
+            && self.data_uri == other.data_uri
+            && self.mime_type == other.mime_type
+            && self.component_package == other.component_package
+            && self.component_class == other.component_class
+            && self.categories == other.categories
+    }
+
+    pub fn remove_category(&mut self, category: &str) {
+        self.categories.retain(|existing| existing != category);
+    }
+
 }
 
 /// Package and component metadata reported by PackageManager.
@@ -374,6 +420,29 @@ mod tests {
             launcher_activity: None,
             screen_orientation: None,
         }
+    }
+
+
+    #[test]
+    fn framework_intent_data_type_and_filter_comparison_follow_android_rules() {
+        let mut left = Intent::new(Some(Intent::ACTION_VIEW));
+        left.set_data(Some("content://com.example.provider/item/7"));
+        assert_eq!(left.get_scheme(), Some("content"));
+        assert_eq!(left.mime_type, None);
+        left.set_type(Some("image/png"));
+        assert_eq!(left.data_uri, None);
+        assert_eq!(left.mime_type.as_deref(), Some("image/png"));
+        left.set_data_and_type(Some("content://com.example.provider/item/7"), Some("image/png"));
+        let mut right = left.clone();
+        left.extras.put_int("ignored", 5);
+        right.flags = 0x20;
+        assert!(left.filter_equals(&right));
+        right.set_data(Some("content://com.example.provider/item/8"));
+        assert!(!left.filter_equals(&right));
+        left.add_category("android.intent.category.DEFAULT");
+        left.add_category("custom.category");
+        left.remove_category("custom.category");
+        assert_eq!(left.categories, vec!["android.intent.category.DEFAULT"]);
     }
 
     #[test]

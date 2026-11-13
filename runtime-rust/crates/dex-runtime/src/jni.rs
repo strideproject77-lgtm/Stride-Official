@@ -18,6 +18,100 @@ fn monotonic_uptime_millis() -> i64 {
 
 pub type NativeHandler = Arc<dyn Fn(&mut JniEnv, &[Value]) -> Result<Option<Value>, String> + Send + Sync>;
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedAndroidUri {
+    scheme: Option<String>,
+    authority: Option<String>,
+    host: Option<String>,
+    path: Option<String>,
+    query: Option<String>,
+    fragment: Option<String>,
+    absolute: bool,
+    hierarchical: bool,
+}
+
+fn parse_android_uri(raw: &str) -> Result<ParsedAndroidUri, String> {
+    if raw.as_bytes().contains(&0) || raw.chars().any(|ch| ch.is_control()) {
+        return Err("Uri contains a NUL or control character".into());
+    }
+    let (without_fragment, fragment) = match raw.split_once('#') {
+        Some((left, right)) => (left, Some(right.to_owned())),
+        None => (raw, None),
+    };
+    let (before_query, query) = match without_fragment.split_once('?') {
+        Some((left, right)) => (left, Some(right.to_owned())),
+        None => (without_fragment, None),
+    };
+    let scheme_end = before_query.find(':').filter(|colon| {
+        let boundary = before_query.find('/').unwrap_or(usize::MAX)
+            .min(before_query.find('?').unwrap_or(usize::MAX));
+        *colon < boundary
+    });
+    let scheme = scheme_end.map(|end| before_query[..end].to_owned()).filter(|candidate| {
+        let mut chars = candidate.chars();
+        chars.next().is_some_and(|first| first.is_ascii_alphabetic())
+            && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+    });
+    let absolute = scheme.is_some();
+    let remainder = if let Some(end) = scheme_end.filter(|_| absolute) {
+        &before_query[end + 1..]
+    } else {
+        before_query
+    };
+    let hierarchical = !absolute || remainder.starts_with('/');
+    let (authority, path) = if let Some(after_slashes) = remainder.strip_prefix("//") {
+        let authority_end = after_slashes.find('/').unwrap_or(after_slashes.len());
+        let authority = after_slashes[..authority_end].to_owned();
+        let path = after_slashes[authority_end..].to_owned();
+        (Some(authority), Some(path))
+    } else if hierarchical {
+        (None, Some(remainder.to_owned()))
+    } else {
+        (None, Some(remainder.to_owned()))
+    };
+    let host = authority.as_deref().and_then(|authority| {
+        let without_user = authority.rsplit('@').next().unwrap_or(authority);
+        if without_user.starts_with('[') {
+            without_user.find(']').map(|end| without_user[..=end].to_owned())
+        } else {
+            Some(without_user.split(':').next().unwrap_or("").to_owned())
+        }
+    }).filter(|host| !host.is_empty());
+    Ok(ParsedAndroidUri { scheme, authority, host, path, query, fragment, absolute, hierarchical })
+}
+
+fn uri_string_from_object(env: &JniEnv<'_>, uri_id: u32) -> Result<String, String> {
+    let class = env.heap.get(uri_id)
+        .map_err(|error| format!("Uri object lookup failed: {:?}", error))?
+        .class_descriptor().to_owned();
+    if class != "Landroid/net/Uri;" && class != "Landroid/net/Uri$StringUri;" {
+        return Err(format!("expected android.net.Uri, got {class}"));
+    }
+    let value = env.get_object_field(uri_id, "mUriString")
+        .map_err(|error| format!("Uri string field unavailable: {error}"))?;
+    match value {
+        Value::Object(string_id) => Ok(env.get_string_utf(string_id)?.to_owned()),
+        _ => Err("Uri object has no string representation".into()),
+    }
+}
+
+fn uri_component(env: &mut JniEnv<'_>, receiver: u32, component: &'static str) -> Result<Option<Value>, String> {
+    let raw = uri_string_from_object(env, receiver)?;
+    let parsed = parse_android_uri(&raw)?;
+    let value = match component {
+        "scheme" => parsed.scheme,
+        "authority" => parsed.authority,
+        "host" => parsed.host,
+        "path" => parsed.path,
+        "query" => parsed.query,
+        "fragment" => parsed.fragment,
+        _ => None,
+    };
+    value.map(|value| env.new_string_utf(&value).map(Value::Object)).transpose()
+}
+
+
 /// Opaque JNI reference handles. Guest-visible tokens are deliberately distinct
 /// from managed-heap object IDs, so local/global lifetime rules can be enforced
 /// without exposing Rust heap handles as JNI jobject values.
@@ -1190,6 +1284,92 @@ impl JniNativeRegistry {
             }
         });
 
+
+        // android.net.Uri is represented by a guest-managed StringUri object.
+        self.register("Landroid/net/Uri;", "parse", "(Ljava/lang/String;)Landroid/net/Uri;", |env, args| {
+            let input = args.first().and_then(Value::as_object).ok_or("Uri.parse input is null")?;
+            let raw = env.get_string_utf(input)?.to_owned();
+            let _ = parse_android_uri(&raw)?;
+            let uri = env.heap.allocate_instance("Landroid/net/Uri$StringUri;")
+                .map_err(|error| format!("Uri allocation failed: {:?}", error))?;
+            let string = env.new_string_utf(&raw)?;
+            env.set_object_field(uri, "mUriString", Value::Object(string))?;
+            Ok(Some(Value::Object(uri)))
+        });
+        self.register("Landroid/net/Uri;", "toString", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Uri.toString receiver is null")?;
+            let raw = uri_string_from_object(env, receiver)?;
+            Ok(Some(Value::Object(env.new_string_utf(&raw)?)))
+        });
+        for (method, component) in [
+            ("getScheme", "scheme"), ("getAuthority", "authority"),
+            ("getHost", "host"), ("getPath", "path"),
+            ("getQuery", "query"), ("getFragment", "fragment"),
+        ] {
+            self.register("Landroid/net/Uri;", method, "()Ljava/lang/String;", move |env, args| {
+                let receiver = args.first().and_then(Value::as_object).ok_or("Uri accessor receiver is null")?;
+                uri_component(env, receiver, component)
+            });
+        }
+        self.register("Landroid/net/Uri;", "isAbsolute", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Uri.isAbsolute receiver is null")?;
+            let raw = uri_string_from_object(env, receiver)?;
+            Ok(Some(Value::Int(i32::from(parse_android_uri(&raw)?.absolute))))
+        });
+        self.register("Landroid/net/Uri;", "isHierarchical", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Uri.isHierarchical receiver is null")?;
+            let raw = uri_string_from_object(env, receiver)?;
+            Ok(Some(Value::Int(i32::from(parse_android_uri(&raw)?.hierarchical))))
+        });
+        self.register("Landroid/content/Intent;", "setData", "(Landroid/net/Uri;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.setData receiver is null")?;
+            let data = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(uri) = data { let _ = uri_string_from_object(env, uri)?; }
+            env.set_object_field(receiver, "mData", data)?;
+            env.set_object_field(receiver, "mType", Value::Null)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "getData", "()Landroid/net/Uri;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getData receiver is null")?;
+            Ok(Some(env.get_object_field(receiver, "mData").unwrap_or(Value::Null)))
+        });
+        self.register("Landroid/content/Intent;", "getDataString", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getDataString receiver is null")?;
+            match env.get_object_field(receiver, "mData").unwrap_or(Value::Null) {
+                Value::Object(uri) => Ok(Some(Value::Object(env.new_string_utf(&uri_string_from_object(env, uri)?)?))),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/content/Intent;", "getScheme", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getScheme receiver is null")?;
+            match env.get_object_field(receiver, "mData").unwrap_or(Value::Null) {
+                Value::Object(uri) => uri_component(env, uri, "scheme"),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/content/Intent;", "setType", "(Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.setType receiver is null")?;
+            let mime = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = mime { let _ = env.get_string_utf(id)?; }
+            env.set_object_field(receiver, "mType", mime)?;
+            env.set_object_field(receiver, "mData", Value::Null)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "getType", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getType receiver is null")?;
+            Ok(Some(env.get_object_field(receiver, "mType").unwrap_or(Value::Null)))
+        });
+        self.register("Landroid/content/Intent;", "setDataAndType", "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.setDataAndType receiver is null")?;
+            let data = args.get(1).copied().unwrap_or(Value::Null);
+            let mime = args.get(2).copied().unwrap_or(Value::Null);
+            if let Value::Object(uri) = data { let _ = uri_string_from_object(env, uri)?; }
+            if let Value::Object(id) = mime { let _ = env.get_string_utf(id)?; }
+            env.set_object_field(receiver, "mData", data)?;
+            env.set_object_field(receiver, "mType", mime)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+
 // Guest-created Intent objects and common mutation methods used by
         // in-app navigation. These update only the managed guest object.
         self.register("Landroid/content/Intent;", "<init>", "()V", |env, args| {
@@ -1548,6 +1728,98 @@ impl JniNativeRegistry {
                 _ => Value::Int(0),
             }))
         });
+
+        self.register("Landroid/os/Bundle;", "containsKey", "(Ljava/lang/String;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.containsKey receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.containsKey key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let present = env.heap.has_instance_field(receiver, &format!("mStrideExtra:{key}"))
+                .map_err(|error| format!("Bundle key lookup failed: {:?}", error))?;
+            Ok(Some(Value::Int(i32::from(present))))
+        });
+        self.register("Landroid/os/Bundle;", "remove", "(Ljava/lang/String;)V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.remove receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.remove key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            env.heap.remove_instance_field(receiver, &format!("mStrideExtra:{key}"))
+                .map_err(|error| format!("Bundle key removal failed: {:?}", error))?;
+            Ok(None)
+        });
+        self.register("Landroid/os/Bundle;", "clear", "()V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.clear receiver is null")?;
+            let keys = env.heap.instance_field_names(receiver)
+                .map_err(|error| format!("Bundle field enumeration failed: {:?}", error))?
+                .into_iter().filter(|name| name.starts_with("mStrideExtra:")).collect::<Vec<_>>();
+            for key in keys {
+                env.heap.remove_instance_field(receiver, &key)
+                    .map_err(|error| format!("Bundle clear failed: {:?}", error))?;
+            }
+            Ok(None)
+        });
+        self.register("Landroid/os/Bundle;", "size", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.size receiver is null")?;
+            let count = env.heap.instance_field_names(receiver)
+                .map_err(|error| format!("Bundle size lookup failed: {:?}", error))?
+                .iter().filter(|name| name.starts_with("mStrideExtra:")).count();
+            Ok(Some(Value::Int(i32::try_from(count).unwrap_or(i32::MAX))))
+        });
+        self.register("Landroid/os/Bundle;", "isEmpty", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.isEmpty receiver is null")?;
+            let empty = !env.heap.instance_field_names(receiver)
+                .map_err(|error| format!("Bundle emptiness lookup failed: {:?}", error))?
+                .iter().any(|name| name.starts_with("mStrideExtra:"));
+            Ok(Some(Value::Int(i32::from(empty))))
+        });
+        self.register("Landroid/os/Bundle;", "getString", "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getString receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getString key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let default = args.get(2).copied().unwrap_or(Value::Null);
+            let field = format!("mStrideExtra:{key}");
+            if !env.heap.has_instance_field(receiver, &field).map_err(|error| format!("Bundle lookup failed: {:?}", error))? {
+                return Ok(Some(default));
+            }
+            Ok(Some(match env.get_object_field(receiver, &field) {
+                Ok(value @ Value::Object(_)) => value,
+                _ => default,
+            }))
+        });
+        self.register("Landroid/os/Bundle;", "getInt", "(Ljava/lang/String;I)I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getInt receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getInt key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let default = args.get(2).map(Value::as_int).unwrap_or(0);
+            let field = format!("mStrideExtra:{key}");
+            if !env.heap.has_instance_field(receiver, &field).map_err(|error| format!("Bundle lookup failed: {:?}", error))? {
+                return Ok(Some(Value::Int(default)));
+            }
+            Ok(Some(match env.get_object_field(receiver, &field) {
+                Ok(Value::Int(value)) => Value::Int(value),
+                _ => Value::Int(default),
+            }))
+        });
+        self.register("Landroid/content/Intent;", "removeExtra", "(Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.removeExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.removeExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            if let Ok(Value::Object(bundle)) = env.get_object_field(receiver, "mExtras") {
+                env.heap.remove_instance_field(bundle, &format!("mStrideExtra:{key}"))
+                    .map_err(|error| format!("Intent extra removal failed: {:?}", error))?;
+            }
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "replaceExtras", "(Landroid/os/Bundle;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.replaceExtras receiver is null")?;
+            let bundle = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = bundle {
+                let class = env.heap.get(id).map_err(|error| format!("Intent Bundle lookup failed: {:?}", error))?.class_descriptor().to_owned();
+                if class != "Landroid/os/Bundle;" { return Err(format!("Intent.replaceExtras expected Bundle, got {class}")); }
+            }
+            env.set_object_field(receiver, "mExtras", bundle)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+
+
 
                         // Context app-private directory paths. These are Android-style guest
         // paths only; a persistent filesystem backend is a separate capability.
@@ -2274,6 +2546,51 @@ mod tests {
         assert!(get_launch(&mut env, &[Value::Object(manager), Value::Null]).unwrap_err().contains("packageName is null"));
     }
 
+
+    #[test]
+    fn android_uri_parse_exposes_components_and_intent_data_type_semantics() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let parse = registry.find("Landroid/net/Uri;", "parse", "(Ljava/lang/String;)Landroid/net/Uri;").unwrap().clone();
+        let get_host = registry.find("Landroid/net/Uri;", "getHost", "()Ljava/lang/String;").unwrap().clone();
+        let get_path = registry.find("Landroid/net/Uri;", "getPath", "()Ljava/lang/String;").unwrap().clone();
+        let get_query = registry.find("Landroid/net/Uri;", "getQuery", "()Ljava/lang/String;").unwrap().clone();
+        let intent = env.heap.allocate_instance("Landroid/content/Intent;").unwrap();
+        let set_data = registry.find("Landroid/content/Intent;", "setData", "(Landroid/net/Uri;)Landroid/content/Intent;").unwrap().clone();
+        let get_data_string = registry.find("Landroid/content/Intent;", "getDataString", "()Ljava/lang/String;").unwrap().clone();
+        let set_type = registry.find("Landroid/content/Intent;", "setType", "(Ljava/lang/String;)Landroid/content/Intent;").unwrap().clone();
+        let get_type = registry.find("Landroid/content/Intent;", "getType", "()Ljava/lang/String;").unwrap().clone();
+        let raw = env.new_string_utf("https://example.com:8443/games/list?sort=recent#top").unwrap();
+        let uri = parse(&mut env, &[Value::Object(raw)]).unwrap().unwrap().as_object().unwrap();
+        let host = get_host(&mut env, &[Value::Object(uri)]).unwrap().unwrap().as_object().unwrap();
+        let path = get_path(&mut env, &[Value::Object(uri)]).unwrap().unwrap().as_object().unwrap();
+        let query = get_query(&mut env, &[Value::Object(uri)]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(host).unwrap(), "example.com");
+        assert_eq!(env.get_string_utf(path).unwrap(), "/games/list");
+        assert_eq!(env.get_string_utf(query).unwrap(), "sort=recent");
+        set_data(&mut env, &[Value::Object(intent), Value::Object(uri)]).unwrap();
+        let data_string = get_data_string(&mut env, &[Value::Object(intent)]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(data_string).unwrap(), "https://example.com:8443/games/list?sort=recent#top");
+        let mime = env.new_string_utf("text/plain").unwrap();
+        set_type(&mut env, &[Value::Object(intent), Value::Object(mime)]).unwrap();
+        assert_eq!(env.get_object_field(intent, "mData").unwrap(), Value::Null);
+        assert_eq!(get_type(&mut env, &[Value::Object(intent)]).unwrap(), Some(Value::Object(mime)));
+    }
+
+    #[test]
+    fn android_uri_parser_rejects_control_characters_and_handles_opaque_uris() {
+        assert!(parse_android_uri("https://example.com/\ninvalid").is_err());
+        let mail = parse_android_uri("mailto:hello@example.com").unwrap();
+        assert_eq!(mail.scheme.as_deref(), Some("mailto"));
+        assert!(mail.absolute);
+        assert!(!mail.hierarchical);
+        assert_eq!(mail.host, None);
+        let content = parse_android_uri("content://com.example.provider/items/4").unwrap();
+        assert_eq!(content.authority.as_deref(), Some("com.example.provider"));
+        assert_eq!(content.path.as_deref(), Some("/items/4"));
+    }
+
     #[test]
     fn guest_intent_constructors_and_mutators_preserve_component_categories_and_flags() {
         let registry = JniNativeRegistry::new();
@@ -2310,6 +2627,39 @@ mod tests {
         let component_class = env.get_object_field(component, "mClass").unwrap().as_object().unwrap();
         assert_eq!(env.get_string_utf(component_package).unwrap(), "com.stride.fixture");
         assert_eq!(env.get_string_utf(component_class).unwrap(), "com.stride.fixture.DetailActivity");
+    }
+
+
+    #[test]
+    fn bundle_remove_clear_size_contains_and_typed_defaults_are_consistent() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let bundle = env.heap.allocate_instance("Landroid/os/Bundle;").unwrap();
+        let key = env.new_string_utf("score").unwrap();
+        let title_key = env.new_string_utf("title").unwrap();
+        let title = env.new_string_utf("Stride").unwrap();
+        let put_int = registry.find("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;").unwrap().clone();
+        let contains = registry.find("Landroid/os/Bundle;", "containsKey", "(Ljava/lang/String;)Z").unwrap().clone();
+        let remove = registry.find("Landroid/os/Bundle;", "remove", "(Ljava/lang/String;)V").unwrap().clone();
+        let clear = registry.find("Landroid/os/Bundle;", "clear", "()V").unwrap().clone();
+        let size = registry.find("Landroid/os/Bundle;", "size", "()I").unwrap().clone();
+        let empty = registry.find("Landroid/os/Bundle;", "isEmpty", "()Z").unwrap().clone();
+        let get_int = registry.find("Landroid/os/Bundle;", "getInt", "(Ljava/lang/String;I)I").unwrap().clone();
+        let intent = env.heap.allocate_instance("Landroid/content/Intent;").unwrap();
+        env.set_object_field(intent, "mExtras", Value::Object(bundle)).unwrap();
+        put_int(&mut env, &[Value::Object(intent), Value::Object(key), Value::Int(99)]).unwrap();
+        env.set_object_field(bundle, "mStrideExtra:title", Value::Object(title)).unwrap();
+        assert_eq!(size(&mut env, &[Value::Object(bundle)]).unwrap(), Some(Value::Int(2)));
+        assert_eq!(empty(&mut env, &[Value::Object(bundle)]).unwrap(), Some(Value::Int(0)));
+        assert_eq!(contains(&mut env, &[Value::Object(bundle), Value::Object(key)]).unwrap(), Some(Value::Int(1)));
+        assert_eq!(get_int(&mut env, &[Value::Object(bundle), Value::Object(key), Value::Int(-7)]).unwrap(), Some(Value::Int(99)));
+        remove(&mut env, &[Value::Object(bundle), Value::Object(key)]).unwrap();
+        assert_eq!(contains(&mut env, &[Value::Object(bundle), Value::Object(key)]).unwrap(), Some(Value::Int(0)));
+        assert_eq!(get_int(&mut env, &[Value::Object(bundle), Value::Object(key), Value::Int(-7)]).unwrap(), Some(Value::Int(-7)));
+        clear(&mut env, &[Value::Object(bundle)]).unwrap();
+        assert_eq!(size(&mut env, &[Value::Object(bundle)]).unwrap(), Some(Value::Int(0)));
+        assert_eq!(empty(&mut env, &[Value::Object(bundle)]).unwrap(), Some(Value::Int(1)));
     }
 
     #[test]
