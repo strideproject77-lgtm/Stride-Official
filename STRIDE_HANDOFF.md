@@ -577,7 +577,6 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- DEX method resolution: enforce invoke-kind compatibility against preserved DEX access flags (static vs instance, direct vs virtual), as a separate small batch.
 - Managed object references: one concrete GC-root/reachability edge case plus regression.
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
 - JNI: one guest-reference or argument-conversion behavior plus regression.
