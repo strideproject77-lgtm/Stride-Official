@@ -500,7 +500,7 @@ struct ContentView: View {
                     statusCard("URI and Intent data", detail: "android.net.Uri parsing, scheme/host/path/query and MIME data", symbol: "link", good: true)
                     statusCard("Bundle management", detail: "containsKey, remove, clear, size and typed defaults", symbol: "shippingbox", good: true)
                     statusCard("Intent filter semantics", detail: "Data/type exclusivity, categories and filterEquals", symbol: "line.3.horizontal.decrease.circle", good: true)
-                    statusCard("In-process Activity backstack", detail: "Explicit component dispatch, safe allocation and nullable onCreate Bundle · guest Context.startActivity bridge pending", symbol: "arrow.trianglehead.2.clockwise.rotate.90", good: false)
+                    statusCard("In-process Activity backstack", detail: "Explicit component dispatch, safe allocation and nullable onCreate Bundle · guest Context.startActivity bridge pending", symbol: "arrow.triangle.2.circlepath", good: false)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }

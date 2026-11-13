@@ -889,7 +889,7 @@ These are candidates, not completed work:
 
 ### Phase 26 — In-process Activity dispatch foundation
 
-**Status: Partial (implementation batch; consolidated validation pending).**
+**Status: Partial · approximately 40% (dispatcher foundation hardened; guest bridge and runtime synchronization remain).**
 
 - Hardened ActivityManager.start_activity() to require an explicit non-empty component class instead of silently routing implicit intents to a fabricated UnknownActivity.
 - Activity allocation now happens before the current top Activity is paused/stopped. Allocation failure returns a diagnostic error and leaves the existing backstack/lifecycle unchanged.
