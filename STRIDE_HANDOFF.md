@@ -469,6 +469,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; Rust workspace workflow passed |
 | 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Completed — implementation reviewed and regressions added; consolidated workflow pending |
 | 4 | DEX virtual dispatch: choose the maximally-specific interface declaration and reject ambiguous defaults | Completed — implementation reviewed and regressions added; consolidated workflow pending |
+| 5 | DEX hierarchy linking: preserve original method access flags so abstract/private/static declarations remain distinguishable | Implemented — focused regression added; consolidated workflow pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -537,9 +538,26 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Implementation commits: `335f61fac0fcdc513947e267ee29ed9b60a7f26e`, `10b92c50f401b081f7a02c7c9400506912f02d7f`.
 - Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
 
+### Phase 5 — Preserve DEX method access flags during hierarchy linking
+
+**Acceptance criteria**
+1. Linking loaded DEX classes into `ClassHierarchy` preserves each method's original access flags rather than replacing them with `public`.
+2. Abstract interface redeclarations remain abstract after linking and therefore suppress inherited interface defaults.
+3. Private and static method flags are preserved for later access/invoke-kind checks.
+4. Regression coverage verifies abstract, private, and static flags through the actual loader-to-hierarchy linking path.
+
+**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+- Added `RuntimeClass::register_method_with_flags`; the existing `register_method` remains source-compatible and delegates with its previous public default.
+- Updated `AppClassLoader::link_hierarchy` to pass `LoadedMethod.access_flags` for both virtual and direct methods.
+- Added a loader-level regression that links an abstract subinterface method plus private and static direct methods, checks their flags, and verifies that the abstract declaration suppresses the parent interface default after linking.
+- Extra improvement: downstream access checks and invoke-kind validation now have the real DEX flags available instead of fabricated public flags.
+- Files: `runtime-rust/crates/dex-runtime/src/hierarchy.rs`, `runtime-rust/crates/dex-runtime/src/loader.rs`.
+- Implementation commits: `8762d631bebe3fcd2a3e56a7a55fafd03020b99a`, `b5fc4b6095373e7ba6bf86a3da11c13be0a7f250`, `fa0002b79f9df93e052fb58c8efaef6ec77ba986`.
+- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- DEX method resolution: remaining access-check and invoke-kind edge cases, each as a separate small batch.
+- DEX method resolution: enforce invoke-kind compatibility against preserved DEX access flags (static vs instance, direct vs virtual), as a separate small batch.
 - Managed object references: one concrete GC-root/reachability edge case plus regression.
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
 - JNI: one guest-reference or argument-conversion behavior plus regression.
