@@ -746,10 +746,25 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 18 — Context app-private directory paths
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added Context.getFilesDir() and Context.getCacheDir() guest JNI bridges.
+- Each method returns a guest-managed java.io.File object carrying the app-scoped Android-style path derived from the configured manifest package identity.
+- Added File.getPath(), getAbsolutePath() and toString() accessors for these runtime-created File objects.
+- Calls before package bootstrap fail explicitly; no fake path is returned.
+- Added regression coverage for both directories, path accessors and missing package identity.
+- Extra UI improvement: Runtime Status now lists app-private files/cache path support and clearly states that disk persistence is not implemented yet.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: these are guest path objects only. File creation, directory existence, read/write streams, mkdirs, deletion and durable sandbox-backed storage remain unsupported.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
-- Phases 16–17 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
+- Phases 16–18 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
 - No new IPA build was triggered by Phases 16–17. Do not build, sign or export another IPA without explicit user authorization.
 
 ### Next small implementation batches
