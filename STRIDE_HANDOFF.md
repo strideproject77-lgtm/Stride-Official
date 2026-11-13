@@ -18,7 +18,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Phase 5 — Preserve DEX method access flags during hierarchy linking: **implementation complete**. The loader carries original DEX flags into `ClassHierarchy`; regressions cover abstract interface redeclarations plus private/static declarations through the loader path.
 - Phase 6 — DEX invoke-kind compatibility: **implementation complete**. The interpreter rejects linked-app static/instance, direct/private/constructor, and class/interface invoke mismatches while leaving unresolved framework owners eligible for exact-signature JNI bridges. Focused regressions are present.
 - UI extra delivered alongside this work: the Home welcome hero and app mark use a dark walnut/amber palette rather than the former purple/blue treatment.
-- Validation state: these phase-specific regressions have not yet been included in a successful consolidated Rust workspace workflow. The next push is intended to run the Rust-only job; the workflow's IPA job is gated off unless explicitly opted in. No IPA build/sign/export is authorized.
+- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 implementation is now committed; its regressions await the next single consolidated Rust workflow. IPA build/sign/export remains unauthorized.
 - Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
@@ -580,8 +580,26 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added focused regressions for static-vs-instance mismatch, private direct calls, constructors, and class/interface opcode compatibility.
 - Extra UI improvement: refreshed the Home welcome hero from the old purple/blue treatment to a dark walnut-brown gradient with warm amber highlights, carrying the same palette into the mini app mark and CTA.
 - Files: `runtime-rust/crates/dex-runtime/src/interpreter.rs`, `Sources/StrideApp/ContentView.swift`.
-- Tests: added; deliberately deferred to the single consolidated Rust workflow. Swift UI compile also remains unverified until the final app validation.
+- Tests: focused regressions included in successful consolidated Rust workspace workflow #663. Swift UI compile remains unverified because the IPA job was skipped.
 - IPA: not built, signed, or exported.
+
+### Phase 7 — Reject dangling managed-object references
+
+**Acceptance criteria**
+1. Instance fields cannot store non-null object handles that are not currently live in the managed heap.
+2. Array elements cannot store non-null dangling object handles; bounds/type validation remains intact.
+3. Failed reference writes are atomic and leave the prior field/element value unchanged.
+4. Null object references remain valid, and valid object edges remain discoverable by mark-sweep GC.
+5. Focused regressions cover both instance-field and reference-array paths, including reachability after collection.
+
+**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+- ManagedHeap.set_instance_field now rejects non-null Value::Object handles that do not resolve to a live heap object.
+- ManagedHeap.set_array_element validates array type and bounds, then validates object handles before mutating the element.
+- Failed reference writes return HeapError::InvalidHandle and preserve the previous value.
+- Added regressions proving invalid field/array references are rejected and valid child objects remain reachable when the owner/array is a GC root.
+- Extra UI/UX improvement: Home and Library no-results states now offer a one-tap “Clear search” action; the Home search field has an explicit accessibility label and hint.
+- Files: runtime-rust/crates/dex-runtime/src/heap.rs, Sources/StrideApp/ContentView.swift.
+- Validation: pending the single consolidated Rust workspace workflow. Swift UI compile remains unverified; no IPA build, signing, or export was run.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
