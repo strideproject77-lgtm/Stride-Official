@@ -434,6 +434,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 ### Opaque guest JNI reference handles
 - Added an exported `JniReferenceTable` that maps opaque 64-bit guest tokens to managed objects without exposing internal heap IDs as `jobject` values.
 - Supports local/global/weak-global lifetime classes, local frames, result-preserving frame pop, clone/delete operations, identity checks, live-handle resolution, strong-root snapshots and weak-reference pruning.
+- Cleared weak references resolve as NULL but retain their token until `DeleteWeakGlobalRef`, matching JNI weak-handle lifetime more closely.
 - This does not yet implement guest-callable `JNIEnv*`/`JavaVM*` function tables, executable trampolines, native-to-managed callback dispatch or automatic GC root handoff. Tests are added but deliberately unrun until the final single test pass.
 
 - Added strong global-reference create/delete and local+global strong-root snapshots; weak globals and automatic GC integration remain outstanding.
