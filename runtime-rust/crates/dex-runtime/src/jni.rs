@@ -1292,6 +1292,8 @@ mod tests {
         let local_root = env.new_string_utf("local-root").unwrap();
         let global_root = env.heap.allocate_string("global-root").unwrap();
         env.new_global_ref(global_root).unwrap();
+        let guest_local_root = env.heap.allocate_string("guest-local-root").unwrap();
+        env.new_guest_local_ref(guest_local_root).unwrap();
         let guest_global_root = env.heap.allocate_string("guest-global-root").unwrap();
         env.new_guest_global_ref(guest_global_root).unwrap();
         let weak_only = env.heap.allocate_string("weak-only").unwrap();
@@ -1300,15 +1302,18 @@ mod tests {
 
         let report = env.collect_garbage(&[caller_root]);
 
-        assert_eq!(report.objects_before, 5);
-        assert_eq!(report.objects_after, 4);
+        assert_eq!(report.objects_before, 6);
+        assert_eq!(report.objects_after, 5);
         assert!(env.heap.contains(local_root));
         assert!(env.heap.contains(global_root));
+        assert!(env.heap.contains(guest_local_root));
         assert!(env.heap.contains(guest_global_root));
         assert!(env.heap.contains(caller_root));
         assert!(!env.heap.contains(weak_only));
         assert_eq!(env.resolve_guest_ref(weak).unwrap(), None);
         assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 0);
+        env.delete_guest_weak_global_ref(weak).unwrap();
+        assert!(env.guest_references.resolve(weak).is_err());
     }
 
     #[test]
