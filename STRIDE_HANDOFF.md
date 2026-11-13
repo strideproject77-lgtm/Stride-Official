@@ -12,6 +12,14 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Continue on branch: feat/dex-class-method-loader
 - Draft PR: https://github.com/strideproject77-lgtm/Stride-Official/pull/1
 - The branch was reconciled with latest main by a two-parent merge commit, preserving main's newer ELF address-overflow validation.
+
+## Common Compatibility Engine — current implementation checkpoint (2026-11-13)
+
+- Phase 5 — Preserve DEX method access flags during hierarchy linking: **implementation complete**. The loader carries original DEX flags into `ClassHierarchy`; regressions cover abstract interface redeclarations plus private/static declarations through the loader path.
+- Phase 6 — DEX invoke-kind compatibility: **implementation complete**. The interpreter rejects linked-app static/instance, direct/private/constructor, and class/interface invoke mismatches while leaving unresolved framework owners eligible for exact-signature JNI bridges. Focused regressions are present.
+- UI extra delivered alongside this work: the Home welcome hero and app mark use a dark walnut/amber palette rather than the former purple/blue treatment.
+- Validation state: these phase-specific regressions have not yet been included in a successful consolidated Rust workspace workflow. The next push is intended to run the Rust-only job; the workflow's IPA job is gated off unless explicitly opted in. No IPA build/sign/export is authorized.
+- Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
 ## Completed
