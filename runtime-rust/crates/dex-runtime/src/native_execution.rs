@@ -602,7 +602,14 @@ mod tests {
     fn unregisters_only_the_requested_classes_native_methods() {
         let mut image = NativeGuestImage {
             memory: GuestMemory::new(DEFAULT_GUEST_LOAD_BIAS, 4096).unwrap(),
-            plan: NativeImagePlan { image_virtual_start: 0, image_size: 4096, pages: Vec::new() },
+            plan: NativeImagePlan {
+                load_bias: DEFAULT_GUEST_LOAD_BIAS,
+                image_virtual_start: 0,
+                image_size: 4096,
+                pages: Vec::new(),
+                segment_copies: Vec::new(),
+                architecture: stride_elf_inspector::ElfArchitecture::Aarch64,
+            },
             entry_point: 0, report: NativeImageReport {
                 soname: None, needed_libraries: Vec::new(), image_base: DEFAULT_GUEST_LOAD_BIAS,
                 image_size: 4096, entry_point: 0, mapped_pages: 0, relocated_symbols: 0,
