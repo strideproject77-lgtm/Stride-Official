@@ -659,9 +659,23 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 12 — Android Context package identity
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added per-JNI-environment Android package identity configuration through set_package_name, with basic Java package-segment validation.
+- Implemented Context.getPackageName() and Context.getOpPackageName() bridges. Both return guest-managed Java String objects from the configured package identity.
+- Calls made before package bootstrap now fail explicitly instead of returning a fake/placeholder package name.
+- Added regression coverage for configured identity, both Context methods, missing bootstrap identity, and malformed package names.
+- Extra Settings UI improvement: Runtime Status now lists the Context package identity bridge as a distinct capability rather than hiding it inside the broad Android framework status.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Integration note: the APK/application bootstrap must call JniEnv::set_package_name with the parsed manifest package before app Context code is executed. This batch adds the bridge/configuration API; it does not claim the full app bootstrap wiring is already connected.
+- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
+- Android framework: connect parsed manifest package identity into the JNI bootstrap and validate Context lifecycle integration.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
