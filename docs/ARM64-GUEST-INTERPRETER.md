@@ -98,6 +98,8 @@ in this implementation-only batch.
 - Regression tests were added but intentionally not run in this implementation-only batch.
 
 ### JNI failure-safety follow-up
+
+- Added strong global-reference create/delete operations and GC-root snapshots, plus a combined local+global strong-root snapshot. Global refs are independent of local-frame lifetime; weak globals and automatic collector wiring are still not implemented.
 - `PopLocalFrame(result)` now validates the result and reserves parent-frame capacity before mutating frame state, so invalid handles/allocation failures do not partially pop the frame.
 - Local-reference vector capacity is reserved before allocating strings and primitive arrays, avoiding an infallible `Vec::push` growth after a managed object has already been allocated.
 - `NewLocalRef(NULL)` and `DeleteLocalRef(NULL)` follow JNI null-reference behavior. Regression coverage was updated/added but remains unrun pending the single final test pass.
