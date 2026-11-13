@@ -18,7 +18,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Phase 5 — Preserve DEX method access flags during hierarchy linking: **implementation complete**. The loader carries original DEX flags into `ClassHierarchy`; regressions cover abstract interface redeclarations plus private/static declarations through the loader path.
 - Phase 6 — DEX invoke-kind compatibility: **implementation complete**. The interpreter rejects linked-app static/instance, direct/private/constructor, and class/interface invoke mismatches while leaving unresolved framework owners eligible for exact-signature JNI bridges. Focused regressions are present.
 - UI extra delivered alongside this work: the Home welcome hero and app mark use a dark walnut/amber palette rather than the former purple/blue treatment.
-- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 is implemented and validated by successful consolidated Rust workspace workflow #667. Phase 8 passed the consolidated Rust workspace workflow #672 (run ID `43466701440`); the IPA job was skipped. IPA build/sign/export remains unauthorized.
+- Validation state: Phases 11–15 passed the consolidated Rust workspace test job in workflow #701 (run ID `43481239721`, commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`). The unsigned iOS IPA build job is queued/in progress; record its final result and artifact only after completion. IPA signing is not part of this workflow.
 - Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
@@ -656,7 +656,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added a regression that checks non-negative monotonic results and confirms uptime remains distinct from epoch wall-clock time.
 - Extra Diagnostics UI improvement: added a one-tap SUMMARY copy action containing total events, fatal/error/warning counts, and the 12 most recent diagnostic entries. Existing full-copy and export actions remain available.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
-- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace workflow #701 (run ID `43481239721`) passed. The macOS unsigned IPA/UI compile job is tracked separately in the same run; final result pending.
 - IPA: not built, signed, or exported.
 
 ### Phase 12 — Android Context package identity
@@ -714,6 +714,11 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Scope boundary: this is a typed Rust framework query API, not yet a guest Java PackageManager object/JNI method bridge; third-party package enumeration and flags overloads remain unsupported.
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
+
+### Latest validation checkpoint — 2026-11-13
+
+- Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job is queued/in progress. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
+- This checkpoint commit intentionally contains no source changes; Phase 16 work should start after the current build completes so the IPA being produced matches the validated source revision.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
