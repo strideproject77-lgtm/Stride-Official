@@ -501,7 +501,7 @@ mod diagnostics_tests {
             init_state: ClassInitState::NotInitialized,
             static_fields: HashMap::new(),
             instance_field_names: Vec::new(),
-            direct_methods: Vec::new(),
+            direct_methods: vec![12, 13],
             virtual_methods: vec![10],
         });
         loader.classes.insert(child.into(), LoadedClass {
@@ -523,12 +523,23 @@ mod diagnostics_tests {
             method_id: 11, class_descriptor: child.into(), name: "render".into(),
             prototype: "()V".into(), access_flags: 0x0401, is_direct: false, code: None,
         });
+        loader.methods_by_id.insert(12, LoadedMethod {
+            method_id: 12, class_descriptor: base.into(), name: "secret".into(),
+            prototype: "()V".into(), access_flags: 0x0002, is_direct: true, code: None,
+        });
+        loader.methods_by_id.insert(13, LoadedMethod {
+            method_id: 13, class_descriptor: base.into(), name: "create".into(),
+            prototype: "()V".into(), access_flags: 0x0008, is_direct: true, code: None,
+        });
 
         let mut hierarchy = ClassHierarchy::new();
         loader.link_hierarchy(&mut hierarchy);
         let child_method = hierarchy.get_class(child).unwrap().methods
             .get(&("render".into(), "()V".into())).unwrap();
         assert_eq!(child_method.access_flags, 0x0401);
+        let base_methods = &hierarchy.get_class(base).unwrap().methods;
+        assert_eq!(base_methods.get(&("secret".into(), "()V".into())).unwrap().access_flags, 0x0002);
+        assert_eq!(base_methods.get(&("create".into(), "()V".into())).unwrap().access_flags, 0x0008);
 
         let mut widget = RuntimeClass::new("Ltest/Widget;", Some("Ljava/lang/Object;"));
         widget.interface_descriptors = vec![child.into()];
