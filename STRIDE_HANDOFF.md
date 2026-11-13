@@ -647,9 +647,21 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust runtime workflow #679 (run ID 43470693805) passed, including the new exception-trace regression. The iOS/IPA job was skipped; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 11 — Monotonic Android SystemClock uptime
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Replaced the Android SystemClock.uptimeMillis bridge's wall-clock epoch source with a process-relative monotonic Instant clock.
+- Wall-clock timestamps remain available through java.lang.System.currentTimeMillis; adjusting the device clock can no longer make uptimeMillis jump backwards or forwards.
+- Added a regression that checks non-negative monotonic results and confirms uptime remains distinct from epoch wall-clock time.
+- Extra Diagnostics UI improvement: added a one-tap SUMMARY copy action containing total events, fatal/error/warning counts, and the 12 most recent diagnostic entries. Existing full-copy and export actions remain available.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Exception propagation: one specific handler/stack-trace correctness issue plus regression.
+- Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
