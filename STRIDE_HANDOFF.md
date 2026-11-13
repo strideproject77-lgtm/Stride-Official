@@ -637,8 +637,11 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
-- Exception propagation: one specific handler/stack-trace correctness issue plus regression.
-- JNI: one guest-reference or argument-conversion behavior plus regression.
+- Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
+- Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
+- Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
+- UI/UX: one user-visible Stride library/launch/diagnostics improvement in a dedicated batch, with matching tests where practical.
+- Compatibility harness: one exact APK scenario and evidence record at a time.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
