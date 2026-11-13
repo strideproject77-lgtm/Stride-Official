@@ -43,6 +43,53 @@ pub struct MethodCode {
     pub try_blocks: Vec<TryBlock>,
 }
 
+
+/// Validate the DEX invoke opcode against a linked declaration when one is available.
+/// Framework methods without a materialized RuntimeClass remain eligible for JNI bridges.
+fn validate_invoke_kind(
+    hierarchy: &ClassHierarchy,
+    opcode: u8,
+    target_class: &str,
+    target_name: &str,
+    target_prototype: &str,
+) -> Result<(), String> {
+    let Some(class) = hierarchy.get_class(target_class) else {
+        return Ok(());
+    };
+    let key = (target_name.to_owned(), target_prototype.to_owned());
+    let Some(method) = class.methods.get(&key) else {
+        return Ok(());
+    };
+
+    let is_static = method.access_flags & 0x0008 != 0;
+    let is_private = method.access_flags & 0x0002 != 0;
+    let is_constructor = target_name == "<init>";
+    let invalid = match opcode {
+        0x71 | 0x77 => !is_static,
+        0x70 | 0x76 => is_static || !method.is_direct || !(is_private || is_constructor),
+        0x6e | 0x74 => is_static || is_private || method.is_direct || class.is_interface(),
+        0x72 | 0x78 => is_static || is_private || method.is_direct || !class.is_interface(),
+        0x6f | 0x75 => is_static || is_private || method.is_direct,
+        _ => false,
+    };
+
+    if invalid {
+        let kind = match opcode {
+            0x71 | 0x77 => "invoke-static",
+            0x70 | 0x76 => "invoke-direct",
+            0x6e | 0x74 => "invoke-virtual",
+            0x72 | 0x78 => "invoke-interface",
+            0x6f | 0x75 => "invoke-super",
+            _ => "unknown invoke",
+        };
+        return Err(format!(
+            "{} is incompatible with linked declaration {}->{}{} (access_flags=0x{:04x}, direct={})",
+            kind, target_class, target_name, target_prototype, method.access_flags, method.is_direct
+        ));
+    }
+    Ok(())
+}
+
 pub struct ArtVm<'a> {
     pub heap: &'a mut ManagedHeap,
     pub hierarchy: &'a mut ClassHierarchy,
@@ -1278,6 +1325,10 @@ impl<'a> ArtVm<'a> {
                         ("<unknown>", "<unknown>", "()V")
                     };
 
+                    validate_invoke_kind(
+                        self.hierarchy, op, target_class, target_name, target_proto,
+                    ).map_err(|error| format!("Invalid DEX invoke at PC {}: {}", pc, error))?;
+
                     let is_static_invoke = matches!(op, 0x71 | 0x77);
                     let args = decode_invoke_arguments(&rf, &argument_registers, target_proto, is_static_invoke)
                         .map_err(|error| format!(
@@ -1528,6 +1579,49 @@ mod tests {
 
 
     use super::*;
+
+    #[test]
+    fn invoke_kind_validation_rejects_static_instance_and_dispatch_mismatches() {
+        let mut hierarchy = ClassHierarchy::new();
+
+        let mut owner = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Owner;", Some("Ljava/lang/Object;"),
+        );
+        owner.register_method_with_flags("staticCall", "()V", 10, true, 0x0009);
+        owner.register_method_with_flags("instanceCall", "()V", 11, false, 0x0001);
+        owner.register_method_with_flags("privateCall", "()V", 12, true, 0x0002);
+        owner.register_method_with_flags("<init>", "()V", 13, true, 0x0001);
+        hierarchy.register_class(owner);
+
+        assert!(validate_invoke_kind(&hierarchy, 0x6e, "Ltest/Owner;", "staticCall", "()V").is_err());
+        assert!(validate_invoke_kind(&hierarchy, 0x71, "Ltest/Owner;", "instanceCall", "()V").is_err());
+        assert!(validate_invoke_kind(&hierarchy, 0x6e, "Ltest/Owner;", "privateCall", "()V").is_err());
+        assert!(validate_invoke_kind(&hierarchy, 0x70, "Ltest/Owner;", "privateCall", "()V").is_ok());
+        assert!(validate_invoke_kind(&hierarchy, 0x70, "Ltest/Owner;", "<init>", "()V").is_ok());
+    }
+
+    #[test]
+    fn invoke_interface_requires_interface_declaration_and_virtual_requires_class() {
+        let mut hierarchy = ClassHierarchy::new();
+
+        let mut interface = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Callable;", Some("Ljava/lang/Object;"),
+        );
+        interface.access_flags = 0x0601;
+        interface.register_method_with_flags("call", "()V", 20, false, 0x0001);
+        hierarchy.register_class(interface);
+
+        let mut class = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Worker;", Some("Ljava/lang/Object;"),
+        );
+        class.register_method_with_flags("call", "()V", 21, false, 0x0001);
+        hierarchy.register_class(class);
+
+        assert!(validate_invoke_kind(&hierarchy, 0x72, "Ltest/Callable;", "call", "()V").is_ok());
+        assert!(validate_invoke_kind(&hierarchy, 0x6e, "Ltest/Callable;", "call", "()V").is_err());
+        assert!(validate_invoke_kind(&hierarchy, 0x6e, "Ltest/Worker;", "call", "()V").is_ok());
+        assert!(validate_invoke_kind(&hierarchy, 0x72, "Ltest/Worker;", "call", "()V").is_err());
+    }
 
     #[test]
     fn art_vm_executes_wide_const_and_arithmetic() {
