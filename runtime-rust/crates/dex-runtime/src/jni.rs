@@ -1190,7 +1190,169 @@ impl JniNativeRegistry {
             }
         });
 
-                // Context app-private directory paths. These are Android-style guest
+// Guest-created Intent objects and common mutation methods used by
+        // in-app navigation. These update only the managed guest object.
+        self.register("Landroid/content/Intent;", "<init>", "()V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent constructor receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent constructor lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent constructor received incompatible receiver {class}"));
+            }
+            env.set_object_field(receiver, "mFlags", Value::Int(0))?;
+            Ok(None)
+        });
+        self.register("Landroid/content/Intent;", "<init>", "(Ljava/lang/String;)V", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent constructor receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent constructor lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent constructor received incompatible receiver {class}"));
+            }
+            let action = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = action {
+                if !env.heap.contains(id) {
+                    return Err("Intent constructor received an invalid action string".into());
+                }
+            }
+            env.set_object_field(receiver, "mAction", action)?;
+            env.set_object_field(receiver, "mFlags", Value::Int(0))?;
+            Ok(None)
+        });
+        self.register("Landroid/content/Intent;", "setAction", "(Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.setAction receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.setAction lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.setAction received incompatible receiver {class}"));
+            }
+            let action = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = action {
+                if !env.heap.contains(id) { return Err("Intent.setAction received an invalid action string".into()); }
+            }
+            env.set_object_field(receiver, "mAction", action)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "setPackage", "(Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.setPackage receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.setPackage lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.setPackage received incompatible receiver {class}"));
+            }
+            let package = args.get(1).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = package {
+                if !env.heap.contains(id) { return Err("Intent.setPackage received an invalid package string".into()); }
+            }
+            env.set_object_field(receiver, "mPackage", package)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "addCategory", "(Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.addCategory receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.addCategory lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.addCategory received incompatible receiver {class}"));
+            }
+            let category = args.get(1).and_then(Value::as_object)
+                .ok_or("Intent.addCategory category is null")?;
+            let category_text = env.get_string_utf(category)?.to_owned();
+            let existing = match env.get_object_field(receiver, "mCategories") {
+                Ok(Value::Object(id)) => id,
+                _ => 0,
+            };
+            let mut categories = Vec::new();
+            if existing != 0 {
+                let count = env.heap.get_array_length(existing)
+                    .map_err(|error| format!("Intent category array lookup failed: {:?}", error))?;
+                for index in 0..count {
+                    categories.push(env.heap.get_array_element(existing, index as i32)
+                        .map_err(|error| format!("Intent category read failed: {:?}", error))?);
+                }
+            }
+            let already_present = categories.iter().any(|value| {
+                value.as_object().and_then(|id| env.get_string_utf(id).ok())
+                    .is_some_and(|value| value == category_text)
+            });
+            if !already_present {
+                categories.push(Value::Object(category));
+                let length = i32::try_from(categories.len())
+                    .map_err(|_| "Intent category count exceeds guest limits".to_owned())?;
+                let array = env.heap.allocate_array("[Ljava/lang/String;", length)
+                    .map_err(|error| format!("Intent category array allocation failed: {:?}", error))?;
+                for (index, value) in categories.into_iter().enumerate() {
+                    env.heap.set_array_element(array, index as i32, value)
+                        .map_err(|error| format!("Intent category assignment failed: {:?}", error))?;
+                }
+                env.set_object_field(receiver, "mCategories", Value::Object(array))?;
+            }
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "setClassName", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.setClassName receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.setClassName lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.setClassName received incompatible receiver {class}"));
+            }
+            let package = args.get(1).and_then(Value::as_object)
+                .ok_or("Intent.setClassName packageName is null")?;
+            let class_name = args.get(2).and_then(Value::as_object)
+                .ok_or("Intent.setClassName className is null")?;
+            let package_text = env.get_string_utf(package)?.to_owned();
+            let class_text = env.get_string_utf(class_name)?.to_owned();
+            if package_text.is_empty() || class_text.is_empty() {
+                return Err("Intent.setClassName packageName and className must be non-empty".into());
+            }
+            let component = env.heap.allocate_instance("Landroid/content/ComponentName;")
+                .map_err(|error| format!("Intent ComponentName allocation failed: {:?}", error))?;
+            env.set_object_field(component, "mPackage", Value::Object(package))?;
+            env.set_object_field(component, "mClass", Value::Object(class_name))?;
+            env.set_object_field(receiver, "mPackage", Value::Object(package))?;
+            env.set_object_field(receiver, "mComponent", Value::Object(component))?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "setFlags", "(I)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.setFlags receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.setFlags lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.setFlags received incompatible receiver {class}"));
+            }
+            let flags = args.get(1).map(Value::as_int).unwrap_or(0);
+            env.set_object_field(receiver, "mFlags", Value::Int(flags))?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "addFlags", "(I)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.addFlags receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent.addFlags lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.addFlags received incompatible receiver {class}"));
+            }
+            let current = env.get_object_field(receiver, "mFlags").unwrap_or(Value::Int(0)).as_int();
+            let flags = args.get(1).map(Value::as_int).unwrap_or(0);
+            env.set_object_field(receiver, "mFlags", Value::Int(current | flags))?;
+            Ok(Some(Value::Object(receiver)))
+        });
+
+                        // Context app-private directory paths. These are Android-style guest
         // paths only; a persistent filesystem backend is a separate capability.
         let context_directory_handler = |directory: &'static str| {
             move |env: &mut JniEnv, _args: &[Value]| -> Result<Option<Value>, String> {
@@ -1869,13 +2031,17 @@ mod tests {
             env.get_string_utf(value.as_object().unwrap()).unwrap().to_owned()
         };
 
-        assert_eq!(read_string(&env, get_action(&mut env, &[Value::Object(intent)]).unwrap().unwrap()), "android.intent.action.MAIN");
-        assert_eq!(read_string(&env, get_package(&mut env, &[Value::Object(intent)]).unwrap().unwrap()), "com.stride.launcher");
+        let action_value = get_action(&mut env, &[Value::Object(intent)]).unwrap().unwrap();
+        let package_value = get_package(&mut env, &[Value::Object(intent)]).unwrap().unwrap();
+        assert_eq!(read_string(&env, action_value), "android.intent.action.MAIN");
+        assert_eq!(read_string(&env, package_value), "com.stride.launcher");
         let launcher_category = env.new_string_utf("android.intent.category.LAUNCHER").unwrap();
         assert_eq!(has_category(&mut env, &[Value::Object(intent), Value::Object(launcher_category)]).unwrap(), Some(Value::Int(1)));
         let component = get_component(&mut env, &[Value::Object(intent)]).unwrap().unwrap().as_object().unwrap();
-        assert_eq!(read_string(&env, component_package(&mut env, &[Value::Object(component)]).unwrap().unwrap()), "com.stride.launcher");
-        assert_eq!(read_string(&env, component_class(&mut env, &[Value::Object(component)]).unwrap().unwrap()), "com.stride.launcher.HomeActivity");
+        let component_package_value = component_package(&mut env, &[Value::Object(component)]).unwrap().unwrap();
+        let component_class_value = component_class(&mut env, &[Value::Object(component)]).unwrap().unwrap();
+        assert_eq!(read_string(&env, component_package_value), "com.stride.launcher");
+        assert_eq!(read_string(&env, component_class_value), "com.stride.launcher.HomeActivity");
     }
 
     #[test]
@@ -1909,6 +2075,44 @@ mod tests {
         let unknown = env.new_string_utf("com.other.app").unwrap();
         assert!(get_launch(&mut env, &[Value::Object(manager), Value::Object(unknown)]).unwrap_err().contains("NameNotFoundException"));
         assert!(get_launch(&mut env, &[Value::Object(manager), Value::Null]).unwrap_err().contains("packageName is null"));
+    }
+
+    #[test]
+    fn guest_intent_constructors_and_mutators_preserve_component_categories_and_flags() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let intent = env.heap.allocate_instance("Landroid/content/Intent;").unwrap();
+        let constructor = registry.find("Landroid/content/Intent;", "<init>", "(Ljava/lang/String;)V").unwrap().clone();
+        let set_package = registry.find("Landroid/content/Intent;", "setPackage", "(Ljava/lang/String;)Landroid/content/Intent;").unwrap().clone();
+        let set_class = registry.find("Landroid/content/Intent;", "setClassName", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;").unwrap().clone();
+        let add_category = registry.find("Landroid/content/Intent;", "addCategory", "(Ljava/lang/String;)Landroid/content/Intent;").unwrap().clone();
+        let has_category = registry.find("Landroid/content/Intent;", "hasCategory", "(Ljava/lang/String;)Z").unwrap().clone();
+        let add_flags = registry.find("Landroid/content/Intent;", "addFlags", "(I)Landroid/content/Intent;").unwrap().clone();
+        let get_flags = registry.find("Landroid/content/Intent;", "getFlags", "()I").unwrap().clone();
+
+        let action = env.new_string_utf("com.stride.OPEN").unwrap();
+        constructor(&mut env, &[Value::Object(intent), Value::Object(action)]).unwrap();
+        let package = env.new_string_utf("com.stride.fixture").unwrap();
+        let class_name = env.new_string_utf("com.stride.fixture.DetailActivity").unwrap();
+        assert_eq!(set_package(&mut env, &[Value::Object(intent), Value::Object(package)]).unwrap(), Some(Value::Object(intent)));
+        assert_eq!(set_class(&mut env, &[Value::Object(intent), Value::Object(package), Value::Object(class_name)]).unwrap(), Some(Value::Object(intent)));
+
+        let category = env.new_string_utf("com.stride.category.DETAIL").unwrap();
+        add_category(&mut env, &[Value::Object(intent), Value::Object(category)]).unwrap();
+        add_category(&mut env, &[Value::Object(intent), Value::Object(category)]).unwrap();
+        assert_eq!(has_category(&mut env, &[Value::Object(intent), Value::Object(category)]).unwrap(), Some(Value::Int(1)));
+        let categories_id = env.get_object_field(intent, "mCategories").unwrap().as_object().unwrap();
+        assert_eq!(env.heap.get_array_length(categories_id).unwrap(), 1);
+
+        add_flags(&mut env, &[Value::Object(intent), Value::Int(0x10)]).unwrap();
+        add_flags(&mut env, &[Value::Object(intent), Value::Int(0x20)]).unwrap();
+        assert_eq!(get_flags(&mut env, &[Value::Object(intent)]).unwrap(), Some(Value::Int(0x30)));
+        let component = env.get_object_field(intent, "mComponent").unwrap().as_object().unwrap();
+        let component_package = env.get_object_field(component, "mPackage").unwrap().as_object().unwrap();
+        let component_class = env.get_object_field(component, "mClass").unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(component_package).unwrap(), "com.stride.fixture");
+        assert_eq!(env.get_string_utf(component_class).unwrap(), "com.stride.fixture.DetailActivity");
     }
 
     #[test]

@@ -789,6 +789,21 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 21 — Guest Intent construction and mutation
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added guest Intent constructors for empty and action-based intents.
+- Added setAction(), setPackage(), setClassName(String, String), addCategory(), setFlags() and addFlags().
+- Category insertion is idempotent; repeated addCategory() calls do not duplicate entries.
+- Preserves guest object identity for fluent Intent APIs and stores ComponentName/category references in the managed heap graph.
+- Added regression coverage for constructor state, package/class component mapping, category de-duplication and bitwise flag accumulation.
+- Extra UI improvement: Runtime Status now separates Intent creation/mutation from manifest launcher resolution.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: this phase does not dispatch activities, resolve external packages, persist intents across process boundaries, or implement Parcelable/Bundle extras.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
