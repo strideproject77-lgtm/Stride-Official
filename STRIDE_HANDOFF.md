@@ -421,3 +421,9 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added class-scoped UnregisterNatives state handling and duplicate-entry rejection inside one RegisterNatives table. Registration remains staged atomically.
 - These are validation/state-management foundations, not a real guest JNIEnv/JavaVM function table. Guest-callable JNI trampolines, callback dispatch, managed-object/reference conversion and native-to-managed callbacks remain unimplemented.
 - Regression tests were added but not run. No workflow or IPA build was started.
+
+
+## Latest JNI local-reference lifecycle batch
+- Added checked local-frame allocation, `NewLocalRef`-style reference retention, `DeleteLocalRef`-style removal, local GC-root snapshots, and result-preserving frame pop.
+- Added tests for reference deletion/root behavior, frame result preservation, and invalid state/handles. Tests are deliberately deferred to the single final test pass.
+- Scope is deliberately honest: this is Rust-side JNI groundwork, not a guest `JNIEnv*` function table, global/weak reference implementation, or automatic native-to-GC root integration.
