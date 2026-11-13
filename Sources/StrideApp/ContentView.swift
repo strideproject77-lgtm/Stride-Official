@@ -159,11 +159,11 @@ struct ContentView: View {
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 25)
                         .fill(LinearGradient(
-                            colors: [Color(red: 0.30, green: 0.18, blue: 0.72), Color(red: 0.20, green: 0.12, blue: 0.48), Color(red: 0.10, green: 0.09, blue: 0.25)],
+                            colors: [Color(red: 0.29, green: 0.19, blue: 0.14), Color(red: 0.18, green: 0.12, blue: 0.10), Color(red: 0.08, green: 0.07, blue: 0.07)],
                             startPoint: .topLeading, endPoint: .bottomTrailing
                         ))
                     Circle()
-                        .fill(Color.purple.opacity(0.28))
+                        .fill(Color(red: 0.78, green: 0.43, blue: 0.22).opacity(0.24))
                         .frame(width: 180, height: 180)
                         .blur(radius: 28)
                         .offset(x: 205, y: -48)
@@ -185,7 +185,7 @@ struct ContentView: View {
                             } label: {
                                 Image(systemName: "arrow.right")
                                     .font(.system(size: 15, weight: .bold))
-                                    .foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.48))
+                                    .foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.10))
                                     .frame(width: 39, height: 39)
                                     .background(.white, in: Circle())
                             }
@@ -201,12 +201,12 @@ struct ContentView: View {
                             VStack(spacing: 10) {
                                 Capsule().fill(Color.white.opacity(0.6)).frame(width: 27, height: 3)
                                 ZStack {
-                                    RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color.purple.opacity(0.75), Color.blue.opacity(0.55)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                    RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color(red: 0.78, green: 0.48, blue: 0.25), Color(red: 0.40, green: 0.25, blue: 0.16)], startPoint: .topLeading, endPoint: .bottomTrailing))
                                     Image(systemName: "hexagon.fill")
                                         .font(.system(size: 36, weight: .medium))
                                         .foregroundStyle(Color.white.opacity(0.9))
                                         .overlay {
-                                            Text("S").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(Color(red: 0.25, green: 0.16, blue: 0.56))
+                                            Text("S").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.10))
                                         }
                                 }
                                 .frame(width: 57, height: 65)
