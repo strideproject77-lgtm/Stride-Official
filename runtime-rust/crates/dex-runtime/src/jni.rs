@@ -7,6 +7,158 @@ use crate::heap::ManagedHeap;
 
 pub type NativeHandler = Arc<dyn Fn(&mut JniEnv, &[Value]) -> Result<Option<Value>, String> + Send + Sync>;
 
+/// Opaque JNI reference handles. Guest-visible tokens are deliberately distinct
+/// from managed-heap object IDs, so local/global lifetime rules can be enforced
+/// without exposing Rust heap handles as JNI jobject values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestReferenceKind {
+    Local,
+    Global,
+    WeakGlobal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GuestReference {
+    object_id: u32,
+    kind: GuestReferenceKind,
+}
+
+/// Reference-token registry for the future guest JNIEnv ABI bridge.
+/// Tokens are opaque integer handles, never host pointers.
+#[derive(Debug, Clone)]
+pub struct JniReferenceTable {
+    entries: HashMap<u64, GuestReference>,
+    local_frames: Vec<Vec<u64>>,
+    next_handle: u64,
+}
+
+impl Default for JniReferenceTable {
+    fn default() -> Self {
+        Self { entries: HashMap::new(), local_frames: vec![Vec::new()], next_handle: 1 }
+    }
+}
+
+impl JniReferenceTable {
+    pub fn new() -> Self { Self::default() }
+
+    fn allocate(&mut self, object_id: u32, kind: GuestReferenceKind) -> Result<u64, String> {
+        if object_id == 0 { return Ok(0); }
+        let handle = self.next_handle;
+        self.next_handle = self.next_handle.checked_add(1)
+            .ok_or_else(|| "JNI opaque reference handle space exhausted".to_owned())?;
+        self.entries.try_reserve(1)
+            .map_err(|_| "JNI opaque reference table allocation failed".to_owned())?;
+        self.entries.insert(handle, GuestReference { object_id, kind });
+        if kind == GuestReferenceKind::Local {
+            let frame = self.local_frames.last_mut()
+                .ok_or_else(|| "JNI local-reference frame stack is empty".to_owned())?;
+            frame.try_reserve(1)
+                .map_err(|_| "JNI local-reference frame allocation failed".to_owned())?;
+            frame.push(handle);
+        }
+        Ok(handle)
+    }
+
+    pub fn new_local(&mut self, object_id: u32) -> Result<u64, String> {
+        self.allocate(object_id, GuestReferenceKind::Local)
+    }
+
+    pub fn new_global(&mut self, object_id: u32) -> Result<u64, String> {
+        self.allocate(object_id, GuestReferenceKind::Global)
+    }
+
+    pub fn new_weak_global(&mut self, object_id: u32) -> Result<u64, String> {
+        self.allocate(object_id, GuestReferenceKind::WeakGlobal)
+    }
+
+    pub fn resolve(&self, handle: u64) -> Result<Option<u32>, String> {
+        if handle == 0 { return Ok(None); }
+        self.entries.get(&handle).map(|entry| Some(entry.object_id))
+            .ok_or_else(|| format!("JNI opaque reference handle {handle} is invalid"))
+    }
+
+    pub fn is_same_object(&self, left: u64, right: u64) -> Result<bool, String> {
+        Ok(self.resolve(left)? == self.resolve(right)?)
+    }
+
+    pub fn delete_local(&mut self, handle: u64) -> Result<(), String> {
+        if handle == 0 { return Ok(()); }
+        let entry = self.entries.get(&handle)
+            .ok_or_else(|| format!("JNI local reference {handle} is invalid"))?;
+        if entry.kind != GuestReferenceKind::Local {
+            return Err(format!("JNI reference {handle} is not local"));
+        }
+        self.entries.remove(&handle);
+        if let Some(frame) = self.local_frames.iter_mut().rev().find(|frame| frame.contains(&handle)) {
+            frame.retain(|candidate| *candidate != handle);
+        }
+        Ok(())
+    }
+
+    pub fn delete_global(&mut self, handle: u64) -> Result<(), String> {
+        self.delete_non_local(handle, GuestReferenceKind::Global)
+    }
+
+    pub fn delete_weak_global(&mut self, handle: u64) -> Result<(), String> {
+        self.delete_non_local(handle, GuestReferenceKind::WeakGlobal)
+    }
+
+    fn delete_non_local(&mut self, handle: u64, expected: GuestReferenceKind) -> Result<(), String> {
+        if handle == 0 { return Ok(()); }
+        let entry = self.entries.get(&handle)
+            .ok_or_else(|| format!("JNI reference {handle} is invalid"))?;
+        if entry.kind != expected {
+            return Err(format!("JNI reference {handle} has the wrong lifetime kind"));
+        }
+        self.entries.remove(&handle);
+        Ok(())
+    }
+
+    pub fn push_local_frame(&mut self, capacity: usize) -> Result<(), String> {
+        let mut frame = Vec::new();
+        frame.try_reserve(capacity)
+            .map_err(|_| "JNI guest local-frame allocation failed".to_owned())?;
+        self.local_frames.try_reserve(1)
+            .map_err(|_| "JNI guest frame stack allocation failed".to_owned())?;
+        self.local_frames.push(frame);
+        Ok(())
+    }
+
+    pub fn pop_local_frame(&mut self, result: u64) -> Result<u64, String> {
+        if self.local_frames.len() <= 1 {
+            return Err("JNI guest PopLocalFrame cannot pop the root frame".to_owned());
+        }
+        let result_object = self.resolve(result)?;
+        let frame = self.local_frames.pop().expect("frame count checked");
+        for handle in frame { self.entries.remove(&handle); }
+        match result_object {
+            Some(object_id) => self.new_local(object_id),
+            None => Ok(0),
+        }
+    }
+
+    /// Remove weak references whose referents are no longer live after collection.
+    pub fn prune_collected_weak_refs(&mut self, heap: &ManagedHeap) -> usize {
+        let dead: Vec<u64> = self.entries.iter().filter_map(|(handle, entry)| {
+            (entry.kind == GuestReferenceKind::WeakGlobal && !heap.contains(entry.object_id))
+                .then_some(*handle)
+        }).collect();
+        let count = dead.len();
+        for handle in dead { self.entries.remove(&handle); }
+        count
+    }
+
+    pub fn strong_roots(&self, heap: &ManagedHeap) -> Vec<u32> {
+        self.entries.values().filter_map(|entry| {
+            (entry.kind != GuestReferenceKind::WeakGlobal && heap.contains(entry.object_id))
+                .then_some(entry.object_id)
+        }).collect()
+    }
+
+    pub fn local_frame_depth(&self) -> usize { self.local_frames.len() }
+    pub fn live_reference_count(&self) -> usize { self.entries.len() }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NativeMethodKey {
     pub class_descriptor: String,
@@ -20,6 +172,8 @@ pub struct JniEnv<'a> {
     pub local_refs: Vec<u32>,
     /// Strong JNI global references, retained independently of local frames.
     pub global_refs: Vec<u32>,
+    /// Opaque guest jobject tokens, separate from internal heap object IDs.
+    pub guest_references: JniReferenceTable,
     pub local_frames: Vec<usize>,
 }
 
@@ -29,6 +183,7 @@ impl<'a> JniEnv<'a> {
             heap,
             local_refs: Vec::new(),
             global_refs: Vec::new(),
+            guest_references: JniReferenceTable::new(),
             local_frames: Vec::new(),
         }
     }
@@ -117,6 +272,51 @@ impl<'a> JniEnv<'a> {
         let mut roots = self.local_reference_roots();
         roots.extend(self.global_reference_roots());
         roots
+    }
+
+    /// Create an opaque guest jobject token for an internal managed object.
+    pub fn new_guest_local_ref(&mut self, object_id: u32) -> Result<u64, String> {
+        if object_id != 0 && !self.heap.contains(object_id) {
+            return Err(format!("JNI guest local reference received invalid object {object_id}"));
+        }
+        self.guest_references.new_local(object_id)
+    }
+
+    pub fn new_guest_global_ref(&mut self, object_id: u32) -> Result<u64, String> {
+        if object_id != 0 && !self.heap.contains(object_id) {
+            return Err(format!("JNI guest global reference received invalid object {object_id}"));
+        }
+        self.guest_references.new_global(object_id)
+    }
+
+    pub fn new_guest_weak_global_ref(&mut self, object_id: u32) -> Result<u64, String> {
+        if object_id != 0 && !self.heap.contains(object_id) {
+            return Err(format!("JNI guest weak reference received invalid object {object_id}"));
+        }
+        self.guest_references.new_weak_global(object_id)
+    }
+
+    /// Resolve a guest-visible opaque jobject token to an internal heap handle.
+    pub fn resolve_guest_ref(&self, guest_handle: u64) -> Result<Option<u32>, String> {
+        let object_id = self.guest_references.resolve(guest_handle)?;
+        if let Some(id) = object_id {
+            if !self.heap.contains(id) {
+                return Err(format!("JNI guest reference {guest_handle} points to a collected object"));
+            }
+        }
+        Ok(object_id)
+    }
+
+    /// Snapshot roots from both the legacy internal API and opaque guest handles.
+    pub fn all_strong_reference_roots(&self) -> Vec<u32> {
+        let mut roots = self.strong_reference_roots();
+        roots.extend(self.guest_references.strong_roots(self.heap));
+        roots
+    }
+
+    /// Pop one guest local frame, preserving its result as a fresh parent-frame handle.
+    pub fn pop_guest_local_frame(&mut self, result: u64) -> Result<u64, String> {
+        self.guest_references.pop_local_frame(result)
     }
 
     /// Pop the current frame and optionally preserve one result reference in its parent.
@@ -809,6 +1009,54 @@ mod tests {
         env.delete_global_ref(global).unwrap();
         assert!(env.strong_reference_roots().is_empty());
         assert!(env.heap.contains(temporary));
+    }
+
+    #[test]
+    fn guest_reference_tokens_enforce_local_global_and_weak_lifetimes() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let object = env.new_string_utf("guest-object").unwrap();
+        let local = env.new_guest_local_ref(object).unwrap();
+        let global = env.new_guest_global_ref(object).unwrap();
+        let weak = env.new_guest_weak_global_ref(object).unwrap();
+        assert_ne!(local, object as u64);
+        assert_eq!(env.resolve_guest_ref(local).unwrap(), Some(object));
+        assert!(env.guest_references.is_same_object(local, global).unwrap());
+        env.guest_references.delete_local(local).unwrap();
+        assert!(env.resolve_guest_ref(local).is_err());
+        assert_eq!(env.guest_references.strong_roots(env.heap), vec![object]);
+        env.guest_references.delete_global(global).unwrap();
+        assert!(env.guest_references.strong_roots(env.heap).is_empty());
+        assert_eq!(env.guest_references.resolve(weak).unwrap(), Some(object));
+    }
+
+    #[test]
+    fn guest_local_frame_pop_reissues_result_in_parent_frame() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let outer_object = env.new_string_utf("outer").unwrap();
+        let inner_object = env.new_string_utf("inner").unwrap();
+        let outer = env.new_guest_local_ref(outer_object).unwrap();
+        env.guest_references.push_local_frame(3).unwrap();
+        let inner = env.new_guest_local_ref(inner_object).unwrap();
+        let preserved = env.pop_guest_local_frame(inner).unwrap();
+        assert_eq!(env.resolve_guest_ref(outer).unwrap(), Some(outer_object));
+        assert_eq!(env.resolve_guest_ref(inner), Err(format!("JNI opaque reference handle {inner} is invalid")));
+        assert_eq!(env.resolve_guest_ref(preserved).unwrap(), Some(inner_object));
+        assert_eq!(env.guest_references.local_frame_depth(), 1);
+    }
+
+    #[test]
+    fn guest_weak_references_do_not_become_strong_gc_roots() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let object = env.new_string_utf("weak").unwrap();
+        let weak = env.new_guest_weak_global_ref(object).unwrap();
+        assert!(env.guest_references.strong_roots(env.heap).is_empty());
+        let report = env.heap.collect_garbage(&[]);
+        assert_eq!(report.objects_after, 0);
+        assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 1);
+        assert!(env.guest_references.resolve(weak).is_err());
     }
 
     #[test]
