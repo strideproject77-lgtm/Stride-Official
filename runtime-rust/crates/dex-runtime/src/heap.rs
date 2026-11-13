@@ -216,6 +216,16 @@ impl ManagedHeap {
             return Err(HeapError::NegativeArraySize(length));
         }
         let ulen = length as usize;
+        // Reject oversized arrays before allocating their backing Vec. Building
+        // the Vec first could exhaust the host process even though the managed
+        // heap has a strict memory limit.
+        let requested = ulen.checked_mul(16).and_then(|bytes| bytes.checked_add(32))
+            .ok_or(HeapError::OutOfMemory { requested: usize::MAX, available: self.max_heap_bytes.saturating_sub(self.allocated_bytes) })?;
+        let available = self.max_heap_bytes.saturating_sub(self.allocated_bytes);
+        if requested > available {
+            return Err(HeapError::OutOfMemory { requested, available });
+        }
+
         // The descriptor passed here is the *array* descriptor (for example
         // [I or [Ljava/lang/String;), not just the component type. Primitive
         // arrays must be zero-initialized; only reference arrays default to null.
@@ -231,8 +241,7 @@ impl ManagedHeap {
             element_descriptor: element_descriptor.to_owned(),
             elements,
         });
-        let size = obj.approximate_size();
-        self.check_and_record_alloc(size)?;
+        self.check_and_record_alloc(requested)?;
         let id = self.next_handle()?;
         self.objects.insert(id, obj);
         Ok(id)
@@ -359,16 +368,20 @@ impl ManagedHeap {
         if length < 0 {
             return Err(HeapError::NegativeArraySize(length));
         }
-        if length == 0 {
-            return Ok(());
-        }
+        // Validate both array references and ranges even for a zero-length
+        // copy, matching System.arraycopy's argument-validation behavior.
         let src_len = self.array_length(src_id)?;
         let dst_len = self.array_length(dst_id)?;
-        if src_pos < 0 || (src_pos as usize) + (length as usize) > src_len {
+        let src_end = (src_pos as usize).checked_add(length as usize);
+        let dst_end = (dst_pos as usize).checked_add(length as usize);
+        if src_pos < 0 || src_end.is_none_or(|end| end > src_len) {
             return Err(HeapError::ArrayIndexOutOfBounds { index: src_pos, length: src_len });
         }
-        if dst_pos < 0 || (dst_pos as usize) + (length as usize) > dst_len {
+        if dst_pos < 0 || dst_end.is_none_or(|end| end > dst_len) {
             return Err(HeapError::ArrayIndexOutOfBounds { index: dst_pos, length: dst_len });
+        }
+        if length == 0 {
+            return Ok(());
         }
 
         let mut copied_vals = Vec::with_capacity(length as usize);
@@ -498,6 +511,31 @@ mod tests {
         assert!(heap.contains(s1));
         assert!(!heap.contains(s2));
         assert!(!heap.contains(arr));
+    }
+
+    #[test]
+    fn oversized_array_is_rejected_before_backing_storage_allocation() {
+        let mut heap = ManagedHeap::new(64);
+        let error = heap.allocate_array("[I", i32::MAX).unwrap_err();
+        assert!(matches!(error, HeapError::OutOfMemory { .. }));
+        assert_eq!(heap.object_count(), 0);
+        assert_eq!(heap.allocated_bytes(), 0);
+    }
+
+    #[test]
+    fn zero_length_array_copy_still_validates_references_and_positions() {
+        let mut heap = ManagedHeap::new(1024);
+        let array = heap.allocate_array("[I", 2).unwrap();
+
+        assert!(matches!(
+            heap.array_copy(999, 0, array, 0, 0),
+            Err(HeapError::InvalidHandle(999))
+        ));
+        assert!(matches!(
+            heap.array_copy(array, 3, array, 0, 0),
+            Err(HeapError::ArrayIndexOutOfBounds { .. })
+        ));
+        heap.array_copy(array, 2, array, 2, 0).unwrap();
     }
 
     #[test]
