@@ -453,6 +453,15 @@ impl<'a> JniEnv<'a> {
         let object_id = self.guest_references.resolve(guest_handle)?;
         if let Some(id) = object_id {
             if !self.heap.contains(id) {
+                // A cleared weak global behaves exactly like NULL. Strong
+                // references to reclaimed objects indicate a broken root/lifetime
+                // invariant and must remain an explicit error.
+                let is_weak = self.guest_references.entries
+                    .get(&guest_handle)
+                    .is_some_and(|entry| entry.kind == GuestReferenceKind::WeakGlobal);
+                if is_weak {
+                    return Ok(None);
+                }
                 return Err(format!("JNI guest reference {guest_handle} points to a collected object"));
             }
         }
@@ -1282,6 +1291,25 @@ mod tests {
         assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 1);
         assert_eq!(env.guest_references.resolve(weak).unwrap(), None);
         env.guest_references.delete_weak_global(weak).unwrap();
+    }
+
+    #[test]
+    fn stale_weak_reference_promotes_to_null_but_stale_strong_reference_errors() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let weak_object = env.heap.allocate_string("weak-only").unwrap();
+        let strong_object = env.heap.allocate_string("strong-unrooted").unwrap();
+        let weak = env.new_guest_weak_global_ref(weak_object).unwrap();
+        let strong = env.new_guest_local_ref(strong_object).unwrap();
+
+        // Exercise a collector call that bypasses JniEnv's post-GC weak pruning.
+        env.heap.collect_garbage(&[]);
+
+        assert_eq!(env.resolve_guest_ref(weak).unwrap(), None);
+        assert_eq!(env.new_guest_local_ref_from_handle(weak).unwrap(), 0);
+        assert!(env.guest_refs_are_same(weak, 0).unwrap());
+        assert!(env.resolve_guest_ref(strong).is_err());
+        env.delete_guest_weak_global_ref(weak).unwrap();
     }
 
     #[test]
