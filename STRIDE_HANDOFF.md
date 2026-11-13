@@ -743,7 +743,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: the Runtime Status capability card names both guest getPackageInfo and getApplicationInfo JNI methods.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: this phase does not yet implement ApplicationInfo resource paths, flags, nativeLibraryDir, sourceDir, enabled state or label/resource resolution.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 18 — Context app-private directory paths
@@ -758,7 +758,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now lists app-private files/cache path support and clearly states that disk persistence is not implemented yet.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: these are guest path objects only. File creation, directory existence, read/write streams, mkdirs, deletion and durable sandbox-backed storage remain unsupported.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 19 — Extended guest app-private File path behavior
@@ -771,7 +771,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI refinement: Runtime Status now lists all four app-private directory categories while explicitly retaining the no-disk-persistence limitation.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: paths remain guest metadata only. Directory creation, file I/O, canonical path resolution, permissions and durable storage are not implemented.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 20 — PackageManager launcher Intent resolution
@@ -786,7 +786,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now surfaces launcher Intent resolution as a separate capability.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: only the current app's manifest-declared launcher is resolved. Cross-package intent resolution, intent filters beyond the parsed launcher, chooser/system activities and actual host-side activity dispatch remain unsupported.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 21 — Guest Intent construction and mutation
@@ -801,7 +801,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now separates Intent creation/mutation from manifest launcher resolution.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: this phase does not dispatch activities, resolve external packages, persist intents across process boundaries, or implement Parcelable/Bundle extras.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 22 — Guest Intent extras and Bundle reads
@@ -817,7 +817,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - UI polish: redesigned all Runtime Status rows with clearer spacing, readable multi-line descriptions, a consistent READY / IN PROGRESS status pill, and combined VoiceOver labels.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: Parcelable/custom objects, nested Bundles, arrays, URI/ClipData and cross-process serialization remain unsupported.
-- Validation: first consolidated workflow caught an incorrect ManagedHeap array-length method name in the new Intent bridge; corrected to the existing array_length() API. A fresh consolidated Rust workspace pass is pending; Swift UI compile remains unverified.
+- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Latest validation checkpoint — 2026-11-13

@@ -195,6 +195,21 @@ impl ManagedHeap {
         }
     }
 
+    /// Check whether an instance explicitly contains a field.
+    ///
+    /// Unlike get_instance_field(), this distinguishes a missing field from a
+    /// field whose value is the valid default integer zero.
+    pub fn has_instance_field(&self, object_id: u32, field_name: &str) -> Result<bool, HeapError> {
+        let obj = self.get(object_id)?;
+        match obj {
+            HeapObject::Instance(inst) => Ok(inst.fields.contains_key(field_name)),
+            _ => Err(HeapError::TypeMismatch {
+                expected: "InstanceObject".into(),
+                actual: obj.class_descriptor().into(),
+            }),
+        }
+    }
+
     pub fn set_instance_field(&mut self, object_id: u32, field_name: &str, value: Value) -> Result<(), HeapError> {
         // Never allow a dangling object handle into the object graph: GC traces
         // these values as strong edges, and reads must not expose reclaimed IDs.
@@ -537,6 +552,18 @@ impl ManagedHeap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instance_field_presence_distinguishes_missing_zero_and_null_values() {
+        let mut heap = ManagedHeap::default();
+        let object = heap.allocate_instance("Lfixture/Fields;").unwrap();
+        assert!(!heap.has_instance_field(object, "missing").unwrap());
+        heap.set_instance_field(object, "zero", Value::Int(0)).unwrap();
+        heap.set_instance_field(object, "null", Value::Null).unwrap();
+        assert!(heap.has_instance_field(object, "zero").unwrap());
+        assert!(heap.has_instance_field(object, "null").unwrap());
+        assert!(!heap.has_instance_field(object, "stillMissing").unwrap());
+    }
 
     #[test]
     fn heap_allocates_and_reclaims_dead_objects() {

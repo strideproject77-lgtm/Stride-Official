@@ -1455,7 +1455,11 @@ impl JniNativeRegistry {
                 Ok(Value::Object(id)) => id,
                 _ => return Ok(Some(Value::Int(default))),
             };
-            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+            let field = format!("mStrideExtra:{key}");
+            let present = env.heap.has_instance_field(bundle, &field)
+                .map_err(|error| format!("Intent extra lookup failed: {:?}", error))?;
+            if !present { return Ok(Some(Value::Int(default))); }
+            Ok(Some(match env.get_object_field(bundle, &field) {
                 Ok(Value::Int(value)) => Value::Int(value),
                 _ => Value::Int(default),
             }))
@@ -1469,7 +1473,11 @@ impl JniNativeRegistry {
                 Ok(Value::Object(id)) => id,
                 _ => return Ok(Some(Value::Long(default))),
             };
-            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+            let field = format!("mStrideExtra:{key}");
+            let present = env.heap.has_instance_field(bundle, &field)
+                .map_err(|error| format!("Intent extra lookup failed: {:?}", error))?;
+            if !present { return Ok(Some(Value::Long(default))); }
+            Ok(Some(match env.get_object_field(bundle, &field) {
                 Ok(Value::Long(value)) => Value::Long(value),
                 _ => Value::Long(default),
             }))
@@ -1483,7 +1491,11 @@ impl JniNativeRegistry {
                 Ok(Value::Object(id)) => id,
                 _ => return Ok(Some(Value::Int(i32::from(default != 0)))),
             };
-            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+            let field = format!("mStrideExtra:{key}");
+            let present = env.heap.has_instance_field(bundle, &field)
+                .map_err(|error| format!("Intent extra lookup failed: {:?}", error))?;
+            if !present { return Ok(Some(Value::Int(i32::from(default != 0)))); }
+            Ok(Some(match env.get_object_field(bundle, &field) {
                 Ok(Value::Int(value)) => Value::Int(i32::from(value != 0)),
                 _ => Value::Int(i32::from(default != 0)),
             }))
@@ -1496,7 +1508,9 @@ impl JniNativeRegistry {
                 Ok(Value::Object(id)) => id,
                 _ => return Ok(Some(Value::Int(0))),
             };
-            Ok(Some(Value::Int(i32::from(env.get_object_field(bundle, &format!("mStrideExtra:{key}")).is_ok()))))
+            let present = env.heap.has_instance_field(bundle, &format!("mStrideExtra:{key}"))
+                .map_err(|error| format!("Intent extra presence check failed: {:?}", error))?;
+            Ok(Some(Value::Int(i32::from(present))))
         });
         self.register("Landroid/os/Bundle;", "getString", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
             let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getString receiver is null")?;
