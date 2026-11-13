@@ -1087,7 +1087,19 @@ impl JniNativeRegistry {
             "()Ljava/io/File;",
             context_directory_handler("cache"),
         );
-        let file_path_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
+        self.register(
+            "Landroid/content/Context;",
+            "getNoBackupFilesDir",
+            "()Ljava/io/File;",
+            context_directory_handler("no_backup"),
+        );
+        self.register(
+            "Landroid/content/Context;",
+            "getCodeCacheDir",
+            "()Ljava/io/File;",
+            context_directory_handler("code_cache"),
+        );
+        let file_path_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String| {
             let receiver = args.first().and_then(Value::as_object)
                 .ok_or("File path query receiver is null")?;
             let path_id = env.get_object_field(receiver, "mStridePath")?
@@ -1098,6 +1110,48 @@ impl JniNativeRegistry {
         self.register("Ljava/io/File;", "getPath", "()Ljava/lang/String;", file_path_handler);
         self.register("Ljava/io/File;", "getAbsolutePath", "()Ljava/lang/String;", file_path_handler);
         self.register("Ljava/io/File;", "toString", "()Ljava/lang/String;", file_path_handler);
+        self.register("Ljava/io/File;", "getAbsoluteFile", "()Ljava/io/File;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("File.getAbsoluteFile receiver is null")?;
+            let path_id = env.get_object_field(receiver, "mStridePath")?
+                .as_object().ok_or("File object has no Stride path")?;
+            let path = env.get_string_utf(path_id)?.to_owned();
+            let copy = env.heap.allocate_instance("Ljava/io/File;")
+                .map_err(|error| format!("File allocation failed: {:?}", error))?;
+            let copy_path = env.new_string_utf(&path)?;
+            env.set_object_field(copy, "mStridePath", Value::Object(copy_path))?;
+            Ok(Some(Value::Object(copy)))
+        });
+        self.register("Ljava/io/File;", "getName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("File.getName receiver is null")?;
+            let path_id = env.get_object_field(receiver, "mStridePath")?
+                .as_object().ok_or("File object has no Stride path")?;
+            let path = env.get_string_utf(path_id)?.trim_end_matches('/').to_owned();
+            let name = path.rsplit('/').next().unwrap_or("");
+            Ok(Some(Value::Object(env.new_string_utf(name)?)))
+        });
+        self.register("Ljava/io/File;", "getParent", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("File.getParent receiver is null")?;
+            let path_id = env.get_object_field(receiver, "mStridePath")?
+                .as_object().ok_or("File object has no Stride path")?;
+            let path = env.get_string_utf(path_id)?.trim_end_matches('/').to_owned();
+            let parent = path.rsplit_once('/').map(|(parent, _)| parent.to_owned());
+            match parent {
+                Some(parent) if !parent.is_empty() => Ok(Some(Value::Object(env.new_string_utf(&parent)?))),
+                Some(_) => Ok(Some(Value::Object(env.new_string_utf("/")?))),
+                None => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Ljava/io/File;", "isAbsolute", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("File.isAbsolute receiver is null")?;
+            let path_id = env.get_object_field(receiver, "mStridePath")?
+                .as_object().ok_or("File object has no Stride path")?;
+            let path = env.get_string_utf(path_id)?;
+            Ok(Some(Value::Int(if path.starts_with('/') { 1 } else { 0 })))
+        });
 
         // Android Context package identity. The bootstrap layer must set the
         // package name for each app; never silently return a placeholder package.
@@ -1674,6 +1728,49 @@ mod tests {
         assert_eq!(read_path(&mut env, &get_path, files_id), "/data/data/com.stride.storage/files");
         assert_eq!(read_path(&mut env, &get_absolute_path, files_id), "/data/data/com.stride.storage/files");
         assert_eq!(read_path(&mut env, &get_path, cache_id), "/data/data/com.stride.storage/cache");
+    }
+
+    #[test]
+    fn context_additional_directories_and_file_metadata_methods_are_consistent() {
+        let registry = JniNativeRegistry::new();
+        let get_no_backup = registry.find(
+            "Landroid/content/Context;", "getNoBackupFilesDir", "()Ljava/io/File;",
+        ).unwrap().clone();
+        let get_code_cache = registry.find(
+            "Landroid/content/Context;", "getCodeCacheDir", "()Ljava/io/File;",
+        ).unwrap().clone();
+        let get_name = registry.find("Ljava/io/File;", "getName", "()Ljava/lang/String;").unwrap().clone();
+        let get_parent = registry.find("Ljava/io/File;", "getParent", "()Ljava/lang/String;").unwrap().clone();
+        let is_absolute = registry.find("Ljava/io/File;", "isAbsolute", "()Z").unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        env.set_package_name("com.stride.paths").unwrap();
+
+        let no_backup_id = match get_no_backup(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected no-backup directory: {:?}", other),
+        };
+        let code_cache_id = match get_code_cache(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected code-cache directory: {:?}", other),
+        };
+        let path_for = |env: &JniEnv, file_id| {
+            let path_id = env.get_object_field(file_id, "mStridePath").unwrap().as_object().unwrap();
+            env.get_string_utf(path_id).unwrap().to_owned()
+        };
+        assert_eq!(path_for(&env, no_backup_id), "/data/data/com.stride.paths/no_backup");
+        assert_eq!(path_for(&env, code_cache_id), "/data/data/com.stride.paths/code_cache");
+        let name_id = match get_name(&mut env, &[Value::Object(no_backup_id)]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected File.getName result: {:?}", other),
+        };
+        assert_eq!(env.get_string_utf(name_id).unwrap(), "no_backup");
+        let parent_id = match get_parent(&mut env, &[Value::Object(no_backup_id)]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected File.getParent result: {:?}", other),
+        };
+        assert_eq!(env.get_string_utf(parent_id).unwrap(), "/data/data/com.stride.paths");
+        assert_eq!(is_absolute(&mut env, &[Value::Object(code_cache_id)]).unwrap(), Some(Value::Int(1)));
     }
 
     #[test]
