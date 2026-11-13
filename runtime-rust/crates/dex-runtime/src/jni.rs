@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use crate::types::Value;
 use crate::heap::{GcReport, ManagedHeap};
+use crate::framework::PackageInfo;
 use stride_axml::ManifestMetadata;
 
 
@@ -335,6 +336,8 @@ pub struct JniEnv<'a> {
     pub local_frames: Vec<usize>,
     /// Android package identity supplied by the app/package bootstrap layer.
     package_name: Option<String>,
+    /// Manifest-backed metadata exposed through the guest PackageManager bridge.
+    package_info: Option<PackageInfo>,
 }
 
 impl<'a> JniEnv<'a> {
@@ -346,6 +349,7 @@ impl<'a> JniEnv<'a> {
             guest_references: JniReferenceTable::new(),
             local_frames: Vec::new(),
             package_name: None,
+            package_info: None,
         }
     }
 
@@ -357,8 +361,10 @@ impl<'a> JniEnv<'a> {
     ) -> Result<Self, String> {
         let package_name = manifest.package_name.as_deref()
             .ok_or("Android manifest is missing its package identity")?;
+        let package_info = PackageInfo::from_manifest(manifest)?;
         let mut env = Self::new(heap);
         env.set_package_name(package_name)?;
+        env.set_package_info(package_info)?;
         Ok(env)
     }
 
@@ -374,7 +380,22 @@ impl<'a> JniEnv<'a> {
         {
             return Err(format!("invalid Android package name: {package_name}"));
         }
+        if self.package_info.as_ref().is_some_and(|info| info.package_name != package_name) {
+            return Err("PackageInfo identity does not match the configured JNI package".to_owned());
+        }
         self.package_name = Some(package_name);
+        Ok(())
+    }
+
+    /// Attach trusted, manifest-derived PackageInfo metadata to this app's JNI environment.
+    /// Metadata must belong to the already configured package identity.
+    pub fn set_package_info(&mut self, package_info: PackageInfo) -> Result<(), String> {
+        let package_name = self.package_name.as_deref()
+            .ok_or("PackageInfo cannot be attached before app package identity is configured")?;
+        if package_info.package_name != package_name {
+            return Err("PackageInfo package identity does not match the configured JNI package".to_owned());
+        }
+        self.package_info = Some(package_info);
         Ok(())
     }
 
@@ -663,6 +684,85 @@ impl<'a> JniEnv<'a> {
     pub fn set_object_field(&mut self, obj_id: u32, field_name: &str, val: Value) -> Result<(), String> {
         self.heap.set_instance_field(obj_id, field_name, val).map_err(|e| format!("{:?}", e))
     }
+
+    /// Materialize the supported Android PackageInfo fields as guest-managed objects.
+    /// Every reference is stored in the managed object graph so GC can trace it from
+    /// the returned PackageInfo instance.
+    fn materialize_package_info(&mut self, info: &PackageInfo) -> Result<u32, String> {
+        let package_info_id = self.heap.allocate_instance("Landroid/content/pm/PackageInfo;")
+            .map_err(|error| format!("PackageInfo allocation failed: {:?}", error))?;
+        let package_name = self.new_string_utf(&info.package_name)?;
+        let version_name = self.new_string_utf(&info.version_name)?;
+        self.set_object_field(package_info_id, "packageName", Value::Object(package_name))?;
+        self.set_object_field(package_info_id, "versionName", Value::Object(version_name))?;
+        self.set_object_field(package_info_id, "versionCode", Value::Int(info.version_code as i32))?;
+        self.set_object_field(package_info_id, "longVersionCode", Value::Long(info.version_code as i64))?;
+
+        let permissions_len = i32::try_from(info.permissions.len())
+            .map_err(|_| "PackageInfo permissions array exceeds guest limits".to_owned())?;
+        let permissions_id = self.heap.allocate_array("[Ljava/lang/String;", permissions_len)
+            .map_err(|error| format!("PackageInfo permissions allocation failed: {:?}", error))?;
+        for (index, permission) in info.permissions.iter().enumerate() {
+            let permission_id = self.new_string_utf(permission)?;
+            self.heap.set_array_element(permissions_id, index as i32, Value::Object(permission_id))
+                .map_err(|error| format!("PackageInfo permission assignment failed: {:?}", error))?;
+        }
+        self.set_object_field(package_info_id, "requestedPermissions", Value::Object(permissions_id))?;
+
+        let activities_len = i32::try_from(info.activities.len())
+            .map_err(|_| "PackageInfo activities array exceeds guest limits".to_owned())?;
+        let activities_id = self.heap.allocate_array("[Landroid/content/pm/ActivityInfo;", activities_len)
+            .map_err(|error| format!("PackageInfo activities allocation failed: {:?}", error))?;
+        for (index, activity) in info.activities.iter().enumerate() {
+            let activity_id = self.heap.allocate_instance("Landroid/content/pm/ActivityInfo;")
+                .map_err(|error| format!("ActivityInfo allocation failed: {:?}", error))?;
+            let name_id = self.new_string_utf(&activity.name)?;
+            let owner_id = self.new_string_utf(&info.package_name)?;
+            self.set_object_field(activity_id, "name", Value::Object(name_id))?;
+            self.set_object_field(activity_id, "packageName", Value::Object(owner_id))?;
+            self.set_object_field(activity_id, "exported", Value::Int(i32::from(activity.exported)))?;
+            self.set_object_field(activity_id, "screenOrientation", Value::Int(activity.screen_orientation))?;
+            self.heap.set_array_element(activities_id, index as i32, Value::Object(activity_id))
+                .map_err(|error| format!("ActivityInfo array assignment failed: {:?}", error))?;
+        }
+        self.set_object_field(package_info_id, "activities", Value::Object(activities_id))?;
+
+        let services_len = i32::try_from(info.services.len())
+            .map_err(|_| "PackageInfo services array exceeds guest limits".to_owned())?;
+        let services_id = self.heap.allocate_array("[Landroid/content/pm/ServiceInfo;", services_len)
+            .map_err(|error| format!("PackageInfo services allocation failed: {:?}", error))?;
+        for (index, service) in info.services.iter().enumerate() {
+            let service_id = self.heap.allocate_instance("Landroid/content/pm/ServiceInfo;")
+                .map_err(|error| format!("ServiceInfo allocation failed: {:?}", error))?;
+            let name_id = self.new_string_utf(&service.name)?;
+            let owner_id = self.new_string_utf(&info.package_name)?;
+            self.set_object_field(service_id, "name", Value::Object(name_id))?;
+            self.set_object_field(service_id, "packageName", Value::Object(owner_id))?;
+            self.set_object_field(service_id, "exported", Value::Int(i32::from(service.exported)))?;
+            let permission_id = match service.permission.as_deref() {
+                Some(permission) => Value::Object(self.new_string_utf(permission)?),
+                None => Value::Null,
+            };
+            self.set_object_field(service_id, "permission", permission_id)?;
+            self.heap.set_array_element(services_id, index as i32, Value::Object(service_id))
+                .map_err(|error| format!("ServiceInfo array assignment failed: {:?}", error))?;
+        }
+        self.set_object_field(package_info_id, "services", Value::Object(services_id))?;
+
+        let application_id = self.heap.allocate_instance("Landroid/content/pm/ApplicationInfo;")
+            .map_err(|error| format!("ApplicationInfo allocation failed: {:?}", error))?;
+        let app_package_id = self.new_string_utf(&info.package_name)?;
+        self.set_object_field(application_id, "packageName", Value::Object(app_package_id))?;
+        self.set_object_field(application_id, "targetSdkVersion", Value::Int(info.target_sdk as i32))?;
+        self.set_object_field(application_id, "minSdkVersion", Value::Int(info.min_sdk as i32))?;
+        let class_name = match info.application_class.as_deref() {
+            Some(name) => Value::Object(self.new_string_utf(name)?),
+            None => Value::Null,
+        };
+        self.set_object_field(application_id, "className", class_name)?;
+        self.set_object_field(package_info_id, "applicationInfo", Value::Object(application_id))?;
+        Ok(package_info_id)
+    }
 }
 
 /// JNI native method registry for binding native library symbols to DEX method declarations.
@@ -878,6 +978,54 @@ impl JniNativeRegistry {
             let value = args.first().map(Value::as_double).unwrap_or(0.0);
             Ok(Some(Value::Int(i32::from(value.is_infinite()))))
         });
+
+        // Guest Java PackageManager bridge. Only manifest-backed metadata for the
+        // currently loaded app is exposed; third-party package enumeration is not implied.
+        self.register(
+            "Landroid/content/Context;",
+            "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+            |env, _args| {
+                if env.package_name.is_none() {
+                    return Err("Context.getPackageManager called before app package identity was configured".into());
+                }
+                let manager = env.heap.allocate_instance("Landroid/content/pm/PackageManager;")
+                    .map_err(|error| format!("PackageManager allocation failed: {:?}", error))?;
+                Ok(Some(Value::Object(manager)))
+            },
+        );
+        let package_info_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("PackageManager.getPackageInfo receiver is null")?;
+            let receiver_class = env.heap.get(receiver)
+                .map_err(|error| format!("PackageManager receiver lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if receiver_class != "Landroid/content/pm/PackageManager;" {
+                return Err(format!("PackageManager.getPackageInfo received incompatible receiver {receiver_class}"));
+            }
+            let requested_id = args.get(1).and_then(Value::as_object)
+                .ok_or("PackageManager.getPackageInfo packageName is null")?;
+            let requested = env.get_string_utf(requested_id)?.to_owned();
+            let info = env.package_info.clone()
+                .ok_or("PackageManager metadata is unavailable; manifest PackageInfo was not bootstrapped")?;
+            if requested != info.package_name {
+                return Err(format!("PackageManager.NameNotFoundException: {requested}"));
+            }
+            let guest_info = env.materialize_package_info(&info)?;
+            Ok(Some(Value::Object(guest_info)))
+        };
+        self.register(
+            "Landroid/content/pm/PackageManager;",
+            "getPackageInfo",
+            "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;",
+            package_info_handler,
+        );
+        self.register(
+            "Landroid/content/pm/PackageManager;",
+            "getPackageInfo",
+            "(Ljava/lang/String;J)Landroid/content/pm/PackageInfo;",
+            package_info_handler,
+        );
 
         // Android Context package identity. The bootstrap layer must set the
         // package name for each app; never silently return a placeholder package.
