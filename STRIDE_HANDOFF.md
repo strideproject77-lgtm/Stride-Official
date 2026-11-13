@@ -701,9 +701,23 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 15 — Bounded PackageManager package-info lookup
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added AndroidEnvironment::load_package_info_from_manifest to attach PackageInfo derived from parsed ManifestMetadata only when its package identity exactly matches the active app environment.
+- Added AndroidEnvironment::get_package_info as a bounded current-app PackageManager.getPackageInfo-style query.
+- Unknown package names return PackageNotFound; absent/invalid manifest metadata returns MetadataUnavailable. Mismatched manifest identity is rejected before mutating environment state.
+- Added regressions for successful version metadata lookup, unknown package rejection, missing metadata and mismatch atomicity.
+- Extra Settings UI improvement: Runtime Status now shows a separate PackageManager lookup capability card.
+- Files: runtime-rust/crates/dex-runtime/src/framework.rs, runtime-rust/crates/dex-runtime/src/lib.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: this is a typed Rust framework query API, not yet a guest Java PackageManager object/JNI method bridge; third-party package enumeration and flags overloads remain unsupported.
+- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Android framework: expose manifest-backed PackageInfo through one bounded PackageManager query bridge with explicit unsupported-query behavior.
+- Android framework: add guest Java PackageManager object/JNI bridge for the typed current-app PackageInfo query.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
