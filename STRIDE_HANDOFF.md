@@ -774,6 +774,21 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 20 — PackageManager launcher Intent resolution
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added guest PackageManager.getLaunchIntentForPackage(String) using only the active app's parsed manifest launcher activity.
+- Builds a guest-managed Intent with ACTION_MAIN, CATEGORY_LAUNCHER, package identity and ComponentName; all object references remain connected through the managed heap for GC tracing.
+- Added Intent.getAction(), getPackage(), getComponent(), getFlags() and hasCategory(), plus ComponentName.getPackageName() / getClassName().
+- Returns Java null when the current package has no declared launcher activity; rejects null package names, unknown packages and incompatible receiver types explicitly.
+- Added regression coverage for launcher intent fields, category lookup, component identity, no-launcher behavior and unknown-package rejection.
+- Extra UI improvement: Runtime Status now surfaces launcher Intent resolution as a separate capability.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: only the current app's manifest-declared launcher is resolved. Cross-package intent resolution, intent filters beyond the parsed launcher, chooser/system activities and actual host-side activity dispatch remain unsupported.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.

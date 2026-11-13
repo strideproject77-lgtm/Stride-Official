@@ -1049,7 +1049,148 @@ impl JniNativeRegistry {
             application_info_handler,
         );
 
-        // Context app-private directory paths. These are Android-style guest
+// Resolve the current app's manifest-declared launcher entry point.
+        // A missing launcher is represented by Java null, matching Android's API.
+        self.register(
+            "Landroid/content/pm/PackageManager;",
+            "getLaunchIntentForPackage",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+            |env, args| {
+                let receiver = args.first().and_then(Value::as_object)
+                    .ok_or("PackageManager.getLaunchIntentForPackage receiver is null")?;
+                let receiver_class = env.heap.get(receiver)
+                    .map_err(|error| format!("PackageManager receiver lookup failed: {:?}", error))?
+                    .class_descriptor().to_owned();
+                if receiver_class != "Landroid/content/pm/PackageManager;" {
+                    return Err(format!("PackageManager.getLaunchIntentForPackage received incompatible receiver {receiver_class}"));
+                }
+                let requested_id = args.get(1).and_then(Value::as_object)
+                    .ok_or("PackageManager.getLaunchIntentForPackage packageName is null")?;
+                let requested = env.get_string_utf(requested_id)?.to_owned();
+                let info = env.package_info.clone()
+                    .ok_or("PackageManager metadata is unavailable; manifest PackageInfo was not bootstrapped")?;
+                if requested != info.package_name {
+                    return Err(format!("PackageManager.NameNotFoundException: {requested}"));
+                }
+                let Some(launcher) = info.launcher_activity.as_deref() else {
+                    return Ok(Some(Value::Null));
+                };
+
+                let intent_id = env.heap.allocate_instance("Landroid/content/Intent;")
+                    .map_err(|error| format!("Launch Intent allocation failed: {:?}", error))?;
+                let action_id = env.new_string_utf("android.intent.action.MAIN")?;
+                let package_id = env.new_string_utf(&info.package_name)?;
+                let class_id = env.new_string_utf(launcher)?;
+                let category_id = env.new_string_utf("android.intent.category.LAUNCHER")?;
+                let categories_id = env.heap.allocate_array("[Ljava/lang/String;", 1)
+                    .map_err(|error| format!("Launch Intent categories allocation failed: {:?}", error))?;
+                env.heap.set_array_element(categories_id, 0, Value::Object(category_id))
+                    .map_err(|error| format!("Launch Intent category assignment failed: {:?}", error))?;
+
+                let component_id = env.heap.allocate_instance("Landroid/content/ComponentName;")
+                    .map_err(|error| format!("ComponentName allocation failed: {:?}", error))?;
+                env.set_object_field(component_id, "mPackage", Value::Object(package_id))?;
+                env.set_object_field(component_id, "mClass", Value::Object(class_id))?;
+                env.set_object_field(intent_id, "mAction", Value::Object(action_id))?;
+                env.set_object_field(intent_id, "mPackage", Value::Object(package_id))?;
+                env.set_object_field(intent_id, "mComponent", Value::Object(component_id))?;
+                env.set_object_field(intent_id, "mCategories", Value::Object(categories_id))?;
+                env.set_object_field(intent_id, "mFlags", Value::Int(0))?;
+                Ok(Some(Value::Object(intent_id)))
+            },
+        );
+
+        let intent_string_field = |field: &'static str| {
+            move |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
+                let receiver = args.first().and_then(Value::as_object)
+                    .ok_or("Intent accessor receiver is null")?;
+                let class = env.heap.get(receiver)
+                    .map_err(|error| format!("Intent receiver lookup failed: {:?}", error))?
+                    .class_descriptor().to_owned();
+                if class != "Landroid/content/Intent;" {
+                    return Err(format!("Intent accessor received incompatible receiver {class}"));
+                }
+                match env.get_object_field(receiver, field) {
+                    Ok(Value::Object(id)) => Ok(Some(Value::Object(id))),
+                    Ok(Value::Null) => Ok(Some(Value::Null)),
+                    Ok(_) => Err(format!("Intent field {field} has an invalid type")),
+                    Err(_) => Ok(Some(Value::Null)),
+                }
+            }
+        };
+        self.register("Landroid/content/Intent;", "getAction", "()Ljava/lang/String;", intent_string_field("mAction"));
+        self.register("Landroid/content/Intent;", "getPackage", "()Ljava/lang/String;", intent_string_field("mPackage"));
+        self.register("Landroid/content/Intent;", "getComponent", "()Landroid/content/ComponentName;", intent_string_field("mComponent"));
+        self.register("Landroid/content/Intent;", "getFlags", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.getFlags receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent receiver lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.getFlags received incompatible receiver {class}"));
+            }
+            Ok(Some(env.get_object_field(receiver, "mFlags").unwrap_or(Value::Int(0))))
+        });
+        self.register("Landroid/content/Intent;", "hasCategory", "(Ljava/lang/String;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("Intent.hasCategory receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("Intent receiver lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/Intent;" {
+                return Err(format!("Intent.hasCategory received incompatible receiver {class}"));
+            }
+            let requested_id = args.get(1).and_then(Value::as_object)
+                .ok_or("Intent.hasCategory category is null")?;
+            let requested = env.get_string_utf(requested_id)?.to_owned();
+            let categories_id = match env.get_object_field(receiver, "mCategories") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Int(0))),
+            };
+            let count = env.heap.get_array_length(categories_id)
+                .map_err(|error| format!("Intent categories lookup failed: {:?}", error))?;
+            for index in 0..count {
+                let item = env.heap.get_array_element(categories_id, index as i32)
+                    .map_err(|error| format!("Intent category read failed: {:?}", error))?;
+                if let Some(id) = item.as_object() {
+                    if env.get_string_utf(id).is_ok_and(|value| value == requested) {
+                        return Ok(Some(Value::Int(1)));
+                    }
+                }
+            }
+            Ok(Some(Value::Int(0)))
+        });
+        self.register("Landroid/content/ComponentName;", "getPackageName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("ComponentName.getPackageName receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("ComponentName lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/ComponentName;" {
+                return Err(format!("ComponentName.getPackageName received incompatible receiver {class}"));
+            }
+            match env.get_object_field(receiver, "mPackage")? {
+                Value::Object(id) => Ok(Some(Value::Object(id))),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/content/ComponentName;", "getClassName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("ComponentName.getClassName receiver is null")?;
+            let class = env.heap.get(receiver)
+                .map_err(|error| format!("ComponentName lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if class != "Landroid/content/ComponentName;" {
+                return Err(format!("ComponentName.getClassName received incompatible receiver {class}"));
+            }
+            match env.get_object_field(receiver, "mClass")? {
+                Value::Object(id) => Ok(Some(Value::Object(id))),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+
+                // Context app-private directory paths. These are Android-style guest
         // paths only; a persistent filesystem backend is a separate capability.
         let context_directory_handler = |directory: &'static str| {
             move |env: &mut JniEnv, _args: &[Value]| -> Result<Option<Value>, String> {
@@ -1668,6 +1809,106 @@ mod tests {
             &mut env,
             &[Value::Object(manager_id), Value::Object(requested_name), Value::Int(0)],
         ).unwrap_err().contains("metadata is unavailable"));
+    }
+
+    #[test]
+    fn package_manager_builds_guest_launcher_intent_from_manifest() {
+        let manifest = ManifestMetadata {
+            package_name: Some("com.stride.launcher".to_owned()),
+            version_name: Some("1.0".to_owned()),
+            version_code: Some(1),
+            min_sdk: Some(23),
+            target_sdk: Some(35),
+            permissions: Vec::new(),
+            application_name: None,
+            components: vec![stride_axml::ManifestComponent {
+                kind: "activity".to_owned(),
+                name: "com.stride.launcher.HomeActivity".to_owned(),
+                exported: Some(true),
+                has_launcher_intent: true,
+                screen_orientation: None,
+            }],
+            launcher_activity: Some("com.stride.launcher.HomeActivity".to_owned()),
+            screen_orientation: None,
+        };
+        let registry = JniNativeRegistry::new();
+        let get_manager = registry.find(
+            "Landroid/content/Context;", "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+        ).unwrap().clone();
+        let get_launch = registry.find(
+            "Landroid/content/pm/PackageManager;", "getLaunchIntentForPackage",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+        ).unwrap().clone();
+        let get_action = registry.find(
+            "Landroid/content/Intent;", "getAction", "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let get_package = registry.find(
+            "Landroid/content/Intent;", "getPackage", "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let get_component = registry.find(
+            "Landroid/content/Intent;", "getComponent", "()Landroid/content/ComponentName;",
+        ).unwrap().clone();
+        let has_category = registry.find(
+            "Landroid/content/Intent;", "hasCategory", "(Ljava/lang/String;)Z",
+        ).unwrap().clone();
+        let component_package = registry.find(
+            "Landroid/content/ComponentName;", "getPackageName", "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let component_class = registry.find(
+            "Landroid/content/ComponentName;", "getClassName", "()Ljava/lang/String;",
+        ).unwrap().clone();
+
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::from_manifest(&mut heap, &manifest).unwrap();
+        let manager = get_manager(&mut env, &[]).unwrap().unwrap().as_object().unwrap();
+        let requested = env.new_string_utf("com.stride.launcher").unwrap();
+        let intent = get_launch(&mut env, &[Value::Object(manager), Value::Object(requested)])
+            .unwrap().unwrap().as_object().unwrap();
+        let read_string = |env: &JniEnv, value: Value| {
+            env.get_string_utf(value.as_object().unwrap()).unwrap().to_owned()
+        };
+
+        assert_eq!(read_string(&env, get_action(&mut env, &[Value::Object(intent)]).unwrap().unwrap()), "android.intent.action.MAIN");
+        assert_eq!(read_string(&env, get_package(&mut env, &[Value::Object(intent)]).unwrap().unwrap()), "com.stride.launcher");
+        let launcher_category = env.new_string_utf("android.intent.category.LAUNCHER").unwrap();
+        assert_eq!(has_category(&mut env, &[Value::Object(intent), Value::Object(launcher_category)]).unwrap(), Some(Value::Int(1)));
+        let component = get_component(&mut env, &[Value::Object(intent)]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(read_string(&env, component_package(&mut env, &[Value::Object(component)]).unwrap().unwrap()), "com.stride.launcher");
+        assert_eq!(read_string(&env, component_class(&mut env, &[Value::Object(component)]).unwrap().unwrap()), "com.stride.launcher.HomeActivity");
+    }
+
+    #[test]
+    fn package_manager_returns_null_without_launcher_and_rejects_other_packages() {
+        let manifest = ManifestMetadata {
+            package_name: Some("com.stride.no_launcher".to_owned()),
+            version_name: None,
+            version_code: None,
+            min_sdk: Some(21),
+            target_sdk: Some(35),
+            permissions: Vec::new(),
+            application_name: None,
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        };
+        let registry = JniNativeRegistry::new();
+        let get_manager = registry.find(
+            "Landroid/content/Context;", "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+        ).unwrap().clone();
+        let get_launch = registry.find(
+            "Landroid/content/pm/PackageManager;", "getLaunchIntentForPackage",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+        ).unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::from_manifest(&mut heap, &manifest).unwrap();
+        let manager = get_manager(&mut env, &[]).unwrap().unwrap().as_object().unwrap();
+        let requested = env.new_string_utf("com.stride.no_launcher").unwrap();
+        assert_eq!(get_launch(&mut env, &[Value::Object(manager), Value::Object(requested)]).unwrap(), Some(Value::Null));
+        let unknown = env.new_string_utf("com.other.app").unwrap();
+        assert!(get_launch(&mut env, &[Value::Object(manager), Value::Object(unknown)]).unwrap_err().contains("NameNotFoundException"));
+        assert!(get_launch(&mut env, &[Value::Object(manager), Value::Null]).unwrap_err().contains("packageName is null"));
     }
 
     #[test]
