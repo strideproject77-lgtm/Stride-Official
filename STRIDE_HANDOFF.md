@@ -441,3 +441,330 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - `PopLocalFrame(result)` validates and reserves before changing frame/reference stacks, preventing partial state changes on failure.
 - String/int-array/byte-array creation reserves local-reference capacity before heap allocation; null local-reference operations follow JNI behavior.
 - Added/updated regression coverage only; tests remain deferred to the one final pass.
+
+
+
+---
+
+## ChatGPT Mobile Roadmap — Common Compatibility Engine
+
+**Purpose:** Build reusable Android runtime capabilities that improve compatibility across many apps, rather than adding one-off game-specific workarounds.
+
+**Branch and execution rules**
+- `main` remains the stable production branch.
+- All development and bug fixes happen only on `feat/dex-class-method-loader`.
+- Do not merge to `main` until the consolidated final validation passes and the changes are reviewed.
+- Implement roadmap work in focused batches, with each batch small enough to complete and report in one work session.
+- Do not run repeated tests after every small edit. Run the single consolidated test pass at the end, as requested.
+- Do not build, sign, export, or publish an IPA without the user's explicit permission.
+- Do not represent stubs, placeholders, static analysis, or lifecycle-only execution as working app compatibility.
+- After each meaningful batch, update this handoff with changed files, implemented behavior, remaining limitations, extra improvements, and affected app targets.
+- Update the phase tracker below as progress is made. Mark a phase **Completed** only when every listed item in that phase is implemented; until then use **Partial**. Final test status must remain separately identified.
+
+### Phase tracker
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | DEX Runtime & Class Loading | Partial — DEX interpreter and multi-DEX loader foundations exist; full resolution/coverage remains |
+| 2 | Java Object & Exception System | Partial — managed heap, hierarchy and exception foundations exist |
+| 3 | Android Context & Application | Partial — framework structures and Context groundwork exist |
+| 4 | Activity Lifecycle | Partial — lifecycle state machine and ActivityManager foundations exist |
+| 5 | Intent & Component System | Partial — Intent/Bundle groundwork exists; complete resolution and component dispatch remain |
+| 6 | PackageManager | Partial — package/activity/service metadata groundwork exists |
+| 7 | Android Resources | Partial — scalar resource parsing exists; full resource/configuration/theme coverage remains |
+| 8 | APK Assets & Split Support | Partial — APK/XAPK package grouping foundations exist; full asset and split resolution remains |
+| 9 | Android View Framework | Partial — View/layout foundations exist; broad Android widget behavior remains |
+| 10 | Canvas & 2D Graphics | Partial — Canvas rasterization and drawing primitives exist; API coverage remains |
+| 11 | Touch & Input | Partial — input queue and MotionEvent foundations exist; broad gesture/input behavior remains |
+| 12 | JNI Core | Partial — registry, references and ABI table groundwork exist; callable guest trampolines/callback integration remain |
+| 13 | Native ELF Loader | Partial — ELF inspection/loading and dynamic-linker foundations exist; full relocation/ABI coverage remains |
+| 14 | Bionic libc | Partial — selected libc/libm/liblog symbols and guest memory groundwork exist |
+| 15 | Native Threads & Synchronization | Partial — monitor and limited exclusive-atomic foundations exist; pthread/TLS/global arbitration remain |
+| 16 | Android Handler & Services | Partial — service and Looper/Handler groundwork exists; full scheduling/lifecycle integration remains |
+| 17 | Android Storage | Partial — SharedPreferences and guest file/memory groundwork exist; full Android storage mapping remains |
+| 18 | Permissions & System APIs | Partial — manifest permission metadata exists; runtime permission/system API behavior remains |
+| 19 | EGL & OpenGL ES | Partial — EGL/GLES state and basic presentation groundwork exists; real shader/texture/render pipeline remains |
+| 20 | 3D Rendering & Games | Partial — surface/frame telemetry groundwork exists; production render-thread/GPU integration remains |
+| 21 | Audio & Media | Partial — AudioTrack/session groundwork exists; broad Android audio/media behavior remains |
+| 22 | Game Compatibility | Partial — Unity/native game integration groundwork exists; real game startup and gameplay remain unverified |
+| 23 | Diagnostics & Stability | Partial — missing API/native diagnostics and telemetry foundations exist; complete crash/stability coverage remains |
+| 24 | Performance & Optimization | Partial — FPS/ANR and runtime telemetry foundations exist; profiling-led optimization remains |
+| 25 | Compatibility Expansion | Not complete — representative APK/XAPK regression matrix and physical-device validation remain |
+
+**Current baseline note:** These statuses describe code foundations visible in the feature branch, not verified Android app compatibility. No phase is declared fully complete by this roadmap entry. Update statuses only after reviewing the actual implementation on the feature branch.
+
+### Phase 1 — DEX Runtime & Class Loading
+1. Improve DEX class resolution.
+2. Complete method lookup and dispatch.
+3. Complete field resolution and access checks.
+4. Link classes across multiple DEX files.
+5. Add safe missing-class/method handling and diagnostics.
+6. Expand DEX opcode compatibility and verifier coverage.
+
+### Phase 2 — Java Object & Exception System
+7. Improve object allocation and lifecycle.
+8. Complete inheritance and interface resolution.
+9. Complete virtual/interface/super dispatch.
+10. Improve exception propagation and stack traces.
+11. Add reflection API groundwork.
+12. Strengthen garbage-collector roots and object reachability.
+
+### Phase 3 — Android Context & Application
+13. Complete Application class initialization.
+14. Implement commonly used Context APIs.
+15. Add ContextWrapper and ContextImpl behavior.
+16. Complete Application lifecycle callbacks.
+17. Implement reusable system-service lookup.
+18. Expose application metadata and paths.
+
+### Phase 4 — Activity Lifecycle
+19. Complete Activity creation and destruction.
+20. Complete start/resume/pause/stop transitions.
+21. Implement saved instance state.
+22. Handle Activity recreation.
+23. Handle configuration changes.
+24. Complete finish/back-navigation behavior.
+
+### Phase 5 — Intent & Component System
+25. Resolve Intent actions.
+26. Support explicit and implicit Intents.
+27. Expand Intent extras and Bundle types.
+28. Resolve Intent filters and categories.
+29. Launch and communicate between app components.
+30. Add PendingIntent groundwork and safe behavior.
+
+### Phase 6 — PackageManager
+31. Resolve package metadata.
+32. Complete ActivityInfo and ServiceInfo.
+33. Implement ApplicationInfo.
+34. Resolve permission metadata.
+35. Support installed-package/component queries.
+36. Expose version and SDK information.
+
+### Phase 7 — Android Resources
+37. Expand resources.arsc parsing.
+38. Resolve resource IDs and references.
+39. Select resources by device/configuration qualifiers.
+40. Support strings and plurals.
+41. Support colors, dimensions and styles.
+42. Resolve themes and attributes.
+
+### Phase 8 — APK Assets & Split Support
+43. Implement APK asset access.
+44. Improve AssetManager compatibility.
+45. Load multiple APKs as one package.
+46. Complete XAPK extraction and package grouping.
+47. Select required split APKs.
+48. Resolve density and language splits.
+
+### Phase 9 — Android View Framework
+49. Complete View measurement and layout.
+50. Complete the View drawing lifecycle.
+51. Improve ViewGroup child management.
+52. Expand LayoutParams compatibility.
+53. Improve TextView and Button behavior.
+54. Improve EditText, focus and keyboard behavior.
+
+### Phase 10 — Canvas & 2D Graphics
+55. Expand Canvas drawing APIs.
+56. Improve Paint, color and stroke behavior.
+57. Expand Bitmap operations.
+58. Improve Drawable support.
+59. Improve Typeface and text rendering.
+60. Add clipping, scaling and matrix transformations.
+
+### Phase 11 — Touch & Input
+61. Expand MotionEvent compatibility.
+62. Support multi-touch pointer lifecycle.
+63. Implement common gesture detection.
+64. Complete click and long-click callbacks.
+65. Add scroll and fling behavior.
+66. Improve keyboard and focus input.
+
+### Phase 12 — JNI Core
+67. Implement guest-callable JNI function tables.
+68. Implement safe JNI callback trampolines.
+69. Convert JNI arguments and return values correctly.
+70. Integrate JNI references with managed objects.
+71. Support native-to-managed method callbacks.
+72. Complete JavaVM invocation-interface behavior.
+
+### Phase 13 — Native ELF Loader
+73. Expand ARM32 ELF loading.
+74. Expand ARM64 ELF loading.
+75. Improve dynamic symbol resolution.
+76. Expand relocation compatibility.
+77. Load shared-library dependencies in correct order.
+78. Handle native constructors and destructors safely.
+
+### Phase 14 — Bionic libc
+79. Expand memory allocation APIs.
+80. Add common string and memory functions.
+81. Add file and directory APIs.
+82. Add environment and process APIs.
+83. Improve errno and error behavior.
+84. Expand Android-specific libc symbols.
+
+### Phase 15 — Native Threads & Synchronization
+85. Implement pthread creation and management.
+86. Implement thread-local storage.
+87. Add mutexes and condition variables.
+88. Complete cross-thread atomic operations.
+89. Add guest-thread scheduling.
+90. Coordinate Java and native threads.
+
+### Phase 16 — Android Handler & Services
+91. Complete Looper behavior.
+92. Implement Handler message queues.
+93. Schedule Runnable callbacks.
+94. Complete Service lifecycle behavior.
+95. Add foreground-service behavior.
+96. Add BroadcastReceiver groundwork and dispatch.
+
+### Phase 17 — Android Storage
+97. Implement internal app storage.
+98. Implement scoped external app storage mapping.
+99. Enforce guest file permissions and path boundaries.
+100. Persist SharedPreferences correctly.
+101. Add database compatibility groundwork.
+102. Isolate data directories per APK/package.
+
+### Phase 18 — Permissions & System APIs
+103. Implement runtime permission requests.
+104. Track permission grant/denial state.
+105. Add common device-information APIs.
+106. Improve display and orientation APIs.
+107. Add clipboard and input system services.
+108. Add safe network API groundwork.
+
+### Phase 19 — EGL & OpenGL ES
+109. Improve EGL initialization and config selection.
+110. Complete EGL context/surface lifecycle.
+111. Expand GLES2 command coverage.
+112. Expand GLES3 command coverage.
+113. Implement shader compilation/linking behavior.
+114. Add texture, buffer and framebuffer operations.
+
+### Phase 20 — 3D Rendering & Games
+115. Integrate Surface lifecycle with rendering.
+116. Implement frame scheduling.
+117. Coordinate render threads safely.
+118. Manage GPU resources and context loss.
+119. Handle viewport and resolution changes.
+120. Profile and improve rendering performance.
+
+### Phase 21 — Audio & Media
+121. Expand AudioTrack compatibility.
+122. Add SoundPool behavior.
+123. Handle audio focus.
+124. Integrate audio with Activity lifecycle.
+125. Add media playback groundwork.
+126. Measure and improve audio latency.
+
+### Phase 22 — Game Compatibility
+127. Improve native game startup.
+128. Improve game input mapping.
+129. Support landscape and portrait transitions.
+130. Implement reusable missing APIs identified by game diagnostics.
+131. Expand Unity integration.
+132. Add common game-engine compatibility layers.
+
+### Phase 23 — Diagnostics & Stability
+133. Produce actionable missing-API reports.
+134. Produce missing-native-symbol reports.
+135. Improve DEX execution diagnostics.
+136. Improve crash logs and stack traces.
+137. Track guest memory usage and pressure.
+138. Implement safe shutdown and resource cleanup.
+
+### Phase 24 — Performance & Optimization
+139. Profile and optimize DEX execution.
+140. Add safe class/method lookup caching.
+141. Add native symbol caching.
+142. Add resource caching.
+143. Optimize guest memory allocation.
+144. Profile and optimize rendering/frame time.
+
+### Phase 25 — Compatibility Expansion
+145. Build an automated APK compatibility harness.
+146. Add APK/XAPK format regression coverage.
+147. Add Java application compatibility cases.
+148. Add native application compatibility cases.
+149. Add 2D and 3D game compatibility cases.
+150. Add regression tests for every confirmed fix.
+
+### Named compatibility target list
+
+**These are targets for investigation and eventual real-device testing, not current support claims.** The percentages below are provisional planning estimates only; they must be recalculated from the exact APK version, ABI, Android API requirements, runtime diagnostics and physical-device results. Do not describe them as measured compatibility.
+
+#### Games
+
+| Game | Current planning estimate | Long-term target |
+|---|---:|---:|
+| 2048 | 40–45% | 90–95% |
+| Flappy Bird | 30–35% | 90–95% |
+| Subway Surfers | 5–8% | 70–85% |
+| Hill Climb Racing | 17–18% | 80–90% |
+| Dr. Driving | 8–12% | 70–85% |
+| Temple Run 2 | 5–10% | 65–80% |
+| Candy Crush Saga | 15–20% | 80–90% |
+| Hill Climb Racing 2 | 5–10% | 70–85% |
+| Geometry Dash | 10–15% | 75–90% |
+| My Talking Tom | 10–15% | 75–85% |
+| Ludo King | 15–20% | 80–90% |
+| 8 Ball Pool | 5–10% | 65–80% |
+| Traffic Rider | 5–10% | 65–80% |
+| Extreme Car Driving Simulator | 3–8% | 55–75% |
+| Roblox | 1–5% | 40–60% |
+| Minecraft | 1–5% | 45–65% |
+| Free Fire | 1–5% | 40–60% |
+| PUBG Mobile | 1–5% | 35–55% |
+| Clash of Clans | 5–10% | 65–80% |
+| Brawl Stars | 1–5% | 45–65% |
+
+#### Applications
+
+| App | Current planning estimate | Long-term target |
+|---|---:|---:|
+| Calculator | 35–45% | 95% |
+| Simple Notes | 25–35% | 90–95% |
+| Google Keep | 10–15% | 75–85% |
+| VLC | 5–10% | 70–85% |
+| MX Player | 5–10% | 70–85% |
+| Spotify | 5–10% | 65–80% |
+| WhatsApp | 5–10% | 60–75% |
+| Telegram | 5–10% | 65–80% |
+| Instagram | 1–5% | 50–65% |
+| Facebook | 1–5% | 50–65% |
+| Snapchat | 1–5% | 40–60% |
+| TikTok | 1–5% | 45–60% |
+| Discord | 5–10% | 60–75% |
+| Google Chrome | 5–10% | 65–80% |
+| Files by Google | 15–20% | 80–90% |
+| Google Translate | 5–10% | 65–80% |
+| Microsoft Word | 5–10% | 65–80% |
+| Canva | 1–5% | 50–65% |
+| CapCut | 1–5% | 40–60% |
+| YouTube | 5–10% | 60–75% |
+
+**Compatibility measurement rules**
+- A percentage is not a promise that an app will launch. It is a provisional estimate of requirement coverage until supported by test evidence.
+- Track each exact APK version/build, package name, ABI, min/target SDK, split set, iOS device/version, and test result.
+- Separate import success, static inspection, class loading, Activity lifecycle, first rendered frame, interactive session, and sustained stability.
+- Mark an app as **Verified** only after it launches and performs its declared test scenario on a real supported iPhone. Record crashes and missing APIs.
+- Revisit the target estimates after the compatibility harness produces evidence. Some apps may remain unsupported because of DRM, Play Services, proprietary APIs, device-specific GPU features, anti-cheat, or unsupported native CPU behavior.
+
+### Progress update format
+
+Append a dated entry under this roadmap after every meaningful implementation batch:
+
+`YYYY-MM-DD — Phase N: [phase title] — Partial / Completed`
+- Implemented:
+- Files changed:
+- Extra improvements:
+- Remaining blockers:
+- Apps/categories likely helped:
+- Tests: Not run / final consolidated test pending.
+- IPA: Not built (unless explicitly authorized).
+
+Do not mark a phase complete merely because its files or API names exist. A phase is complete only when its full scope has been implemented and reviewed. The final consolidated validation remains a separate gate before merging any changes into `main`.
