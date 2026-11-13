@@ -673,9 +673,22 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 13 — Manifest-backed Context bootstrap
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added JniEnv::from_manifest(heap, metadata), directly consuming stride-axml ManifestMetadata and configuring the Context package identity from the parsed AndroidManifest.xml package attribute.
+- Bootstrap fails closed when the manifest package attribute is missing or invalid; it does not invent a fallback package.
+- Added an end-to-end JNI regression using ManifestMetadata, verifying Context.getPackageName returns the package parsed/configured from manifest metadata and that missing package identity is rejected.
+- Extra Settings UI improvement: Runtime Status now names the actual Manifest → Context bootstrap path instead of listing only the lower-level Context methods.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Integration boundary: APK startup code that owns parsed ManifestMetadata must construct its JNI environment through JniEnv::from_manifest; this batch exposes and tests that direct handoff API but does not claim every APK launch path already calls it.
+- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Android framework: connect parsed manifest package identity into the JNI bootstrap and validate Context lifecycle integration.
+- Android framework: extend Context identity into a bounded application-info or PackageManager lookup backed by parsed manifest metadata.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
