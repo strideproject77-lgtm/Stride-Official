@@ -1020,12 +1020,6 @@ impl JniNativeRegistry {
             "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;",
             package_info_handler,
         );
-        self.register(
-            "Landroid/content/pm/PackageManager;",
-            "getPackageInfo",
-            "(Ljava/lang/String;J)Landroid/content/pm/PackageInfo;",
-            package_info_handler,
-        );
         let application_info_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
             let receiver = args.first().and_then(Value::as_object)
                 .ok_or("PackageManager.getApplicationInfo receiver is null")?;
@@ -1052,12 +1046,6 @@ impl JniNativeRegistry {
             "Landroid/content/pm/PackageManager;",
             "getApplicationInfo",
             "(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;",
-            application_info_handler,
-        );
-        self.register(
-            "Landroid/content/pm/PackageManager;",
-            "getApplicationInfo",
-            "(Ljava/lang/String;J)Landroid/content/pm/ApplicationInfo;",
             application_info_handler,
         );
 
@@ -1662,7 +1650,7 @@ mod tests {
         let get_package_info = registry.find(
             "Landroid/content/pm/PackageManager;",
             "getPackageInfo",
-            "(Ljava/lang/String;J)Landroid/content/pm/PackageInfo;",
+            "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;",
         ).unwrap().clone();
         let mut heap = ManagedHeap::default();
         let mut env = JniEnv::new(&mut heap);
@@ -1673,12 +1661,12 @@ mod tests {
         };
         assert!(get_package_info(
             &mut env,
-            &[Value::Object(manager_id), Value::Null, Value::Long(0)],
+            &[Value::Object(manager_id), Value::Null, Value::Int(0)],
         ).unwrap_err().contains("packageName is null"));
         let requested_name = env.new_string_utf("com.stride.empty").unwrap();
         assert!(get_package_info(
             &mut env,
-            &[Value::Object(manager_id), Value::Object(requested_name), Value::Long(0)],
+            &[Value::Object(manager_id), Value::Object(requested_name), Value::Int(0)],
         ).unwrap_err().contains("metadata is unavailable"));
     }
 
