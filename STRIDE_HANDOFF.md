@@ -891,6 +891,8 @@ These are candidates, not completed work:
 
 **Status: Partial · approximately 40% (dispatcher foundation hardened; guest bridge and runtime synchronization remain).**
 
+- Consolidated workflow #724 exposed two Rust type errors: the new `dispatch_method` receiver parameter is `Option<u32>`, but the `onStart` and `onResume` call sites passed bare `u32` values. Both call sites now pass `Some(obj_ref)`; rerun the consolidated workflow before treating Phase 26 as validated. The iOS IPA job was skipped because Rust compilation failed.
+
 - Hardened ActivityManager.start_activity() to require an explicit non-empty component class instead of silently routing implicit intents to a fabricated UnknownActivity.
 - Activity allocation now happens before the current top Activity is paused/stopped. Allocation failure returns a diagnostic error and leaves the existing backstack/lifecycle unchanged.
 - Activity record IDs now use checked increment so integer overflow cannot silently wrap and collide with earlier records.
