@@ -317,6 +317,13 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 
 ### JNI local-reference failure-safety follow-up
 
+
+### Guest JNI reference-token layer
+- Added opaque 64-bit guest reference tokens, deliberately separate from internal `u32` managed object IDs. Local, strong-global and weak-global references now have distinct lifetime classes.
+- Added local-frame push/pop with result re-issuance, reference cloning/deletion, guest-handle resolution, same-object checks, strong-root snapshots and weak-reference pruning.
+- The table is currently Rust-side infrastructure. It is not yet installed as a guest-callable `JNIEnv*` table and does not provide callable native callback trampolines or automatic GC integration.
+- Regression coverage was added but not run; defer all tests to the one final pass.
+
 - Added strong JNI global-reference lifecycle APIs and combined strong-root snapshots so global references can outlive local-frame pops. Weak globals and automatic native-runtime GC root handoff remain future work.
 - Made result-preserving frame pop atomic on invalid handles or reservation failure; the active frame remains intact when validation fails.
 - Reserve local-reference capacity before creating strings/int/byte arrays, and accept null in NewLocalRef/DeleteLocalRef according to JNI semantics.
