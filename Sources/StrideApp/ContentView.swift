@@ -328,6 +328,16 @@ struct ContentView: View {
                         .font(.system(size: 12, weight: .medium))
                         .tint(accent)
                         .autocorrectionDisabled()
+                        .accessibilityLabel("Search your imported Android apps")
+                        .accessibilityHint("Filters the Library as you type")
+                    if !searchText.isEmpty {
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(muted)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear library search")
+                    }
                 }
                 .padding(.horizontal, 13)
                 .frame(height: 44)
