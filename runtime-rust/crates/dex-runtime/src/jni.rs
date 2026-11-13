@@ -1026,6 +1026,40 @@ impl JniNativeRegistry {
             "(Ljava/lang/String;J)Landroid/content/pm/PackageInfo;",
             package_info_handler,
         );
+        let application_info_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("PackageManager.getApplicationInfo receiver is null")?;
+            let receiver_class = env.heap.get(receiver)
+                .map_err(|error| format!("PackageManager receiver lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if receiver_class != "Landroid/content/pm/PackageManager;" {
+                return Err(format!("PackageManager.getApplicationInfo received incompatible receiver {receiver_class}"));
+            }
+            let requested_id = args.get(1).and_then(Value::as_object)
+                .ok_or("PackageManager.getApplicationInfo packageName is null")?;
+            let requested = env.get_string_utf(requested_id)?.to_owned();
+            let info = env.package_info.clone()
+                .ok_or("PackageManager metadata is unavailable; manifest PackageInfo was not bootstrapped")?;
+            if requested != info.package_name {
+                return Err(format!("PackageManager.NameNotFoundException: {requested}"));
+            }
+            let package_info_id = env.materialize_package_info(&info)?;
+            let application_id = env.get_object_field(package_info_id, "applicationInfo")?
+                .as_object().ok_or("PackageManager ApplicationInfo materialization returned null")?;
+            Ok(Some(Value::Object(application_id)))
+        };
+        self.register(
+            "Landroid/content/pm/PackageManager;",
+            "getApplicationInfo",
+            "(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;",
+            application_info_handler,
+        );
+        self.register(
+            "Landroid/content/pm/PackageManager;",
+            "getApplicationInfo",
+            "(Ljava/lang/String;J)Landroid/content/pm/ApplicationInfo;",
+            application_info_handler,
+        );
 
         // Android Context package identity. The bootstrap layer must set the
         // package name for each app; never silently return a placeholder package.
@@ -1474,6 +1508,55 @@ mod tests {
             &mut env,
             &[Value::Object(manager_id), Value::Object(unknown_name), Value::Int(0)],
         ).unwrap_err().contains("NameNotFoundException"));
+    }
+
+    #[test]
+    fn guest_package_manager_get_application_info_returns_manifest_backed_metadata() {
+        let manifest = ManifestMetadata {
+            package_name: Some("com.stride.applicationinfo".to_owned()),
+            version_name: Some("1.0".to_owned()),
+            version_code: Some(10),
+            min_sdk: Some(24),
+            target_sdk: Some(34),
+            permissions: Vec::new(),
+            application_name: Some("com.stride.applicationinfo.CustomApp".to_owned()),
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        };
+        let registry = JniNativeRegistry::new();
+        let get_package_manager = registry.find(
+            "Landroid/content/Context;",
+            "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+        ).unwrap().clone();
+        let get_application_info = registry.find(
+            "Landroid/content/pm/PackageManager;",
+            "getApplicationInfo",
+            "(Ljava/lang/String;I)Landroid/content/pm/ApplicationInfo;",
+        ).unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::from_manifest(&mut heap, &manifest).unwrap();
+        let manager_id = match get_package_manager(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected PackageManager result: {:?}", other),
+        };
+        let requested_name = env.new_string_utf("com.stride.applicationinfo").unwrap();
+        let application_id = match get_application_info(
+            &mut env,
+            &[Value::Object(manager_id), Value::Object(requested_name), Value::Int(0)],
+        ).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected ApplicationInfo result: {:?}", other),
+        };
+        assert_eq!(
+            env.heap.get(application_id).unwrap().class_descriptor(),
+            "Landroid/content/pm/ApplicationInfo;"
+        );
+        assert_eq!(env.get_object_field(application_id, "minSdkVersion").unwrap(), Value::Int(24));
+        assert_eq!(env.get_object_field(application_id, "targetSdkVersion").unwrap(), Value::Int(34));
+        let app_class_id = env.get_object_field(application_id, "className").unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(app_class_id).unwrap(), "com.stride.applicationinfo.CustomApp");
     }
 
     #[test]
