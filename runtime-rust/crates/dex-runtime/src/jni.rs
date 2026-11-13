@@ -1,9 +1,18 @@
 //! JNI native compatibility bridge and method dispatch boundary.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 use crate::types::Value;
 use crate::heap::{GcReport, ManagedHeap};
+
+
+// Process-relative monotonic clock used for Android uptime APIs. Unlike wall-clock
+// time, this source cannot jump when the device clock or time zone is adjusted.
+fn monotonic_uptime_millis() -> i64 {
+    static ORIGIN: OnceLock<Instant> = OnceLock::new();
+    ORIGIN.get_or_init(Instant::now).elapsed().as_millis().min(i64::MAX as u128) as i64
+}
 
 pub type NativeHandler = Arc<dyn Fn(&mut JniEnv, &[Value]) -> Result<Option<Value>, String> + Send + Sync>;
 
@@ -837,18 +846,13 @@ impl JniNativeRegistry {
             Ok(Some(Value::Int(i32::from(value.is_infinite()))))
         });
 
-        // android.os.SystemClock.uptimeMillis()J
+        // android.os.SystemClock.uptimeMillis()J. Android uptime is monotonic;
+        // wall-clock epoch time belongs to System.currentTimeMillis instead.
         self.register(
             "Landroid/os/SystemClock;",
             "uptimeMillis",
             "()J",
-            |_env, _args| {
-                let ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as i64)
-                    .unwrap_or(0);
-                Ok(Some(Value::Long(ms)))
-            },
+            |_env, _args| Ok(Some(Value::Long(monotonic_uptime_millis()))),
         );
 
         // android.util.Log logging bridges
@@ -1098,6 +1102,32 @@ mod tests {
         let math_handler = reg.find("Ljava/lang/Math;", "abs", "(I)I").unwrap();
         let math_res = math_handler(&mut env, &[Value::Int(-42)]).unwrap();
         assert_eq!(math_res, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn system_clock_uptime_is_monotonic_and_not_wall_clock_epoch_time() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let uptime = registry.find("Landroid/os/SystemClock;", "uptimeMillis", "()J").unwrap().clone();
+        let wall_clock = registry.find("Ljava/lang/System;", "currentTimeMillis", "()J").unwrap().clone();
+
+        let first = match uptime(&mut env, &[]).unwrap() {
+            Some(Value::Long(value)) => value,
+            other => panic!("unexpected uptime result: {:?}", other),
+        };
+        let wall = match wall_clock(&mut env, &[]).unwrap() {
+            Some(Value::Long(value)) => value,
+            other => panic!("unexpected wall-clock result: {:?}", other),
+        };
+        let second = match uptime(&mut env, &[]).unwrap() {
+            Some(Value::Long(value)) => value,
+            other => panic!("unexpected uptime result: {:?}", other),
+        };
+
+        assert!(first >= 0);
+        assert!(second >= first);
+        assert!(second < wall);
     }
 
     #[test]
