@@ -436,6 +436,27 @@ impl ManagedHeap {
 
     pub fn collect_garbage(&mut self, roots: &[u32]) -> GcReport {
         let before_count = self.objects.len();
+
+        // Public mutable object access is retained for runtime subsystems, so
+        // collection also repairs stale edges inserted outside the checked
+        // field/array setters. A dangling edge must never be returned later
+        // from a still-live owner as if it were a valid jobject.
+        let live_ids: HashSet<u32> = self.objects.keys().copied().collect();
+        for object in self.objects.values_mut() {
+            let values: Box<dyn Iterator<Item = &mut Value> + '_> = match object {
+                HeapObject::Instance(instance) => Box::new(instance.fields.values_mut()),
+                HeapObject::Array(array) => Box::new(array.elements.iter_mut()),
+                HeapObject::String(_) => continue,
+            };
+            for value in values {
+                if let Value::Object(referenced_id) = *value {
+                    if referenced_id != 0 && !live_ids.contains(&referenced_id) {
+                        *value = Value::Null;
+                    }
+                }
+            }
+        }
+
         let mut marked = HashSet::new();
         let mut queue = Vec::new();
 
@@ -563,6 +584,37 @@ mod tests {
         let report = heap.collect_garbage(&[array]);
         assert_eq!(report.objects_after, 2);
         assert!(heap.contains(child));
+    }
+
+    #[test]
+    fn collection_repairs_dangling_edges_and_preserves_cyclic_live_graphs() {
+        let mut heap = ManagedHeap::new(4096);
+        let owner = heap.allocate_instance("Ltest/Owner;").unwrap();
+        let links = heap.allocate_array("[Ljava/lang/Object;", 3).unwrap();
+        let child = heap.allocate_string("reachable-through-array").unwrap();
+
+        // Build a valid owner -> array -> child graph with a back-edge cycle.
+        heap.set_instance_field(owner, "links", Value::Object(links)).unwrap();
+        heap.set_array_element(links, 0, Value::Object(child)).unwrap();
+        heap.set_array_element(links, 1, Value::Object(owner)).unwrap();
+
+        // Exercise the public mutable escape hatch: invalid references can
+        // bypass the checked setters, so GC must sanitize them before tracing.
+        if let HeapObject::Instance(instance) = heap.get_mut(owner).unwrap() {
+            instance.fields.insert("stale".into(), Value::Object(999));
+        }
+        if let HeapObject::Array(array) = heap.get_mut(links).unwrap() {
+            array.elements[2] = Value::Object(1000);
+        }
+
+        let report = heap.collect_garbage(&[owner]);
+        assert_eq!(report.objects_after, 3);
+        assert!(heap.contains(owner));
+        assert!(heap.contains(links));
+        assert!(heap.contains(child));
+        assert_eq!(heap.get_instance_field(owner, "stale").unwrap(), Value::Null);
+        assert_eq!(heap.get_array_element(links, 2).unwrap(), Value::Null);
+        assert_eq!(heap.get_array_element(links, 1).unwrap(), Value::Object(owner));
     }
 
     #[test]
