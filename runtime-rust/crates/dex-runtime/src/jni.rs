@@ -720,7 +720,7 @@ impl<'a> JniEnv<'a> {
             let owner_id = self.new_string_utf(&info.package_name)?;
             self.set_object_field(activity_id, "name", Value::Object(name_id))?;
             self.set_object_field(activity_id, "packageName", Value::Object(owner_id))?;
-            self.set_object_field(activity_id, "exported", Value::Int(i32::from(activity.exported)))?;
+            self.set_object_field(activity_id, "exported", Value::Int(if activity.exported { 1 } else { 0 }))?;
             self.set_object_field(activity_id, "screenOrientation", Value::Int(activity.screen_orientation))?;
             self.heap.set_array_element(activities_id, index as i32, Value::Object(activity_id))
                 .map_err(|error| format!("ActivityInfo array assignment failed: {:?}", error))?;
@@ -738,7 +738,7 @@ impl<'a> JniEnv<'a> {
             let owner_id = self.new_string_utf(&info.package_name)?;
             self.set_object_field(service_id, "name", Value::Object(name_id))?;
             self.set_object_field(service_id, "packageName", Value::Object(owner_id))?;
-            self.set_object_field(service_id, "exported", Value::Int(i32::from(service.exported)))?;
+            self.set_object_field(service_id, "exported", Value::Int(if service.exported { 1 } else { 0 }))?;
             let permission_id = match service.permission.as_deref() {
                 Some(permission) => Value::Object(self.new_string_utf(permission)?),
                 None => Value::Null,
@@ -1384,6 +1384,127 @@ mod tests {
         assert_eq!(package, "com.stride.fixture");
         assert_eq!(op_package, package);
         assert!(env.set_package_name("com..invalid").is_err());
+    }
+
+    #[test]
+    fn guest_package_manager_returns_manifest_backed_current_app_package_info() {
+        let manifest = ManifestMetadata {
+            package_name: Some("com.stride.guestpm".to_owned()),
+            version_name: Some("4.2.1".to_owned()),
+            version_code: Some(421),
+            min_sdk: Some(23),
+            target_sdk: Some(35),
+            permissions: vec!["android.permission.INTERNET".to_owned()],
+            application_name: Some("com.stride.guestpm.App".to_owned()),
+            components: vec![
+                stride_axml::ManifestComponent {
+                    kind: "activity".to_owned(),
+                    name: "com.stride.guestpm.MainActivity".to_owned(),
+                    exported: Some(true),
+                    has_launcher_intent: true,
+                    screen_orientation: Some(1),
+                },
+                stride_axml::ManifestComponent {
+                    kind: "service".to_owned(),
+                    name: "com.stride.guestpm.SyncService".to_owned(),
+                    exported: Some(false),
+                    has_launcher_intent: false,
+                    screen_orientation: None,
+                },
+            ],
+            launcher_activity: Some("com.stride.guestpm.MainActivity".to_owned()),
+            screen_orientation: None,
+        };
+        let registry = JniNativeRegistry::new();
+        let get_package_manager = registry.find(
+            "Landroid/content/Context;",
+            "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+        ).unwrap().clone();
+        let get_package_info = registry.find(
+            "Landroid/content/pm/PackageManager;",
+            "getPackageInfo",
+            "(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;",
+        ).unwrap().clone();
+
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::from_manifest(&mut heap, &manifest).unwrap();
+        let manager_id = match get_package_manager(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected PackageManager result: {:?}", other),
+        };
+        let requested_name = env.new_string_utf("com.stride.guestpm").unwrap();
+        let package_info_id = match get_package_info(
+            &mut env,
+            &[Value::Object(manager_id), Value::Object(requested_name), Value::Int(0)],
+        ).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected PackageInfo result: {:?}", other),
+        };
+
+        assert_eq!(
+            env.heap.get(package_info_id).unwrap().class_descriptor(),
+            "Landroid/content/pm/PackageInfo;"
+        );
+        let package_name_id = env.get_object_field(package_info_id, "packageName").unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(package_name_id).unwrap(), "com.stride.guestpm");
+        assert_eq!(env.get_object_field(package_info_id, "versionCode").unwrap(), Value::Int(421));
+        assert_eq!(env.get_object_field(package_info_id, "longVersionCode").unwrap(), Value::Long(421));
+
+        let permissions_id = env.get_object_field(package_info_id, "requestedPermissions").unwrap().as_object().unwrap();
+        let permission_id = env.heap.get_array_element(permissions_id, 0).unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(permission_id).unwrap(), "android.permission.INTERNET");
+
+        let activities_id = env.get_object_field(package_info_id, "activities").unwrap().as_object().unwrap();
+        let activity_id = env.heap.get_array_element(activities_id, 0).unwrap().as_object().unwrap();
+        assert_eq!(env.get_object_field(activity_id, "exported").unwrap(), Value::Int(1));
+        assert_eq!(env.get_object_field(activity_id, "screenOrientation").unwrap(), Value::Int(1));
+
+        let services_id = env.get_object_field(package_info_id, "services").unwrap().as_object().unwrap();
+        let service_id = env.heap.get_array_element(services_id, 0).unwrap().as_object().unwrap();
+        assert_eq!(env.get_object_field(service_id, "exported").unwrap(), Value::Int(0));
+
+        let application_id = env.get_object_field(package_info_id, "applicationInfo").unwrap().as_object().unwrap();
+        assert_eq!(env.get_object_field(application_id, "targetSdkVersion").unwrap(), Value::Int(35));
+        let app_class_id = env.get_object_field(application_id, "className").unwrap().as_object().unwrap();
+        assert_eq!(env.get_string_utf(app_class_id).unwrap(), "com.stride.guestpm.App");
+
+        let unknown_name = env.new_string_utf("com.other.app").unwrap();
+        assert!(get_package_info(
+            &mut env,
+            &[Value::Object(manager_id), Value::Object(unknown_name), Value::Int(0)],
+        ).unwrap_err().contains("NameNotFoundException"));
+    }
+
+    #[test]
+    fn guest_package_manager_rejects_missing_metadata_and_null_arguments() {
+        let registry = JniNativeRegistry::new();
+        let get_package_manager = registry.find(
+            "Landroid/content/Context;",
+            "getPackageManager",
+            "()Landroid/content/pm/PackageManager;",
+        ).unwrap().clone();
+        let get_package_info = registry.find(
+            "Landroid/content/pm/PackageManager;",
+            "getPackageInfo",
+            "(Ljava/lang/String;J)Landroid/content/pm/PackageInfo;",
+        ).unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        env.set_package_name("com.stride.empty").unwrap();
+        let manager_id = match get_package_manager(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected PackageManager result: {:?}", other),
+        };
+        assert!(get_package_info(
+            &mut env,
+            &[Value::Object(manager_id), Value::Null, Value::Long(0)],
+        ).unwrap_err().contains("packageName is null"));
+        let requested_name = env.new_string_utf("com.stride.empty").unwrap();
+        assert!(get_package_info(
+            &mut env,
+            &[Value::Object(manager_id), Value::Object(requested_name), Value::Long(0)],
+        ).unwrap_err().contains("metadata is unavailable"));
     }
 
     #[test]
