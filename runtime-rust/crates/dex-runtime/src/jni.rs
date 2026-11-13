@@ -50,7 +50,11 @@ impl<'a> JniEnv<'a> {
 
     /// Add another local reference to an existing managed object.
     pub fn new_local_ref(&mut self, object_id: u32) -> Result<u32, String> {
-        if object_id == 0 || !self.heap.contains(object_id) {
+        // JNI NewLocalRef(NULL) is defined to return NULL.
+        if object_id == 0 {
+            return Ok(0);
+        }
+        if !self.heap.contains(object_id) {
             return Err(format!("JNI NewLocalRef received invalid object handle {object_id}"));
         }
         self.local_refs.try_reserve(1)
@@ -76,25 +80,34 @@ impl<'a> JniEnv<'a> {
 
     /// Pop the current frame and optionally preserve one result reference in its parent.
     pub fn pop_local_frame_with_result(&mut self, result: Option<u32>) -> Result<Option<u32>, String> {
-        let Some(previous_len) = self.local_frames.pop() else {
+        // Validate and reserve before changing either stack so failures are atomic.
+        let Some(previous_len) = self.local_frames.last().copied() else {
             return Err("JNI PopLocalFrame called without a pushed local frame".into());
         };
-        self.local_refs.truncate(previous_len);
-        match result {
-            Some(0) | None => Ok(None),
+        let preserved = match result {
+            Some(0) | None => None,
             Some(object_id) => {
                 if !self.heap.contains(object_id) {
                     return Err(format!("JNI PopLocalFrame received invalid result handle {object_id}"));
                 }
                 self.local_refs.try_reserve(1)
                     .map_err(|_| "JNI result local-reference allocation failed".to_owned())?;
-                self.local_refs.push(object_id);
-                Ok(Some(object_id))
+                Some(object_id)
             }
+        };
+        self.local_frames.pop();
+        self.local_refs.truncate(previous_len);
+        if let Some(object_id) = preserved {
+            self.local_refs.push(object_id);
+            Ok(Some(object_id))
+        } else {
+            Ok(None)
         }
     }
 
     pub fn new_string_utf(&mut self, text: &str) -> Result<u32, String> {
+        self.local_refs.try_reserve(1)
+            .map_err(|_| "JNI string local-reference allocation failed".to_owned())?;
         let id = self.heap.allocate_string(text).map_err(|e| format!("{:?}", e))?;
         self.local_refs.push(id);
         Ok(id)
@@ -109,6 +122,8 @@ impl<'a> JniEnv<'a> {
     }
 
     pub fn new_int_array(&mut self, length: i32) -> Result<u32, String> {
+        self.local_refs.try_reserve(1)
+            .map_err(|_| "JNI array local-reference allocation failed".to_owned())?;
         let id = self.heap.allocate_array("[I", length).map_err(|e| format!("{:?}", e))?;
         self.local_refs.push(id);
         Ok(id)
@@ -125,6 +140,8 @@ impl<'a> JniEnv<'a> {
     }
 
     pub fn new_byte_array(&mut self, length: i32) -> Result<u32, String> {
+        self.local_refs.try_reserve(1)
+            .map_err(|_| "JNI array local-reference allocation failed".to_owned())?;
         let id = self.heap.allocate_array("[B", length).map_err(|e| format!("{:?}", e))?;
         self.local_refs.push(id);
         Ok(id)
