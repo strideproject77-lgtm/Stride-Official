@@ -338,8 +338,14 @@ impl AppClassLoader {
         let state = self.classes.get(class_descriptor).map(|c| c.init_state);
         match state {
             Some(ClassInitState::Initialized) | Some(ClassInitState::Initializing) => return Ok(()),
+            Some(ClassInitState::Error) => {
+                return Err(format!(
+                    "Class initialization previously failed; refusing unsafe retry: {}",
+                    class_descriptor
+                ));
+            }
             None => return Ok(()), // External / framework class
-            _ => {}
+            Some(ClassInitState::NotInitialized) => {}
         }
 
         if let Some(c) = self.classes.get_mut(class_descriptor) {
@@ -377,7 +383,20 @@ impl AppClassLoader {
                 vm.attach_method_resolver(&inventory.method_references, &method_lookup);
             }
             vm.attach_static_fields(static_fields);
-            let report = vm.execute_method(runtime_method_id, &[], 50_000)?;
+            let execution_result = vm.execute_method(runtime_method_id, &[], 50_000);
+            drop(vm);
+            let report = match execution_result {
+                Ok(report) => report,
+                Err(error) => {
+                    if let Some(class) = self.classes.get_mut(class_descriptor) {
+                        class.init_state = ClassInitState::Error;
+                    }
+                    return Err(format!(
+                        "Class initializer execution failed for {}: {}",
+                        class_descriptor, error
+                    ));
+                }
+            };
             match report.stop_reason {
                 ExecutionStopReason::UncaughtException(ex) => {
                     if let Some(class) = self.classes.get_mut(class_descriptor) {
@@ -493,5 +512,64 @@ mod diagnostics_tests {
         let report = diagnostics.export_text();
         assert!(!report.contains("DEX_CODE_ITEM_REJECTED"), "{report}");
     }
+    #[test]
+    fn failed_class_initializer_is_sticky_and_never_reported_as_success() {
+        let descriptor = "Ltest/FailedInitializer;";
+        let mut loader = AppClassLoader::new();
+        loader.classes.insert(descriptor.into(), LoadedClass {
+            descriptor: descriptor.into(),
+            super_descriptor: None,
+            interface_descriptors: Vec::new(),
+            access_flags: 0,
+            init_state: ClassInitState::NotInitialized,
+            static_fields: HashMap::new(),
+            instance_field_names: Vec::new(),
+            direct_methods: vec![1],
+            virtual_methods: Vec::new(),
+        });
+        loader.method_lookup.insert(
+            (descriptor.into(), "<clinit>".into(), "()V".into()),
+            1,
+        );
+        loader.methods_by_id.insert(1, LoadedMethod {
+            method_id: 1,
+            class_descriptor: descriptor.into(),
+            name: "<clinit>".into(),
+            prototype: "()V".into(),
+            access_flags: 0x0008,
+            is_direct: true,
+            code: Some(MethodCode {
+                class_descriptor: descriptor.into(),
+                name: "<clinit>".into(),
+                prototype: "()V".into(),
+                code_units: vec![0x0073], // unused opcode: interpreter must reject it
+                registers_size: 0,
+                ins_size: 0,
+                try_blocks: Vec::new(),
+            }),
+        });
+
+        let mut heap = ManagedHeap::new(1024 * 1024);
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let mut static_fields = HashMap::new();
+        let strings = Vec::new();
+
+        let first_error = loader.initialize_class(
+            descriptor, &mut heap, &mut hierarchy, &mut monitors, &mut jni,
+            &mut static_fields, &strings,
+        ).expect_err("invalid class initializer must fail");
+        assert!(first_error.contains("Class initializer execution failed"));
+        assert_eq!(loader.classes[descriptor].init_state, ClassInitState::Error);
+
+        let retry_error = loader.initialize_class(
+            descriptor, &mut heap, &mut hierarchy, &mut monitors, &mut jni,
+            &mut static_fields, &strings,
+        ).expect_err("a failed initializer must not be silently treated as initialized");
+        assert!(retry_error.contains("previously failed"));
+        assert_eq!(loader.classes[descriptor].init_state, ClassInitState::Error);
+    }
+
 
 }
