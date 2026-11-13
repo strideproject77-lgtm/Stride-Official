@@ -1225,6 +1225,13 @@ private struct APKDetailSheet: View {
                                 Text("Unified Diagnostics").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                                 Text("\(diagnostics.entries.count) retained events · \(diagnostics.issueCount) errors")
                                     .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                                HStack(spacing: 9) {
+                                    Label("\(diagnostics.entries.filter { $0.severity == .fatal }.count) fatal", systemImage: "exclamationmark.octagon.fill")
+                                        .foregroundStyle(.red)
+                                    Label("\(diagnostics.entries.filter { $0.severity == .warning }.count) warnings", systemImage: "exclamationmark.triangle.fill")
+                                        .foregroundStyle(.orange)
+                                }
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
                             }
                             Spacer()
                             Button {
