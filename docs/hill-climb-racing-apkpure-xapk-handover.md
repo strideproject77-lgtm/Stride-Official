@@ -308,3 +308,9 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 - Added class-scoped UnregisterNatives state handling and duplicate-entry rejection inside one RegisterNatives table. Registration remains staged atomically.
 - These are validation/state-management foundations, not a real guest JNIEnv/JavaVM function table. Guest-callable JNI trampolines, callback dispatch, managed-object/reference conversion and native-to-managed callbacks remain unimplemented.
 - Regression tests were added but not run. No workflow or IPA build was started.
+
+
+### JNI runtime progress (implementation only)
+- The JNI environment now has checked local-frame reservation, local-reference creation/deletion, managed-heap root snapshots, and `PopLocalFrame(result)`-style result preservation.
+- This reduces reference-lifetime gaps for future native callbacks, but does not yet provide guest-callable `JNIEnv*`/`JavaVM*` tables or native callback trampolines. Global/weak references and automatic root handoff remain outstanding.
+- New regression tests are present but have not been run.
