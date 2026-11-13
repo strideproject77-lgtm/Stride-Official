@@ -145,6 +145,8 @@ struct ContentView: View {
                         .font(.system(size: 13, weight: .medium))
                         .tint(accent)
                         .autocorrectionDisabled()
+                        .accessibilityLabel("Search your imported Android apps")
+                        .accessibilityHint("Filters the Home library as you type")
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
@@ -283,6 +285,16 @@ struct ContentView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(isImporting)
+                        } else {
+                            Button { searchText = "" } label: {
+                                Label("Clear search", systemImage: "xmark.circle.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(accent)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(accent.opacity(0.10), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -336,11 +348,25 @@ struct ContentView: View {
                     if library.packages.isEmpty {
                         emptyState
                     } else {
-                        Text("No apps match “\(searchText)”.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 28)
+                        VStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 22, weight: .medium))
+                                .foregroundStyle(accent)
+                            Text("No apps match “\(searchText)”.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(muted)
+                            Button { searchText = "" } label: {
+                                Label("Clear search", systemImage: "xmark.circle.fill")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(accent)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 10)
+                                    .background(accent.opacity(0.10), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 28)
                     }
                 } else {
                     appCollection(filteredPackages)
