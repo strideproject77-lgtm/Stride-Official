@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::types::Value;
-use crate::heap::ManagedHeap;
+use crate::heap::{GcReport, ManagedHeap};
 
 pub type NativeHandler = Arc<dyn Fn(&mut JniEnv, &[Value]) -> Result<Option<Value>, String> + Send + Sync>;
 
@@ -500,7 +500,23 @@ impl<'a> JniEnv<'a> {
     pub fn all_strong_reference_roots(&self) -> Vec<u32> {
         let mut roots = self.strong_reference_roots();
         roots.extend(self.guest_references.strong_roots(self.heap));
+        roots.sort_unstable();
+        roots.dedup();
         roots
+    }
+
+    /// Run a managed-heap collection with every live JNI strong reference
+    /// included automatically. Caller-owned VM/register/stack roots are passed
+    /// separately; weak JNI references are cleared after the sweep.
+    pub fn collect_garbage(&mut self, additional_roots: &[u32]) -> GcReport {
+        let mut roots = additional_roots.to_vec();
+        roots.extend(self.all_strong_reference_roots());
+        roots.sort_unstable();
+        roots.dedup();
+
+        let report = self.heap.collect_garbage(&roots);
+        self.guest_references.prune_collected_weak_refs(self.heap);
+        report
     }
 
     /// Pop one guest local frame, preserving its result as a fresh parent-frame handle.
@@ -1266,6 +1282,44 @@ mod tests {
         assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 1);
         assert_eq!(env.guest_references.resolve(weak).unwrap(), None);
         env.guest_references.delete_weak_global(weak).unwrap();
+    }
+
+    #[test]
+    fn jni_aware_collection_keeps_all_strong_roots_and_clears_weak_refs() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+
+        let local_root = env.new_string_utf("local-root").unwrap();
+        let global_root = env.heap.allocate_string("global-root").unwrap();
+        env.new_global_ref(global_root).unwrap();
+        let guest_global_root = env.heap.allocate_string("guest-global-root").unwrap();
+        env.new_guest_global_ref(guest_global_root).unwrap();
+        let weak_only = env.heap.allocate_string("weak-only").unwrap();
+        let weak = env.new_guest_weak_global_ref(weak_only).unwrap();
+        let caller_root = env.heap.allocate_string("caller-root").unwrap();
+
+        let report = env.collect_garbage(&[caller_root]);
+
+        assert_eq!(report.objects_before, 5);
+        assert_eq!(report.objects_after, 4);
+        assert!(env.heap.contains(local_root));
+        assert!(env.heap.contains(global_root));
+        assert!(env.heap.contains(guest_global_root));
+        assert!(env.heap.contains(caller_root));
+        assert!(!env.heap.contains(weak_only));
+        assert_eq!(env.resolve_guest_ref(weak).unwrap(), None);
+        assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 0);
+    }
+
+    #[test]
+    fn strong_jni_root_snapshot_is_sorted_and_deduplicated() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let object = env.new_string_utf("shared-root").unwrap();
+        env.new_global_ref(object).unwrap();
+        env.new_guest_global_ref(object).unwrap();
+
+        assert_eq!(env.all_strong_reference_roots(), vec![object]);
     }
 
     #[test]
