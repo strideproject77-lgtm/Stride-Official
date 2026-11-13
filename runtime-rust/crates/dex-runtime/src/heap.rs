@@ -476,6 +476,12 @@ impl ManagedHeap {
             self.allocated_bytes = self.allocated_bytes.saturating_sub(size);
         }
 
+        // Interned strings are not GC roots. Remove cache entries whose
+        // referents were reclaimed so the intern table does not grow forever
+        // with stale handles from short-lived strings.
+        let live_objects = &self.objects;
+        self.interned_strings.retain(|_, object_id| live_objects.contains_key(object_id));
+
         self.gc_runs += 1;
         self.total_reclaimed_bytes += reclaimed_bytes;
 
@@ -569,4 +575,21 @@ mod tests {
         assert_eq!(heap.get_array_element(dst, 2).unwrap(), Value::Int(4));
         assert_eq!(heap.get_array_element(dst, 3).unwrap(), Value::Int(0));
     }
+    #[test]
+    fn garbage_collection_prunes_stale_interned_string_entries() {
+        let mut heap = ManagedHeap::new(4096);
+        let first = heap.intern_string("temporary-interned-value").unwrap();
+        assert!(heap.contains(first));
+        assert!(heap.interned_strings.contains_key("temporary-interned-value"));
+
+        let report = heap.collect_garbage(&[]);
+        assert_eq!(report.objects_after, 0);
+        assert!(!heap.contains(first));
+        assert!(!heap.interned_strings.contains_key("temporary-interned-value"));
+
+        let second = heap.intern_string("temporary-interned-value").unwrap();
+        assert_ne!(first, second);
+        assert!(heap.contains(second));
+    }
+
 }
