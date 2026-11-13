@@ -823,7 +823,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 23 — Guest Uri parsing and Intent data/MIME bridge
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (consolidated Rust workspace validation passed).**
 
 - Added guest-managed android.net.Uri StringUri objects and Uri.parse(String).
 - Added toString(), getScheme(), getAuthority(), getHost(), getPath(), getQuery(), getFragment(), isAbsolute() and isHierarchical().
@@ -834,12 +834,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI: Runtime Status now lists URI parsing and Intent data/MIME support separately.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: no URI permission grants, percent-decoding/encoding helpers, Parcelable serialization, ContentResolver or provider dispatch.
-- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43486129688 on commit `839ebf34f9a0d024d46a56d8b3ef066ffb9f6027`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 24 — Bundle key lifecycle and typed defaults
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (consolidated Rust workspace validation passed).**
 
 - Added ManagedHeap.remove_instance_field() and deterministic instance_field_names() support.
 - Added Bundle.containsKey(), remove(), clear(), size(), isEmpty(), and getString/getInt overloads with caller-supplied defaults.
@@ -850,12 +850,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI: Runtime Status now surfaces Bundle lifecycle management as a separate capability.
 - Files: runtime-rust/crates/dex-runtime/src/heap.rs, runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: primitive/object arrays, nested Bundles, Parcelable values and Android Parcel wire format remain unsupported.
-- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43486129688 on commit `839ebf34f9a0d024d46a56d8b3ef066ffb9f6027`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 25 — Framework Intent data/type and filter semantics
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (consolidated Rust workspace validation passed).**
 
 - Extended the typed framework Intent model with MIME type metadata.
 - Added set_data(), set_type(), set_data_and_type() and get_scheme() with Android-compatible data/type clearing behavior.
@@ -866,16 +866,16 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI: Runtime Status now distinguishes framework Intent filter behavior from guest JNI Intent mutation.
 - Files: runtime-rust/crates/dex-runtime/src/framework.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: no full Android resolver, MIME database, URI grant matching, IntentSender, chooser, cross-package dispatch or host activity navigation.
-- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43486129688 on commit `839ebf34f9a0d024d46a56d8b3ef066ffb9f6027`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Latest validation checkpoint — 2026-11-13
 
-- Previous consolidated workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`: Rust workspace tests passed for Phases 16–22.
-- Phases 23–25 are implemented in the current feature-branch working revision and require the next single consolidated Rust workspace test pass.
-- The unsigned iOS IPA job was skipped in the previous validation. No IPA was built, signed or exported.
+- Final consolidated workflow #43486129688 on commit `839ebf34f9a0d024d46a56d8b3ef066ffb9f6027`: complete Rust workspace test suite **passed** (265 tests across the workspace; zero failures).
+- Phases 23–25 are included in that validated source revision; Phases 16–25 are now recorded as Completed.
+- The workflow's unsigned iOS IPA job was **skipped**. No IPA was built, signed or exported.
 - Swift UI compilation remains unverified because no Xcode/IPA build was run.
-- All work remains on `feat/dex-class-method-loader`; `main` remains untouched. The branch has substantial divergence from `main`, so no merge is attempted without a separate reconciliation and review.
+- All implementation changes remain on `feat/dex-class-method-loader`; `main` is untouched. The branch has substantial divergence from `main`, so no merge was attempted without a separate reconciliation and review.
 - Do not build, sign or export an IPA without explicit user authorization.
 
 ### Next small implementation batches
