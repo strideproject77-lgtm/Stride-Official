@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use crate::types::Value;
 use crate::heap::{GcReport, ManagedHeap};
+use stride_axml::ManifestMetadata;
 
 
 // Process-relative monotonic clock used for Android uptime APIs. Unlike wall-clock
@@ -346,6 +347,19 @@ impl<'a> JniEnv<'a> {
             local_frames: Vec::new(),
             package_name: None,
         }
+    }
+
+    /// Create a JNI environment using package identity from parsed AndroidManifest.xml metadata.
+    /// Fails closed when the manifest has no package attribute or contains an invalid value.
+    pub fn from_manifest(
+        heap: &'a mut ManagedHeap,
+        manifest: &ManifestMetadata,
+    ) -> Result<Self, String> {
+        let package_name = manifest.package_name.as_deref()
+            .ok_or("Android manifest is missing its package identity")?;
+        let mut env = Self::new(heap);
+        env.set_package_name(package_name)?;
+        Ok(env)
     }
 
     /// Configure the package identity exposed by Android Context bridges.
@@ -1144,6 +1158,50 @@ mod tests {
         let math_handler = reg.find("Ljava/lang/Math;", "abs", "(I)I").unwrap();
         let math_res = math_handler(&mut env, &[Value::Int(-42)]).unwrap();
         assert_eq!(math_res, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn jni_environment_bootstraps_context_identity_from_parsed_manifest() {
+        let manifest = ManifestMetadata {
+            package_name: Some("com.stride.manifestfixture".to_owned()),
+            version_name: None,
+            version_code: None,
+            min_sdk: Some(23),
+            target_sdk: Some(35),
+            permissions: Vec::new(),
+            application_name: None,
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        };
+        let registry = JniNativeRegistry::new();
+        let get_package_name = registry.find(
+            "Landroid/content/Context;",
+            "getPackageName",
+            "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::from_manifest(&mut heap, &manifest).unwrap();
+        let package = match get_package_name(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => env.get_string_utf(id).unwrap().to_owned(),
+            other => panic!("unexpected package name result: {:?}", other),
+        };
+        assert_eq!(package, "com.stride.manifestfixture");
+
+        let missing_package = ManifestMetadata {
+            package_name: None,
+            version_name: None,
+            version_code: None,
+            min_sdk: None,
+            target_sdk: None,
+            permissions: Vec::new(),
+            application_name: None,
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        };
+        assert!(JniEnv::from_manifest(&mut heap, &missing_package)
+            .unwrap_err().contains("missing its package identity"));
     }
 
     #[test]
