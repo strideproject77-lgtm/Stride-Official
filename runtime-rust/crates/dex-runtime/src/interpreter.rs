@@ -1424,6 +1424,10 @@ impl<'a> ArtVm<'a> {
 
                     let runtime_method_id = dispatched_method_id.expect("target method implies runtime ID");
                     let remaining = step_limit.saturating_sub(steps);
+                    // A child call may append frames while unwinding an exception.
+                    // Remember the caller's trace boundary so a handled exception
+                    // cannot leak its frames into a later, unrelated exception.
+                    let trace_depth_before_call = trace.frames.len();
                     let sub_report = self.execute_internal(runtime_method_id, &args, remaining, call_depth + 1, trace)
                         .map_err(|error| format!(
                             "Call site {}->{}{} at PC {}: {}",
@@ -1439,7 +1443,6 @@ impl<'a> ArtVm<'a> {
                             pending_result = None;
                         }
                         ExecutionStopReason::UncaughtException(mut uncaught_ex) => {
-                            trace.push_frame(&method_class, &method_name, &method_proto, pc);
                             let mut caught_pc = None;
                             for block in &try_blocks {
                                 if block.covers(pc) {
@@ -1450,10 +1453,15 @@ impl<'a> ArtVm<'a> {
                                 }
                             }
                             if let Some(target) = caught_pc {
+                                // This exception is handled here. Discard only the
+                                // frames appended by this child call; retain any
+                                // frames belonging to an outer, still-unwinding call.
+                                trace.frames.truncate(trace_depth_before_call);
                                 pending_exception = Some(uncaught_ex.exception_object);
                                 pc = target;
                                 continue;
                             } else {
+                                trace.push_frame(&method_class, &method_name, &method_proto, pc);
                                 uncaught_ex.stack_trace = trace.clone();
                                 return Ok(InterpreterReport {
                                     stop_reason: ExecutionStopReason::UncaughtException(uncaught_ex),
@@ -1893,6 +1901,77 @@ mod tests {
             ExecutionStopReason::ReturnedValue(Value::Int(2)),
             "invoke-virtual must call Child.value(), not Base.value()",
         );
+    }
+
+    #[test]
+    fn caught_child_exception_frames_do_not_leak_into_later_uncaught_trace() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut child = crate::hierarchy::RuntimeClass::new(
+            "Ltest/Child;", Some("Ljava/lang/Object;"),
+        );
+        child.register_method_with_flags("fail", "()V", 2, true, 0x0009);
+        hierarchy.register_class(child);
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "run".into(),
+                prototype: "()V".into(),
+                // invoke-static Child.fail(); catch it; then throw a new exception.
+                code_units: vec![
+                    0x0071, 0x0000, 0x0000,
+                    0x0022, 0x0000, 0x0027,
+                    0x010d,
+                    0x0022, 0x0000, 0x0027,
+                ],
+                registers_size: 2,
+                ins_size: 0,
+                try_blocks: vec![TryBlock {
+                    start_pc: 0,
+                    end_pc: 3,
+                    handlers: vec![crate::exceptions::CatchHandler {
+                        catch_type: None,
+                        target_pc: 6,
+                    }],
+                }],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/Child;".into(),
+                name: "fail".into(),
+                prototype: "()V".into(),
+                code_units: vec![0x0022, 0x0001, 0x0027],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            }),
+        ]);
+        let types = vec!["Ltest/SecondException;".to_string(), "Ltest/FirstException;".to_string()];
+        let fields = Vec::new();
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ltest/Child;".into(),
+            name: "fail".into(),
+            prototype: "()V".into(),
+        }];
+        let lookup = HashMap::from([
+            (("Ltest/Child;".into(), "fail".into(), "()V".into()), 2u32),
+        ]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[], 32).expect("caller should finish exception flow");
+        let exception = match report.stop_reason {
+            ExecutionStopReason::UncaughtException(exception) => exception,
+            other => panic!("expected second exception to escape, got {:?}", other),
+        };
+        assert_eq!(exception.class_descriptor, "Ltest/SecondException;");
+        assert_eq!(exception.stack_trace.frames.len(), 1);
+        assert_eq!(exception.stack_trace.frames[0].class_descriptor, "Ltest/Caller;");
+        assert_eq!(exception.stack_trace.frames[0].method_name, "run");
+        assert_eq!(exception.stack_trace.frames[0].code_unit_offset, 9);
     }
 
     #[test]
