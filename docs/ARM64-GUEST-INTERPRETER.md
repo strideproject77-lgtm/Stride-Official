@@ -89,3 +89,10 @@ in this implementation-only batch.
 - Added class-scoped UnregisterNatives state handling and duplicate-entry rejection inside one RegisterNatives table. Registration remains staged atomically.
 - These are validation/state-management foundations, not a real guest JNIEnv/JavaVM function table. Guest-callable JNI trampolines, callback dispatch, managed-object/reference conversion and native-to-managed callbacks remain unimplemented.
 - Regression tests were added but not run. No workflow or IPA build was started.
+
+
+### JNI local-reference lifecycle groundwork
+- Added checked local-frame reservation, local-reference creation/deletion, and a root snapshot for managed-heap GC integration.
+- Added result-preserving local-frame pop semantics so one returned reference can survive while temporary frame references are released from the JNI root set.
+- Invalid handles and frame underflow are reported explicitly. This remains an internal Rust-side JNI environment API: guest `JNIEnv*` function-table callbacks, global references, weak references, and automatic GC-root wiring from native guest execution are still not implemented.
+- Regression tests were added but intentionally not run in this implementation-only batch.
