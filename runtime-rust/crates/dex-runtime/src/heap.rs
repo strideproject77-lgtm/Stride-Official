@@ -442,18 +442,26 @@ impl ManagedHeap {
         // field/array setters. A dangling edge must never be returned later
         // from a still-live owner as if it were a valid jobject.
         let live_ids: HashSet<u32> = self.objects.keys().copied().collect();
+        let clear_stale_edge = |value: &mut Value| {
+            if let Value::Object(referenced_id) = *value {
+                if referenced_id != 0 && !live_ids.contains(&referenced_id) {
+                    *value = Value::Null;
+                }
+            }
+        };
         for object in self.objects.values_mut() {
-            let values: Box<dyn Iterator<Item = &mut Value> + '_> = match object {
-                HeapObject::Instance(instance) => Box::new(instance.fields.values_mut()),
-                HeapObject::Array(array) => Box::new(array.elements.iter_mut()),
-                HeapObject::String(_) => continue,
-            };
-            for value in values {
-                if let Value::Object(referenced_id) = *value {
-                    if referenced_id != 0 && !live_ids.contains(&referenced_id) {
-                        *value = Value::Null;
+            match object {
+                HeapObject::Instance(instance) => {
+                    for value in instance.fields.values_mut() {
+                        clear_stale_edge(value);
                     }
                 }
+                HeapObject::Array(array) => {
+                    for value in array.elements.iter_mut() {
+                        clear_stale_edge(value);
+                    }
+                }
+                HeapObject::String(_) => {}
             }
         }
 
