@@ -74,7 +74,8 @@ impl JniReferenceTable {
 
     pub fn resolve(&self, handle: u64) -> Result<Option<u32>, String> {
         if handle == 0 { return Ok(None); }
-        self.entries.get(&handle).map(|entry| Some(entry.object_id))
+        self.entries.get(&handle)
+            .map(|entry| if entry.object_id == 0 { None } else { Some(entry.object_id) })
             .ok_or_else(|| format!("JNI opaque reference handle {handle} is invalid"))
     }
 
@@ -149,15 +150,20 @@ impl JniReferenceTable {
         }
     }
 
-    /// Remove weak references whose referents are no longer live after collection.
+    /// Clear weak referents reclaimed by GC while keeping their JNI handles valid.
+    /// A cleared weak reference resolves as NULL and can still be deleted normally.
     pub fn prune_collected_weak_refs(&mut self, heap: &ManagedHeap) -> usize {
-        let dead: Vec<u64> = self.entries.iter().filter_map(|(handle, entry)| {
-            (entry.kind == GuestReferenceKind::WeakGlobal && !heap.contains(entry.object_id))
-                .then_some(*handle)
-        }).collect();
-        let count = dead.len();
-        for handle in dead { self.entries.remove(&handle); }
-        count
+        let mut cleared = 0;
+        for entry in self.entries.values_mut() {
+            if entry.kind == GuestReferenceKind::WeakGlobal
+                && entry.object_id != 0
+                && !heap.contains(entry.object_id)
+            {
+                entry.object_id = 0;
+                cleared += 1;
+            }
+        }
+        cleared
     }
 
     pub fn strong_roots(&self, heap: &ManagedHeap) -> Vec<u32> {
@@ -1124,7 +1130,8 @@ mod tests {
         let report = env.heap.collect_garbage(&[]);
         assert_eq!(report.objects_after, 0);
         assert_eq!(env.guest_references.prune_collected_weak_refs(env.heap), 1);
-        assert!(env.guest_references.resolve(weak).is_err());
+        assert_eq!(env.guest_references.resolve(weak).unwrap(), None);
+        env.guest_references.delete_weak_global(weak).unwrap();
     }
 
     #[test]
