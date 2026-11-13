@@ -196,6 +196,13 @@ impl ManagedHeap {
     }
 
     pub fn set_instance_field(&mut self, object_id: u32, field_name: &str, value: Value) -> Result<(), HeapError> {
+        // Never allow a dangling object handle into the object graph: GC traces
+        // these values as strong edges, and reads must not expose reclaimed IDs.
+        if let Value::Object(referenced_id) = value {
+            if referenced_id != 0 && !self.contains(referenced_id) {
+                return Err(HeapError::InvalidHandle(referenced_id));
+            }
+        }
         let obj = self.get_mut(object_id)?;
         match obj {
             HeapObject::Instance(inst) => {
@@ -278,23 +285,26 @@ impl ManagedHeap {
     }
 
     pub fn set_array_element(&mut self, array_id: u32, index: i32, value: Value) -> Result<(), HeapError> {
-        let obj = self.get_mut(array_id)?;
-        match obj {
-            HeapObject::Array(arr) => {
-                if index < 0 || (index as usize) >= arr.elements.len() {
-                    return Err(HeapError::ArrayIndexOutOfBounds {
-                        index,
-                        length: arr.elements.len(),
-                    });
-                }
-                arr.elements[index as usize] = value;
-                Ok(())
-            }
-            _ => Err(HeapError::TypeMismatch {
+        let array_len = match self.get(array_id)? {
+            HeapObject::Array(arr) => arr.elements.len(),
+            other => return Err(HeapError::TypeMismatch {
                 expected: "ArrayObject".into(),
-                actual: obj.class_descriptor().into(),
+                actual: other.class_descriptor().into(),
             }),
+        };
+        if index < 0 || (index as usize) >= array_len {
+            return Err(HeapError::ArrayIndexOutOfBounds { index, length: array_len });
         }
+        // Validate reference edges before mutating the array so failed writes
+        // leave the previous element intact.
+        if let Value::Object(referenced_id) = value {
+            if referenced_id != 0 && !self.contains(referenced_id) {
+                return Err(HeapError::InvalidHandle(referenced_id));
+            }
+        }
+        let HeapObject::Array(arr) = self.get_mut(array_id)? else { unreachable!("array type checked above") };
+        arr.elements[index as usize] = value;
+        Ok(())
     }
 
     // --- String Allocation and Operations ---
@@ -517,6 +527,42 @@ mod tests {
         assert!(heap.contains(s1));
         assert!(!heap.contains(s2));
         assert!(!heap.contains(arr));
+    }
+
+    #[test]
+    fn instance_fields_reject_dangling_object_references_without_mutation() {
+        let mut heap = ManagedHeap::new(4096);
+        let owner = heap.allocate_instance("Ltest/Owner;").unwrap();
+        let child = heap.allocate_string("live-child").unwrap();
+        heap.set_instance_field(owner, "child", Value::Object(child)).unwrap();
+
+        assert_eq!(
+            heap.set_instance_field(owner, "bad", Value::Object(999)),
+            Err(HeapError::InvalidHandle(999))
+        );
+        assert_eq!(heap.get_instance_field(owner, "bad").unwrap(), Value::Int(0));
+
+        let report = heap.collect_garbage(&[owner]);
+        assert_eq!(report.objects_after, 2);
+        assert!(heap.contains(child));
+    }
+
+    #[test]
+    fn reference_arrays_reject_dangling_handles_and_keep_live_edges() {
+        let mut heap = ManagedHeap::new(4096);
+        let array = heap.allocate_array("[Ljava/lang/Object;", 1).unwrap();
+        let child = heap.allocate_string("array-child").unwrap();
+        heap.set_array_element(array, 0, Value::Object(child)).unwrap();
+
+        assert_eq!(
+            heap.set_array_element(array, 0, Value::Object(999)),
+            Err(HeapError::InvalidHandle(999))
+        );
+        assert_eq!(heap.get_array_element(array, 0).unwrap(), Value::Object(child));
+
+        let report = heap.collect_garbage(&[array]);
+        assert_eq!(report.objects_after, 2);
+        assert!(heap.contains(child));
     }
 
     #[test]
