@@ -18,6 +18,8 @@ pub struct NativeMethodKey {
 pub struct JniEnv<'a> {
     pub heap: &'a mut ManagedHeap,
     pub local_refs: Vec<u32>,
+    /// Strong JNI global references, retained independently of local frames.
+    pub global_refs: Vec<u32>,
     pub local_frames: Vec<usize>,
 }
 
@@ -26,6 +28,7 @@ impl<'a> JniEnv<'a> {
         Self {
             heap,
             local_refs: Vec::new(),
+            global_refs: Vec::new(),
             local_frames: Vec::new(),
         }
     }
@@ -76,6 +79,44 @@ impl<'a> JniEnv<'a> {
     /// Return the handles that must be treated as JNI local GC roots.
     pub fn local_reference_roots(&self) -> Vec<u32> {
         self.local_refs.iter().copied().filter(|&id| id != 0 && self.heap.contains(id)).collect()
+    }
+
+    /// Create a strong global reference that survives local-frame pops.
+    pub fn new_global_ref(&mut self, object_id: u32) -> Result<u32, String> {
+        if object_id == 0 {
+            return Ok(0);
+        }
+        if !self.heap.contains(object_id) {
+            return Err(format!("JNI NewGlobalRef received invalid object handle {object_id}"));
+        }
+        self.global_refs.try_reserve(1)
+            .map_err(|_| "JNI global-reference allocation failed".to_owned())?;
+        self.global_refs.push(object_id);
+        Ok(object_id)
+    }
+
+    /// Delete one strong global reference without freeing the managed object.
+    pub fn delete_global_ref(&mut self, object_id: u32) -> Result<(), String> {
+        if object_id == 0 {
+            return Ok(());
+        }
+        let Some(index) = self.global_refs.iter().rposition(|&id| id == object_id) else {
+            return Err(format!("JNI DeleteGlobalRef received unknown global reference {object_id}"));
+        };
+        self.global_refs.remove(index);
+        Ok(())
+    }
+
+    /// Snapshot strong global roots for the managed heap collector.
+    pub fn global_reference_roots(&self) -> Vec<u32> {
+        self.global_refs.iter().copied().filter(|&id| id != 0 && self.heap.contains(id)).collect()
+    }
+
+    /// Snapshot both local and global strong JNI roots for a GC cycle.
+    pub fn strong_reference_roots(&self) -> Vec<u32> {
+        let mut roots = self.local_reference_roots();
+        roots.extend(self.global_reference_roots());
+        roots
     }
 
     /// Pop the current frame and optionally preserve one result reference in its parent.
@@ -749,6 +790,25 @@ mod tests {
         assert_eq!(env.new_local_ref(0).unwrap(), 0);
         assert!(env.local_refs.is_empty());
         assert!(env.delete_local_ref(0).is_ok());
+    }
+
+    #[test]
+    fn global_references_survive_local_frame_pop_and_are_gc_roots() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let global = env.new_string_utf("global").unwrap();
+        env.new_global_ref(global).unwrap();
+        env.try_push_local_frame(2).unwrap();
+        let temporary = env.new_string_utf("temporary").unwrap();
+        env.pop_local_frame_with_result(None).unwrap();
+        assert_eq!(env.local_refs, vec![global]);
+        assert_eq!(env.global_reference_roots(), vec![global]);
+        assert_eq!(env.strong_reference_roots(), vec![global]);
+        env.delete_local_ref(global).unwrap();
+        assert_eq!(env.strong_reference_roots(), vec![global]);
+        env.delete_global_ref(global).unwrap();
+        assert!(env.strong_reference_roots().is_empty());
+        assert!(env.heap.contains(temporary));
     }
 
     #[test]
