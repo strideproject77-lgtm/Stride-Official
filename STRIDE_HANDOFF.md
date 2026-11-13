@@ -429,6 +429,8 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Scope is deliberately honest: this is Rust-side JNI groundwork, not a guest `JNIEnv*` function table, global/weak reference implementation, or automatic native-to-GC root integration.
 
 ### JNI failure-safety refinement
+
+- Added strong global-reference create/delete and local+global strong-root snapshots; weak globals and automatic GC integration remain outstanding.
 - `PopLocalFrame(result)` validates and reserves before changing frame/reference stacks, preventing partial state changes on failure.
 - String/int-array/byte-array creation reserves local-reference capacity before heap allocation; null local-reference operations follow JNI behavior.
 - Added/updated regression coverage only; tests remain deferred to the one final pass.
