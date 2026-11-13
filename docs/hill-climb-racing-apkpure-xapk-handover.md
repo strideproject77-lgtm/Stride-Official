@@ -329,3 +329,10 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 - Made result-preserving frame pop atomic on invalid handles or reservation failure; the active frame remains intact when validation fails.
 - Reserve local-reference capacity before creating strings/int/byte arrays, and accept null in NewLocalRef/DeleteLocalRef according to JNI semantics.
 - Regression coverage was updated/added; not run yet. Still no guest-callable JNI function table, global/weak references, or automatic GC root handoff.
+
+
+## Latest JNI ABI implementation batch (source only)
+
+Added `JniAbiFunctionTable` in `runtime-rust/crates/dex-runtime/src/jni.rs` and exported it from the crate root. It provides checked guest function-address installation, slot validation, AArch64 little-endian pointer-table serialization, and the environment-cell pointer encoding required by the C ABI. Added stable slot constants for the JNI native-interface prefix (0–26) and JavaVM invocation interface (3–7).
+
+**Important boundary:** this is guest ABI layout groundwork, not a live JNI bridge. No callback trampoline is generated, no `JNIEnv*` is installed into a running guest image, and no guest-callable function slots are populated by this batch. Actual HCR startup remains blocked on callback dispatch, shared cross-library guest memory/calls, Bionic pthread/TLS, and EGL/GLES2 integration. Tests remain intentionally deferred to the single final pass; no IPA/workflow was run.
