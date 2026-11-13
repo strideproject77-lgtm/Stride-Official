@@ -18,7 +18,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Phase 5 — Preserve DEX method access flags during hierarchy linking: **implementation complete**. The loader carries original DEX flags into `ClassHierarchy`; regressions cover abstract interface redeclarations plus private/static declarations through the loader path.
 - Phase 6 — DEX invoke-kind compatibility: **implementation complete**. The interpreter rejects linked-app static/instance, direct/private/constructor, and class/interface invoke mismatches while leaving unresolved framework owners eligible for exact-signature JNI bridges. Focused regressions are present.
 - UI extra delivered alongside this work: the Home welcome hero and app mark use a dark walnut/amber palette rather than the former purple/blue treatment.
-- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 implementation is now committed; its regressions await the next single consolidated Rust workflow. IPA build/sign/export remains unauthorized.
+- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 is implemented and validated by successful consolidated Rust workspace workflow #667. IPA build/sign/export remains unauthorized.
 - Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
@@ -592,14 +592,14 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 4. Null object references remain valid, and valid object edges remain discoverable by mark-sweep GC.
 5. Focused regressions cover both instance-field and reference-array paths, including reachability after collection.
 
-**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - ManagedHeap.set_instance_field now rejects non-null Value::Object handles that do not resolve to a live heap object.
 - ManagedHeap.set_array_element validates array type and bounds, then validates object handles before mutating the element.
 - Failed reference writes return HeapError::InvalidHandle and preserve the previous value.
 - Added regressions proving invalid field/array references are rejected and valid child objects remain reachable when the owner/array is a GC root.
 - Extra UI/UX improvement: Home and Library no-results states now offer a one-tap “Clear search” action; the Home search field has an explicit accessibility label and hint.
 - Files: runtime-rust/crates/dex-runtime/src/heap.rs, Sources/StrideApp/ContentView.swift.
-- Validation: pending the single consolidated Rust workspace workflow. Swift UI compile remains unverified; no IPA build, signing, or export was run.
+- Validation: consolidated Rust workspace workflow #667 (run 43464328643) passed; IPA job was skipped. Swift UI compile remains unverified; no IPA build, signing, or export was run.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
