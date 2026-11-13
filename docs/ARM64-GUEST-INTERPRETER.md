@@ -110,3 +110,15 @@ in this implementation-only batch.
 - `PopLocalFrame(result)` now validates the result and reserves parent-frame capacity before mutating frame state, so invalid handles/allocation failures do not partially pop the frame.
 - Local-reference vector capacity is reserved before allocating strings and primitive arrays, avoiding an infallible `Vec::push` growth after a managed object has already been allocated.
 - `NewLocalRef(NULL)` and `DeleteLocalRef(NULL)` follow JNI null-reference behavior. Regression coverage was updated/added but remains unrun pending the single final test pass.
+
+
+## JNI guest ABI table groundwork
+
+Stride now defines the AArch64 JNI/JavaVM function-table memory layout primitives:
+
+- Stable JNI native-interface prefix slot indices (reserved slots 0–3, GetVersion 4, FindClass 6, exception and local/global-reference operations through EnsureLocalCapacity 26).
+- JavaVM invocation-interface slot indices for DestroyJavaVM, AttachCurrentThread, DetachCurrentThread, GetEnv and daemon attach.
+- A bounded, checked guest-address table builder that rejects null/misaligned callback addresses, validates required slots, and serializes 64-bit little-endian guest pointers.
+- Correct two-level environment-cell encoding: a guest JNIEnv*/JavaVM* points to a cell containing the function-table address.
+
+This is ABI layout infrastructure only. It does **not** create executable callback trampolines, populate callbacks, or make native JNI calls callable yet. Zero table slots remain unsupported and must not be treated as implemented.
