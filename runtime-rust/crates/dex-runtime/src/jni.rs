@@ -133,7 +133,8 @@ impl JniReferenceTable {
         // Reserve the destination frame and entry slot before dropping the old
         // frame, so allocation failure cannot destroy a valid result reference.
         if result_object.is_some() {
-            self.local_frames[self.local_frames.len() - 2].try_reserve(1)
+            let parent_index = self.local_frames.len() - 2;
+            self.local_frames[parent_index].try_reserve(1)
                 .map_err(|_| "JNI parent local-frame allocation failed".to_owned())?;
             self.entries.try_reserve(1)
                 .map_err(|_| "JNI result reference allocation failed".to_owned())?;
