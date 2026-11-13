@@ -1200,8 +1200,10 @@ mod tests {
             launcher_activity: None,
             screen_orientation: None,
         };
-        assert!(JniEnv::from_manifest(&mut heap, &missing_package)
-            .unwrap_err().contains("missing its package identity"));
+        assert!(matches!(
+            JniEnv::from_manifest(&mut heap, &missing_package),
+            Err(error) if error.contains("missing its package identity")
+        ));
     }
 
     #[test]
