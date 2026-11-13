@@ -122,3 +122,10 @@ Stride now defines the AArch64 JNI/JavaVM function-table memory layout primitive
 - Correct two-level environment-cell encoding: a guest JNIEnv*/JavaVM* points to a cell containing the function-table address.
 
 This is ABI layout infrastructure only. It does **not** create executable callback trampolines, populate callbacks, or make native JNI calls callable yet. Zero table slots remain unsupported and must not be treated as implemented.
+
+
+## AArch64 exclusive atomics (initial single-interpreter support)
+
+The bounded guest interpreter now recognizes AArch64 LDXR/LDAXR and STXR/STLXR integer forms for 8-, 16-, 32- and 64-bit values. It tracks a per-CPU reservation address/width, returns the architectural status value from store-exclusive, and performs permission-checked guest-memory accesses. This supports a useful subset of compiler-emitted atomic sequences.
+
+**Known limitation:** reservations are currently per interpreter CPU, not globally arbitrated across concurrent guest threads. This is not yet sufficient to claim correct pthread synchronization or multi-threaded Cocos2d-x execution. The guest-thread scheduler/shared-memory reservation model remains outstanding.
