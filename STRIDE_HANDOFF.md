@@ -465,7 +465,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | DEX Runtime & Class Loading | Partial — class-initializer failure state is now sticky and execution errors are captured; broader resolution/dispatch/opcode/verifier scope remains |
+| 1 | DEX Runtime & Class Loading | Partial — sticky initializer errors and transactional multi-DEX registration are implemented; full resolution/dispatch/opcode/verifier scope remains |
 | 2 | Java Object & Exception System | Partial — managed heap, hierarchy and exception foundations exist |
 | 3 | Android Context & Application | Partial — framework structures and Context groundwork exist |
 | 4 | Activity Lifecycle | Partial — lifecycle state machine and ActivityManager foundations exist |
@@ -509,6 +509,8 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Updated `runtime-rust/crates/dex-runtime/src/loader.rs` so an exception/error returned by `ArtVm::execute_method` during `<clinit>` marks the class `Error` instead of leaving it stuck in `Initializing`.
 - Made `ClassInitState::Error` terminal for the current class-loader session: later initialization attempts now return an explicit prior-failure error instead of silently returning success or rerunning a partially executed initializer.
 - Added regression coverage that injects an unsupported opcode into a synthetic `<clinit>`, checks the first initialization failure, and verifies the second attempt remains failed.
+- Staged class, method, lookup and DEX-owner registrations in temporary maps, committing them only after the full DEX has been processed. A method-ID overflow can no longer leave partially registered classes/methods behind.
+- Added a regression test that forces method-ID exhaustion while loading the real fixture DEX and verifies every live loader registry and the next-ID counter remain unchanged.
 - Preserved the existing recursive-initialization behavior for `Initializing` and the no-op behavior for external/framework classes.
 
 **Extra reliability/build fixes**
@@ -518,21 +520,20 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Deduplicated JNI local/global strong roots before passing them to the garbage collector; an object referenced both ways is now reported once.
 
 **Remaining Phase 1 work**
-- Complete transactional DEX loading so an unexpected failure cannot leave partially registered methods/classes.
 - Review class/method resolution precedence, access checks, direct-vs-virtual dispatch and interface/default-method behavior.
 - Make instance-field resolution honor the full owner/name/type identity, including inherited/shadowed fields.
 - Audit multi-DEX ownership for every identifier table and nested invocation path.
 - Expand opcode/verifier coverage based on real APK failures and add targeted regressions.
 
 **Files changed**
-- `runtime-rust/crates/dex-runtime/src/loader.rs`
+- `runtime-rust/crates/dex-runtime/src/loader.rs` (class-init state and atomic DEX registration)
 - `runtime-rust/crates/dex-runtime/src/bionic.rs` (test fixture completeness)
 - `runtime-rust/crates/dex-runtime/src/native_execution.rs` (test fixture completeness)
 - `runtime-rust/crates/dex-runtime/src/jni.rs` (opaque handle separation and GC-root deduplication)
 
 **Validation**
-- GitHub Actions Rust workspace test job passed on commit `04227fca7bbaaff518b8fd0a4286f05a980de095`.
-- The `stride-dex-runtime` test target passed: **163 passed, 0 failed**; all other workspace unit/doc-test targets also passed.
+- GitHub Actions Rust workspace test job passed on commit `b9eaa3d95120443f4ed5e5d829ab31559625dbb9`.
+- The `stride-dex-runtime` test target passed: **164 passed, 0 failed**; all other workspace unit/doc-test targets also passed.
 - The iOS IPA job was **Skipped**. No IPA build, signing, export, or packaging was started.
 - `main` remains untouched.
 
