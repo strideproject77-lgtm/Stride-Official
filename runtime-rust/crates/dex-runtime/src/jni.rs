@@ -40,6 +40,60 @@ impl<'a> JniEnv<'a> {
         }
     }
 
+    /// Push a JNI local-reference frame while reserving capacity up front.
+    pub fn try_push_local_frame(&mut self, capacity: usize) -> Result<(), String> {
+        self.local_refs.try_reserve(capacity)
+            .map_err(|_| "JNI local-reference frame allocation failed".to_owned())?;
+        self.local_frames.push(self.local_refs.len());
+        Ok(())
+    }
+
+    /// Add another local reference to an existing managed object.
+    pub fn new_local_ref(&mut self, object_id: u32) -> Result<u32, String> {
+        if object_id == 0 || !self.heap.contains(object_id) {
+            return Err(format!("JNI NewLocalRef received invalid object handle {object_id}"));
+        }
+        self.local_refs.try_reserve(1)
+            .map_err(|_| "JNI local-reference allocation failed".to_owned())?;
+        self.local_refs.push(object_id);
+        Ok(object_id)
+    }
+
+    /// Delete one matching local-reference entry without freeing the object.
+    pub fn delete_local_ref(&mut self, object_id: u32) -> Result<(), String> {
+        if object_id == 0 { return Ok(()); }
+        let Some(index) = self.local_refs.iter().rposition(|&id| id == object_id) else {
+            return Err(format!("JNI DeleteLocalRef received unknown local reference {object_id}"));
+        };
+        self.local_refs.remove(index);
+        Ok(())
+    }
+
+    /// Return the handles that must be treated as JNI local GC roots.
+    pub fn local_reference_roots(&self) -> Vec<u32> {
+        self.local_refs.iter().copied().filter(|&id| id != 0 && self.heap.contains(id)).collect()
+    }
+
+    /// Pop the current frame and optionally preserve one result reference in its parent.
+    pub fn pop_local_frame_with_result(&mut self, result: Option<u32>) -> Result<Option<u32>, String> {
+        let Some(previous_len) = self.local_frames.pop() else {
+            return Err("JNI PopLocalFrame called without a pushed local frame".into());
+        };
+        self.local_refs.truncate(previous_len);
+        match result {
+            Some(0) | None => Ok(None),
+            Some(object_id) => {
+                if !self.heap.contains(object_id) {
+                    return Err(format!("JNI PopLocalFrame received invalid result handle {object_id}"));
+                }
+                self.local_refs.try_reserve(1)
+                    .map_err(|_| "JNI result local-reference allocation failed".to_owned())?;
+                self.local_refs.push(object_id);
+                Ok(Some(object_id))
+            }
+        }
+    }
+
     pub fn new_string_utf(&mut self, text: &str) -> Result<u32, String> {
         let id = self.heap.allocate_string(text).map_err(|e| format!("{:?}", e))?;
         self.local_refs.push(id);
@@ -626,6 +680,48 @@ mod tests {
         env.pop_local_frame();
         assert_eq!(env.local_refs.len(), 0);
     }
+    #[test]
+    fn local_reference_delete_and_gc_roots_are_scoped_correctly() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let first = env.new_string_utf("first").unwrap();
+        let second = env.new_string_utf("second").unwrap();
+        assert_eq!(env.local_reference_roots(), vec![first, second]);
+        env.delete_local_ref(first).unwrap();
+        assert_eq!(env.local_reference_roots(), vec![second]);
+        assert!(env.delete_local_ref(first).is_err());
+        let roots = env.local_reference_roots();
+        let report = env.heap.collect_garbage(&roots);
+        assert_eq!(report.objects_after, 1);
+        assert!(env.heap.contains(second));
+        assert!(!env.heap.contains(first));
+    }
+
+    #[test]
+    fn pop_local_frame_preserves_only_the_requested_result_reference() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let outer = env.new_string_utf("outer").unwrap();
+        env.try_push_local_frame(4).unwrap();
+        let temporary = env.new_string_utf("temporary").unwrap();
+        let result = env.new_string_utf("result").unwrap();
+        assert_eq!(env.pop_local_frame_with_result(Some(result)).unwrap(), Some(result));
+        assert_eq!(env.local_refs, vec![outer, result]);
+        assert!(env.heap.contains(temporary));
+        assert_eq!(env.get_string_utf(result).unwrap(), "result");
+    }
+
+    #[test]
+    fn local_frame_operations_reject_invalid_state_and_handles() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        assert!(env.pop_local_frame_with_result(None).is_err());
+        assert!(env.new_local_ref(999).is_err());
+        env.try_push_local_frame(1).unwrap();
+        assert!(env.pop_local_frame_with_result(Some(999)).is_err());
+        assert!(env.local_frames.is_empty());
+    }
+
     #[test]
     fn calculator_string_and_double_core_bridges_execute() {
         let mut registry = JniNativeRegistry::new();
