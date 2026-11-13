@@ -467,6 +467,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 |---|---|---|
 | 1 | Class-loader safety: sticky `<clinit>` failure state and atomic DEX registration | Completed — implementation reviewed; previous Rust workspace workflow passed |
 | 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; Rust workspace workflow passed |
+| 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Implemented — focused regressions added; consolidated workflow pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -499,6 +500,21 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra improvement: array-copy range-end arithmetic now uses checked addition to avoid integer-overflow acceptance.
 - File: `runtime-rust/crates/dex-runtime/src/heap.rs`.
 - Validation: workflow run #644 (commit `144b92e5ce0ce2f5015922d78961ad4999598797`) passed the complete Rust workspace test suite; `stride-dex-runtime` passed **166 tests, 0 failed**. The unsigned iOS IPA job was **Skipped**. No IPA build/sign/export occurred.
+
+### Phase 3 — JNI-aware managed-heap collection
+**Acceptance criteria**
+1. A single JNI-owned collection entry point includes caller-supplied VM/register roots plus all live legacy and opaque JNI local/global strong references.
+2. Weak JNI references do not keep objects alive and are cleared to NULL after their referents are collected, while their tokens remain deletable.
+3. Root snapshots are deterministic and deduplicated; focused regressions cover strong-root survival, weak-root clearing, and duplicate references.
+
+**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+- Added `JniEnv::collect_garbage(additional_roots)` to combine caller roots with legacy local/global roots and opaque guest local/global roots before invoking the managed heap collector.
+- After the sweep, the entry point prunes collected weak JNI referents so their still-valid opaque handles resolve as NULL.
+- Made the combined strong-root snapshot sorted and deduplicated, preventing duplicate root entries when one object is retained through multiple JNI reference kinds.
+- Added regressions proving local, legacy-global, opaque guest-global, and caller-provided roots survive; weak-only objects are reclaimed and weak handles resolve as NULL; duplicate strong handles yield one root.
+- Extra improvement: all callers using the new JNI-aware entry point get one consistent GC lifecycle instead of having to manually assemble roots and remember weak-reference pruning.
+- File: `runtime-rust/crates/dex-runtime/src/jni.rs`.
+- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
