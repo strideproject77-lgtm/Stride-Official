@@ -102,7 +102,7 @@ in this implementation-only batch.
 
 ### Opaque guest JNI reference handles
 - Added `JniReferenceTable`, which assigns opaque guest-facing tokens distinct from internal managed-heap object IDs. It tracks local frames, strong globals and weak globals, supports handle cloning/deletion, `IsSameObject`-style identity checks, and `PopLocalFrame(result)` token re-issuance.
-- Added strong-root snapshots and weak-reference pruning hooks. Weak references are excluded from strong GC roots and are invalidated after their referents are collected and the prune hook runs.
+- Added strong-root snapshots and weak-reference pruning hooks. Weak references are excluded from strong GC roots; when GC reclaims a referent, the prune hook clears the referent to NULL while keeping the weak JNI handle valid for comparison and deletion.
 - This is the reference-token/lifetime layer only. It is not yet wired to a guest `JNIEnv*` function table or machine-code callback trampolines; native guest calls still do not receive callable JNI entrypoints, and GC must explicitly consume the combined root snapshot.
 - Added regression tests for handle separation, frame lifetime, weak-root behavior, clone/delete and identity semantics. Tests remain unrun until the single final validation pass.
 
