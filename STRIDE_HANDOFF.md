@@ -467,8 +467,8 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 |---|---|---|
 | 1 | Class-loader safety: sticky `<clinit>` failure state and atomic DEX registration | Completed — implementation reviewed; previous Rust workspace workflow passed |
 | 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; Rust workspace workflow passed |
-| 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Implemented — focused regressions added; consolidated workflow pending |
-| 4 | DEX virtual dispatch: choose the maximally-specific interface declaration and reject ambiguous defaults | Implemented — focused regressions added; consolidated workflow pending |
+| 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Completed — implementation reviewed and regressions added; consolidated workflow pending |
+| 4 | DEX virtual dispatch: choose the maximally-specific interface declaration and reject ambiguous defaults | Completed — implementation reviewed and regressions added; consolidated workflow pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
