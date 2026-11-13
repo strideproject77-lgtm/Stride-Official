@@ -493,7 +493,7 @@ struct ContentView: View {
                     statusCard("PackageInfo metadata mapping", detail: "Versions, SDK levels, permissions and components", symbol: "shippingbox", good: true)
                     statusCard("PackageManager lookup", detail: "Manifest-backed current-app package query", symbol: "magnifyingglass", good: true)
                     statusCard("Guest Java PackageManager", detail: "getPackageInfo + getApplicationInfo JNI bridge", symbol: "shippingbox.fill", good: true)
-                    statusCard("Context app storage paths", detail: "Guest files/cache File paths · no disk persistence yet", symbol: "folder", good: true)
+                    statusCard("Context app storage paths", detail: "Files, cache, no-backup and code-cache paths · no disk persistence", symbol: "folder", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }
