@@ -496,6 +496,7 @@ struct ContentView: View {
                     statusCard("Context app storage paths", detail: "Files, cache, no-backup and code-cache paths · no disk persistence", symbol: "folder", good: true)
                     statusCard("Launcher Intent resolution", detail: "Manifest-backed MAIN / LAUNCHER Intent and ComponentName", symbol: "arrow.up.right.square", good: true)
                     statusCard("Intent construction and mutation", detail: "Action, package, class, categories and flags", symbol: "arrow.left.arrow.right", good: true)
+                    statusCard("Intent extras", detail: "String, integer, long and boolean values with Bundle reads", symbol: "tray.full", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }

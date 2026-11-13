@@ -804,6 +804,21 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 22 — Guest Intent extras and Bundle reads
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added Intent.putExtra() overloads for String, int, long and boolean values.
+- Added getStringExtra(), getIntExtra(), getLongExtra(), getBooleanExtra(), hasExtra() and getExtras().
+- Added guest Bundle getString(), getInt(), getLong() and getBoolean() read paths over the same managed extras object.
+- Missing keys return Android-style null/default values; typed getters do not reinterpret mismatched primitive types.
+- Added regression coverage for typed round trips, Bundle access, key presence and default values.
+- Extra UI improvement: Runtime Status now exposes typed Intent extras as a separate capability.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: Parcelable/custom objects, nested Bundles, arrays, URI/ClipData and cross-process serialization remain unsupported.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.

@@ -1352,6 +1352,189 @@ impl JniNativeRegistry {
             Ok(Some(Value::Object(receiver)))
         });
 
+        // Intent extras are stored on a guest Bundle object. Dynamic keys are
+        // namespaced to avoid collisions with Bundle's own runtime fields.
+        self.register("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.putExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.putExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let value = args.get(2).copied().unwrap_or(Value::Null);
+            if let Value::Object(id) = value {
+                if !env.heap.contains(id) { return Err("Intent.putExtra received an invalid String value".into()); }
+            }
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => {
+                    let id = env.heap.allocate_instance("Landroid/os/Bundle;")
+                        .map_err(|error| format!("Intent extras Bundle allocation failed: {:?}", error))?;
+                    env.set_object_field(receiver, "mExtras", Value::Object(id))?;
+                    id
+                }
+            };
+            env.set_object_field(bundle, &format!("mStrideExtra:{key}"), value)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.putExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.putExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let value = Value::Int(args.get(2).map(Value::as_int).unwrap_or(0));
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => {
+                    let id = env.heap.allocate_instance("Landroid/os/Bundle;")
+                        .map_err(|error| format!("Intent extras Bundle allocation failed: {:?}", error))?;
+                    env.set_object_field(receiver, "mExtras", Value::Object(id))?;
+                    id
+                }
+            };
+            env.set_object_field(bundle, &format!("mStrideExtra:{key}"), value)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;J)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.putExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.putExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let value = Value::Long(args.get(2).map(Value::as_long).unwrap_or(0));
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => {
+                    let id = env.heap.allocate_instance("Landroid/os/Bundle;")
+                        .map_err(|error| format!("Intent extras Bundle allocation failed: {:?}", error))?;
+                    env.set_object_field(receiver, "mExtras", Value::Object(id))?;
+                    id
+                }
+            };
+            env.set_object_field(bundle, &format!("mStrideExtra:{key}"), value)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;Z)Landroid/content/Intent;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.putExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.putExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let value = Value::Int(i32::from(args.get(2).map(Value::as_int).unwrap_or(0) != 0));
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => {
+                    let id = env.heap.allocate_instance("Landroid/os/Bundle;")
+                        .map_err(|error| format!("Intent extras Bundle allocation failed: {:?}", error))?;
+                    env.set_object_field(receiver, "mExtras", Value::Object(id))?;
+                    id
+                }
+            };
+            env.set_object_field(bundle, &format!("mStrideExtra:{key}"), value)?;
+            Ok(Some(Value::Object(receiver)))
+        });
+        self.register("Landroid/content/Intent;", "getExtras", "()Landroid/os/Bundle;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getExtras receiver is null")?;
+            match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => Ok(Some(Value::Object(id))),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/content/Intent;", "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getStringExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.getStringExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Null)),
+            };
+            match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Object(id)) => Ok(Some(Value::Object(id))),
+                Ok(Value::Null) | Err(_) => Ok(Some(Value::Null)),
+                Ok(_) => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/content/Intent;", "getIntExtra", "(Ljava/lang/String;I)I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getIntExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.getIntExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let default = args.get(2).map(Value::as_int).unwrap_or(0);
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Int(default))),
+            };
+            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Int(value)) => Value::Int(value),
+                _ => Value::Int(default),
+            }))
+        });
+        self.register("Landroid/content/Intent;", "getLongExtra", "(Ljava/lang/String;J)J", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getLongExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.getLongExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let default = args.get(2).map(Value::as_long).unwrap_or(0);
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Long(default))),
+            };
+            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Long(value)) => Value::Long(value),
+                _ => Value::Long(default),
+            }))
+        });
+        self.register("Landroid/content/Intent;", "getBooleanExtra", "(Ljava/lang/String;Z)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.getBooleanExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.getBooleanExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let default = args.get(2).map(Value::as_int).unwrap_or(0);
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Int(i32::from(default != 0)))),
+            };
+            Ok(Some(match env.get_object_field(bundle, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Int(value)) => Value::Int(i32::from(value != 0)),
+                _ => Value::Int(i32::from(default != 0)),
+            }))
+        });
+        self.register("Landroid/content/Intent;", "hasExtra", "(Ljava/lang/String;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Intent.hasExtra receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Intent.hasExtra key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            let bundle = match env.get_object_field(receiver, "mExtras") {
+                Ok(Value::Object(id)) => id,
+                _ => return Ok(Some(Value::Int(0))),
+            };
+            Ok(Some(Value::Int(i32::from(env.get_object_field(bundle, &format!("mStrideExtra:{key}")).is_ok()))))
+        });
+        self.register("Landroid/os/Bundle;", "getString", "(Ljava/lang/String;)Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getString receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getString key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            match env.get_object_field(receiver, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Object(id)) => Ok(Some(Value::Object(id))),
+                _ => Ok(Some(Value::Null)),
+            }
+        });
+        self.register("Landroid/os/Bundle;", "getInt", "(Ljava/lang/String;)I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getInt receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getInt key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            Ok(Some(match env.get_object_field(receiver, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Int(value)) => Value::Int(value),
+                _ => Value::Int(0),
+            }))
+        });
+        self.register("Landroid/os/Bundle;", "getLong", "(Ljava/lang/String;)J", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getLong receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getLong key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            Ok(Some(match env.get_object_field(receiver, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Long(value)) => Value::Long(value),
+                _ => Value::Long(0),
+            }))
+        });
+        self.register("Landroid/os/Bundle;", "getBoolean", "(Ljava/lang/String;)Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object).ok_or("Bundle.getBoolean receiver is null")?;
+            let key_id = args.get(1).and_then(Value::as_object).ok_or("Bundle.getBoolean key is null")?;
+            let key = env.get_string_utf(key_id)?.to_owned();
+            Ok(Some(match env.get_object_field(receiver, &format!("mStrideExtra:{key}")) {
+                Ok(Value::Int(value)) => Value::Int(i32::from(value != 0)),
+                _ => Value::Int(0),
+            }))
+        });
+
                         // Context app-private directory paths. These are Android-style guest
         // paths only; a persistent filesystem backend is a separate capability.
         let context_directory_handler = |directory: &'static str| {
@@ -2113,6 +2296,42 @@ mod tests {
         let component_class = env.get_object_field(component, "mClass").unwrap().as_object().unwrap();
         assert_eq!(env.get_string_utf(component_package).unwrap(), "com.stride.fixture");
         assert_eq!(env.get_string_utf(component_class).unwrap(), "com.stride.fixture.DetailActivity");
+    }
+
+    #[test]
+    fn intent_extras_round_trip_typed_values_and_bundle_access() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let intent = env.heap.allocate_instance("Landroid/content/Intent;").unwrap();
+        let key_text = env.new_string_utf("screen").unwrap();
+        let title_key = env.new_string_utf("title").unwrap();
+        let bool_key = env.new_string_utf("enabled").unwrap();
+        let title = env.new_string_utf("Settings").unwrap();
+        let put_string = registry.find("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;Ljava/lang/String;)Landroid/content/Intent;").unwrap().clone();
+        let put_int = registry.find("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;I)Landroid/content/Intent;").unwrap().clone();
+        let put_bool = registry.find("Landroid/content/Intent;", "putExtra", "(Ljava/lang/String;Z)Landroid/content/Intent;").unwrap().clone();
+        let get_string = registry.find("Landroid/content/Intent;", "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;").unwrap().clone();
+        let get_int = registry.find("Landroid/content/Intent;", "getIntExtra", "(Ljava/lang/String;I)I").unwrap().clone();
+        let get_bool = registry.find("Landroid/content/Intent;", "getBooleanExtra", "(Ljava/lang/String;Z)Z").unwrap().clone();
+        let has_extra = registry.find("Landroid/content/Intent;", "hasExtra", "(Ljava/lang/String;)Z").unwrap().clone();
+        let get_extras = registry.find("Landroid/content/Intent;", "getExtras", "()Landroid/os/Bundle;").unwrap().clone();
+        let bundle_get_int = registry.find("Landroid/os/Bundle;", "getInt", "(Ljava/lang/String;)I").unwrap().clone();
+
+        put_string(&mut env, &[Value::Object(intent), Value::Object(title_key), Value::Object(title)]).unwrap();
+        put_int(&mut env, &[Value::Object(intent), Value::Object(key_text), Value::Int(3)]).unwrap();
+        put_bool(&mut env, &[Value::Object(intent), Value::Object(bool_key), Value::Int(1)]).unwrap();
+        let stored_title = get_string(&mut env, &[Value::Object(intent), Value::Object(title_key)]).unwrap().unwrap();
+        assert_eq!(env.get_string_utf(stored_title.as_object().unwrap()).unwrap(), "Settings");
+        assert_eq!(get_int(&mut env, &[Value::Object(intent), Value::Object(key_text), Value::Int(-1)]).unwrap(), Some(Value::Int(3)));
+        assert_eq!(get_bool(&mut env, &[Value::Object(intent), Value::Object(bool_key), Value::Int(0)]).unwrap(), Some(Value::Int(1)));
+        assert_eq!(has_extra(&mut env, &[Value::Object(intent), Value::Object(title_key)]).unwrap(), Some(Value::Int(1)));
+
+        let bundle = get_extras(&mut env, &[Value::Object(intent)]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(bundle_get_int(&mut env, &[Value::Object(bundle), Value::Object(key_text)]).unwrap(), Some(Value::Int(3)));
+        let missing = env.new_string_utf("missing").unwrap();
+        assert_eq!(get_int(&mut env, &[Value::Object(intent), Value::Object(missing), Value::Int(77)]).unwrap(), Some(Value::Int(77)));
+        assert_eq!(has_extra(&mut env, &[Value::Object(intent), Value::Object(missing)]).unwrap(), Some(Value::Int(0)));
     }
 
     #[test]
