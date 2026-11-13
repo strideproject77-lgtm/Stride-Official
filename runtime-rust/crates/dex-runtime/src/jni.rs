@@ -1061,6 +1061,44 @@ impl JniNativeRegistry {
             application_info_handler,
         );
 
+        // Context app-private directory paths. These are Android-style guest
+        // paths only; a persistent filesystem backend is a separate capability.
+        let context_directory_handler = |directory: &'static str| {
+            move |env: &mut JniEnv, _args: &[Value]| -> Result<Option<Value>, String> {
+                let package_name = env.package_name.clone()
+                    .ok_or("Context directory query called before app package identity was configured")?;
+                let path = format!("/data/data/{package_name}/{directory}");
+                let path_id = env.new_string_utf(&path)?;
+                let file_id = env.heap.allocate_instance("Ljava/io/File;")
+                    .map_err(|error| format!("File allocation failed: {:?}", error))?;
+                env.set_object_field(file_id, "mStridePath", Value::Object(path_id))?;
+                Ok(Some(Value::Object(file_id)))
+            }
+        };
+        self.register(
+            "Landroid/content/Context;",
+            "getFilesDir",
+            "()Ljava/io/File;",
+            context_directory_handler("files"),
+        );
+        self.register(
+            "Landroid/content/Context;",
+            "getCacheDir",
+            "()Ljava/io/File;",
+            context_directory_handler("cache"),
+        );
+        let file_path_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
+            let receiver = args.first().and_then(Value::as_object)
+                .ok_or("File path query receiver is null")?;
+            let path_id = env.get_object_field(receiver, "mStridePath")?
+                .as_object().ok_or("File path object has no Stride path")?;
+            let path = env.get_string_utf(path_id)?.to_owned();
+            Ok(Some(Value::Object(env.new_string_utf(&path)?)))
+        };
+        self.register("Ljava/io/File;", "getPath", "()Ljava/lang/String;", file_path_handler);
+        self.register("Ljava/io/File;", "getAbsolutePath", "()Ljava/lang/String;", file_path_handler);
+        self.register("Ljava/io/File;", "toString", "()Ljava/lang/String;", file_path_handler);
+
         // Android Context package identity. The bootstrap layer must set the
         // package name for each app; never silently return a placeholder package.
         self.register(
@@ -1588,6 +1626,54 @@ mod tests {
             &mut env,
             &[Value::Object(manager_id), Value::Object(requested_name), Value::Long(0)],
         ).unwrap_err().contains("metadata is unavailable"));
+    }
+
+    #[test]
+    fn context_files_and_cache_directories_return_guest_file_paths() {
+        let registry = JniNativeRegistry::new();
+        let files_dir = registry.find(
+            "Landroid/content/Context;",
+            "getFilesDir",
+            "()Ljava/io/File;",
+        ).unwrap().clone();
+        let cache_dir = registry.find(
+            "Landroid/content/Context;",
+            "getCacheDir",
+            "()Ljava/io/File;",
+        ).unwrap().clone();
+        let get_path = registry.find(
+            "Ljava/io/File;",
+            "getPath",
+            "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let get_absolute_path = registry.find(
+            "Ljava/io/File;",
+            "getAbsolutePath",
+            "()Ljava/lang/String;",
+        ).unwrap().clone();
+
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        assert!(files_dir(&mut env, &[]).unwrap_err().contains("before app package identity"));
+        env.set_package_name("com.stride.storage").unwrap();
+
+        let files_id = match files_dir(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected files directory result: {:?}", other),
+        };
+        let cache_id = match cache_dir(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => id,
+            other => panic!("unexpected cache directory result: {:?}", other),
+        };
+        let read_path = |env: &mut JniEnv, handler: &NativeHandler, file_id| {
+            match handler(env, &[Value::Object(file_id)]).unwrap() {
+                Some(Value::Object(id)) => env.get_string_utf(id).unwrap().to_owned(),
+                other => panic!("unexpected File path result: {:?}", other),
+            }
+        };
+        assert_eq!(read_path(&mut env, &get_path, files_id), "/data/data/com.stride.storage/files");
+        assert_eq!(read_path(&mut env, &get_absolute_path, files_id), "/data/data/com.stride.storage/files");
+        assert_eq!(read_path(&mut env, &get_path, cache_id), "/data/data/com.stride.storage/cache");
     }
 
     #[test]
