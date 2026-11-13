@@ -761,10 +761,23 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 19 — Extended guest app-private File path behavior
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added Context.getNoBackupFilesDir() and Context.getCodeCacheDir() using package-scoped Android-style paths.
+- Extended runtime-created guest java.io.File objects with getName(), getParent(), isAbsolute() and getAbsoluteFile(), alongside the Phase 18 path accessors.
+- Added regressions for no-backup/code-cache paths, path names, parent paths and absolute-path behavior.
+- Extra UI refinement: Runtime Status now lists all four app-private directory categories while explicitly retaining the no-disk-persistence limitation.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: paths remain guest metadata only. Directory creation, file I/O, canonical path resolution, permissions and durable storage are not implemented.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
-- Phases 16–18 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
+- Phases 16–19 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
 - No new IPA build was triggered by Phases 16–17. Do not build, sign or export another IPA without explicit user authorization.
 
 ### Next small implementation batches
