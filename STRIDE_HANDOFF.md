@@ -18,7 +18,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Phase 5 — Preserve DEX method access flags during hierarchy linking: **implementation complete**. The loader carries original DEX flags into `ClassHierarchy`; regressions cover abstract interface redeclarations plus private/static declarations through the loader path.
 - Phase 6 — DEX invoke-kind compatibility: **implementation complete**. The interpreter rejects linked-app static/instance, direct/private/constructor, and class/interface invoke mismatches while leaving unresolved framework owners eligible for exact-signature JNI bridges. Focused regressions are present.
 - UI extra delivered alongside this work: the Home welcome hero and app mark use a dark walnut/amber palette rather than the former purple/blue treatment.
-- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 is implemented and validated by successful consolidated Rust workspace workflow #667. Phase 8 implementation is committed; its consolidated validation is pending. IPA build/sign/export remains unauthorized.
+- Validation state: Phases 3–6 are covered by successful consolidated Rust workspace workflow #663. Phase 7 is implemented and validated by successful consolidated Rust workspace workflow #667. Phase 8 passed the consolidated Rust workspace workflow #672 (run ID `43466701440`); the IPA job was skipped. IPA build/sign/export remains unauthorized.
 - Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
 
@@ -480,7 +480,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 5 | DEX hierarchy linking: preserve original method access flags so abstract/private/static declarations remain distinguishable | Implemented — focused regression added; consolidated workflow pending |
 | 6 | DEX invoke-kind validation: reject static/instance and direct/virtual/interface mismatches against linked access flags | Implemented — focused regressions added; consolidated workflow pending |
 | 7 | Reject dangling managed-object references in fields and reference arrays | Completed — regression coverage and consolidated Rust workflow passed |
-| 8 | Repair stale object edges that bypass checked setters during GC; preserve valid cyclic reachability | Implemented — regression added; consolidated validation pending |
+| 8 | Repair stale object edges that bypass checked setters during GC; preserve valid cyclic reachability | Completed — regression added; consolidated Rust workflow #672 passed |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -611,15 +611,14 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 3. Root-reachable cyclic graphs and their valid descendants survive collection, while dangling edges are cleared to `Value::Null`.
 4. A focused regression exercises the public mutable-object access path that can bypass checked field/array setters.
 
-**Implementation log — 2026-11-13 — Implemented (consolidated validation pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - Added a GC pre-trace sanitation pass over instance fields and array elements. Any non-null `Value::Object` pointing to a missing heap handle is replaced with `Value::Null` before reachability traversal.
 - This closes an escape-hatch gap: checked setters already reject dangling references, but runtime subsystems using the public mutable-object accessor could otherwise inject stale edges that remained observable from a live owner.
 - Added a regression that deliberately inserts stale handles through mutable access, then verifies GC clears them while preserving an owner → array → child graph with a back-edge cycle.
 - Extra UI/UX improvement: the Library search field now has a one-tap clear control while a query is present, plus explicit accessibility label and hint.
 - Files: `runtime-rust/crates/dex-runtime/src/heap.rs`, `Sources/StrideApp/ContentView.swift`.
 - Implementation commits: `9288ba03fc66b8fb159b7fda73af316dd5f3eb6a`, `7bada546071596ab264de81730fb9a6746d51918`, `2fedc9b79729755f65b18792449cd3cd26ae4496`.
-- Tests: regression added; not run yet. One consolidated Rust workflow remains the validation gate. Swift UI compile is also unverified.
-- Remaining: run consolidated validation; review any failures and fix before marking Phase 8 Completed.
+- Tests: consolidated Rust workspace workflow #672 (run ID `43466701440`) passed, including the new regression. The iOS/IPA job was skipped. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Next small implementation batches
