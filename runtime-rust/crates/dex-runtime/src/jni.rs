@@ -332,6 +332,8 @@ pub struct JniEnv<'a> {
     /// Opaque guest jobject tokens, separate from internal heap object IDs.
     pub guest_references: JniReferenceTable,
     pub local_frames: Vec<usize>,
+    /// Android package identity supplied by the app/package bootstrap layer.
+    package_name: Option<String>,
 }
 
 impl<'a> JniEnv<'a> {
@@ -342,7 +344,24 @@ impl<'a> JniEnv<'a> {
             global_refs: Vec::new(),
             guest_references: JniReferenceTable::new(),
             local_frames: Vec::new(),
+            package_name: None,
         }
+    }
+
+    /// Configure the package identity exposed by Android Context bridges.
+    pub fn set_package_name(&mut self, package_name: impl Into<String>) -> Result<(), String> {
+        let package_name = package_name.into();
+        if package_name.is_empty()
+            || package_name.split('.').any(|part| part.is_empty()
+                || !part.chars().enumerate().all(|(index, ch)| {
+                    if index == 0 { ch == '_' || ch.is_ascii_alphabetic() }
+                    else { ch == '_' || ch.is_ascii_alphanumeric() }
+                }))
+        {
+            return Err(format!("invalid Android package name: {package_name}"));
+        }
+        self.package_name = Some(package_name);
+        Ok(())
     }
 
     pub fn push_local_frame(&mut self, _capacity: usize) {
@@ -846,6 +865,29 @@ impl JniNativeRegistry {
             Ok(Some(Value::Int(i32::from(value.is_infinite()))))
         });
 
+        // Android Context package identity. The bootstrap layer must set the
+        // package name for each app; never silently return a placeholder package.
+        self.register(
+            "Landroid/content/Context;",
+            "getPackageName",
+            "()Ljava/lang/String;",
+            |env, _args| {
+                let package_name = env.package_name.clone()
+                    .ok_or("Context.getPackageName called before app package identity was configured")?;
+                Ok(Some(Value::Object(env.new_string_utf(&package_name)?)))
+            },
+        );
+        self.register(
+            "Landroid/content/Context;",
+            "getOpPackageName",
+            "()Ljava/lang/String;",
+            |env, _args| {
+                let package_name = env.package_name.clone()
+                    .ok_or("Context.getOpPackageName called before app package identity was configured")?;
+                Ok(Some(Value::Object(env.new_string_utf(&package_name)?)))
+            },
+        );
+
         // android.os.SystemClock.uptimeMillis()J. Android uptime is monotonic;
         // wall-clock epoch time belongs to System.currentTimeMillis instead.
         self.register(
@@ -1102,6 +1144,38 @@ mod tests {
         let math_handler = reg.find("Ljava/lang/Math;", "abs", "(I)I").unwrap();
         let math_res = math_handler(&mut env, &[Value::Int(-42)]).unwrap();
         assert_eq!(math_res, Some(Value::Int(42)));
+    }
+
+    #[test]
+    fn context_package_identity_returns_configured_package_and_rejects_missing_identity() {
+        let registry = JniNativeRegistry::new();
+        let get_package_name = registry.find(
+            "Landroid/content/Context;",
+            "getPackageName",
+            "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let get_op_package_name = registry.find(
+            "Landroid/content/Context;",
+            "getOpPackageName",
+            "()Ljava/lang/String;",
+        ).unwrap().clone();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+
+        assert!(get_package_name(&mut env, &[]).unwrap_err().contains("before app package identity"));
+
+        env.set_package_name("com.stride.fixture").unwrap();
+        let package = match get_package_name(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => env.get_string_utf(id).unwrap().to_owned(),
+            other => panic!("unexpected package name result: {:?}", other),
+        };
+        let op_package = match get_op_package_name(&mut env, &[]).unwrap() {
+            Some(Value::Object(id)) => env.get_string_utf(id).unwrap().to_owned(),
+            other => panic!("unexpected op package name result: {:?}", other),
+        };
+        assert_eq!(package, "com.stride.fixture");
+        assert_eq!(op_package, package);
+        assert!(env.set_package_name("com..invalid").is_err());
     }
 
     #[test]
