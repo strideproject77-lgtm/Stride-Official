@@ -489,6 +489,7 @@ struct ContentView: View {
                         .foregroundStyle(muted)
                     statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
                     statusCard("DEX parsing and method loading", detail: "Integrated foundations", symbol: "curlybraces", good: true)
+                    statusCard("Context package identity", detail: "getPackageName / getOpPackageName bridge", symbol: "app.badge", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }
