@@ -635,7 +635,7 @@ impl<'a> JniEnv<'a> {
         self.heap.get_string(string_id).map_err(|e| format!("{:?}", e))
     }
 
-    pub fn get_array_length(&self, array_id: u32) -> Result<usize, String> {
+    pub fn array_length(&self, array_id: u32) -> Result<usize, String> {
         self.heap.array_length(array_id).map_err(|e| format!("{:?}", e))
     }
 
@@ -1148,7 +1148,7 @@ impl JniNativeRegistry {
                 Ok(Value::Object(id)) => id,
                 _ => return Ok(Some(Value::Int(0))),
             };
-            let count = env.heap.get_array_length(categories_id)
+            let count = env.heap.array_length(categories_id)
                 .map_err(|error| format!("Intent categories lookup failed: {:?}", error))?;
             for index in 0..count {
                 let item = env.heap.get_array_element(categories_id, index as i32)
@@ -1273,7 +1273,7 @@ impl JniNativeRegistry {
             };
             let mut categories = Vec::new();
             if existing != 0 {
-                let count = env.heap.get_array_length(existing)
+                let count = env.heap.array_length(existing)
                     .map_err(|error| format!("Intent category array lookup failed: {:?}", error))?;
                 for index in 0..count {
                     categories.push(env.heap.get_array_element(existing, index as i32)
@@ -1723,7 +1723,7 @@ impl JniNativeRegistry {
             let format_text = env.get_string_utf(format_id)?.to_owned();
             let array_id = args.get(2).and_then(|value| value.as_object())
                 .ok_or("String.format argument array is null")?;
-            let count = env.get_array_length(array_id)?;
+            let count = env.array_length(array_id)?;
             let mut values = Vec::with_capacity(count);
             for index in 0..count {
                 let item = env.heap.get_array_element(array_id, index as i32)
@@ -2286,7 +2286,7 @@ mod tests {
         add_category(&mut env, &[Value::Object(intent), Value::Object(category)]).unwrap();
         assert_eq!(has_category(&mut env, &[Value::Object(intent), Value::Object(category)]).unwrap(), Some(Value::Int(1)));
         let categories_id = env.get_object_field(intent, "mCategories").unwrap().as_object().unwrap();
-        assert_eq!(env.heap.get_array_length(categories_id).unwrap(), 1);
+        assert_eq!(env.heap.array_length(categories_id).unwrap(), 1);
 
         add_flags(&mut env, &[Value::Object(intent), Value::Int(0x10)]).unwrap();
         add_flags(&mut env, &[Value::Object(intent), Value::Int(0x20)]).unwrap();
