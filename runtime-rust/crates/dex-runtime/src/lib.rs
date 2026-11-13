@@ -52,7 +52,7 @@ pub use exceptions::{TryBlock, CatchHandler, ThrownException, RuntimeStackTrace,
 pub use jni::{JniNativeRegistry, JniEnv, JniReferenceTable, JniAbiFunctionTable, NativeMethodKey, jni_abi_slots, java_vm_abi_slots, JNI_NATIVE_INTERFACE_MIN_SLOTS, JAVA_VM_INVOCATION_INTERFACE_MIN_SLOTS};
 pub use framework::{
     AndroidEnvironment, SharedPreferences, ActivityLifecycleState, Bundle, Intent,
-    PackageInfo, ActivityInfo, ServiceInfo, AssetManager, Resources,
+    PackageInfo, PackageManagerError, ActivityInfo, ServiceInfo, AssetManager, Resources,
 };
 pub use interpreter::{ArtVm, MethodCode, InterpreterReport, ExecutionStopReason};
 pub use loader::{AppClassLoader, LoadedClass, LoadedMethod, ClassInitState};
