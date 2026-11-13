@@ -634,14 +634,22 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: one consolidated Rust workspace test pass is pending at the end of this batch; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 10 — Keep handled exceptions out of later stack traces
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Fixed nested DEX call exception unwinding: the caller records the stack-trace depth before entering a child method.
+- If the child exception is caught by the caller, only frames appended by that handled child unwind are removed. Existing outer frames remain intact.
+- If the exception is not caught, the caller frame is appended as before, preserving the uncaught trace from throw site outward.
+- Added a regression: one child exception is caught, then a second exception escapes; the second trace must contain only its own caller frame and correct DEX code-unit offset.
+- Extra Diagnostics UI improvement: Unified Diagnostics now shows live fatal and warning counts alongside retained-event/error totals, making exception/crash triage quicker.
+- Files: runtime-rust/crates/dex-runtime/src/interpreter.rs, Sources/StrideApp/ContentView.swift.
+- Validation: one consolidated Rust workspace test pass is pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
-- Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
-- Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
-- Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
-- UI/UX: one user-visible Stride library/launch/diagnostics improvement in a dedicated batch, with matching tests where practical.
-- Compatibility harness: one exact APK scenario and evidence record at a time.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
