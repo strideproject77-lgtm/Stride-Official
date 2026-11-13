@@ -511,8 +511,11 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added regression coverage that injects an unsupported opcode into a synthetic `<clinit>`, checks the first initialization failure, and verifies the second attempt remains failed.
 - Preserved the existing recursive-initialization behavior for `Initializing` and the no-op behavior for external/framework classes.
 
-**Extra reliability improvement**
+**Extra reliability/build fixes**
 - Class initialization now reports interpreter execution errors with the class descriptor and original runtime error, rather than propagating an uncontextualized error while leaving inconsistent state.
+- Corrected two stale `LoadedNativeModule` test fixtures and one `NativeImagePlan` fixture so the Rust workspace test target compiles against the current native-loader data structures.
+- Fixed JNI guest reference tokens to use a 64-bit handle range separate from 32-bit managed object IDs.
+- Deduplicated JNI local/global strong roots before passing them to the garbage collector; an object referenced both ways is now reported once.
 
 **Remaining Phase 1 work**
 - Complete transactional DEX loading so an unexpected failure cannot leave partially registered methods/classes.
@@ -523,10 +526,14 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 **Files changed**
 - `runtime-rust/crates/dex-runtime/src/loader.rs`
+- `runtime-rust/crates/dex-runtime/src/bionic.rs` (test fixture completeness)
+- `runtime-rust/crates/dex-runtime/src/native_execution.rs` (test fixture completeness)
+- `runtime-rust/crates/dex-runtime/src/jni.rs` (opaque handle separation and GC-root deduplication)
 
 **Validation**
-- Added a regression test; execution is pending the branch's Rust test workflow.
-- No IPA build, signing, export, or packaging was started.
+- GitHub Actions Rust workspace test job passed on commit `04227fca7bbaaff518b8fd0a4286f05a980de095`.
+- The `stride-dex-runtime` test target passed: **163 passed, 0 failed**; all other workspace unit/doc-test targets also passed.
+- The iOS IPA job was **Skipped**. No IPA build, signing, export, or packaging was started.
 - `main` remains untouched.
 
 ---
