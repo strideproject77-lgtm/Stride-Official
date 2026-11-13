@@ -427,3 +427,8 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added checked local-frame allocation, `NewLocalRef`-style reference retention, `DeleteLocalRef`-style removal, local GC-root snapshots, and result-preserving frame pop.
 - Added tests for reference deletion/root behavior, frame result preservation, and invalid state/handles. Tests are deliberately deferred to the single final test pass.
 - Scope is deliberately honest: this is Rust-side JNI groundwork, not a guest `JNIEnv*` function table, global/weak reference implementation, or automatic native-to-GC root integration.
+
+### JNI failure-safety refinement
+- `PopLocalFrame(result)` validates and reserves before changing frame/reference stacks, preventing partial state changes on failure.
+- String/int-array/byte-array creation reserves local-reference capacity before heap allocation; null local-reference operations follow JNI behavior.
+- Added/updated regression coverage only; tests remain deferred to the one final pass.
