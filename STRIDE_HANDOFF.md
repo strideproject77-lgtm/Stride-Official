@@ -636,7 +636,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 10 — Keep handled exceptions out of later stack traces
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Fixed nested DEX call exception unwinding: the caller records the stack-trace depth before entering a child method.
 - If the child exception is caught by the caller, only frames appended by that handled child unwind are removed. Existing outer frames remain intact.
@@ -649,7 +649,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 11 — Monotonic Android SystemClock uptime
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Replaced the Android SystemClock.uptimeMillis bridge's wall-clock epoch source with a process-relative monotonic Instant clock.
 - Wall-clock timestamps remain available through java.lang.System.currentTimeMillis; adjusting the device clock can no longer make uptimeMillis jump backwards or forwards.
@@ -661,7 +661,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 12 — Android Context package identity
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added per-JNI-environment Android package identity configuration through set_package_name, with basic Java package-segment validation.
 - Implemented Context.getPackageName() and Context.getOpPackageName() bridges. Both return guest-managed Java String objects from the configured package identity.
@@ -675,7 +675,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 13 — Manifest-backed Context bootstrap
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added JniEnv::from_manifest(heap, metadata), directly consuming stride-axml ManifestMetadata and configuring the Context package identity from the parsed AndroidManifest.xml package attribute.
 - Bootstrap fails closed when the manifest package attribute is missing or invalid; it does not invent a fallback package.
@@ -688,7 +688,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 14 — Manifest-backed PackageInfo mapping
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added PackageInfo::from_manifest(&ManifestMetadata) to build the framework PackageInfo record directly from parsed AndroidManifest.xml metadata.
 - Maps package identity, version code/name, min/target SDK, permissions, application class, launcher Activity, Activities and Services.
@@ -703,7 +703,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 15 — Bounded PackageManager package-info lookup
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added AndroidEnvironment::load_package_info_from_manifest to attach PackageInfo derived from parsed ManifestMetadata only when its package identity exactly matches the active app environment.
 - Added AndroidEnvironment::get_package_info as a bounded current-app PackageManager.getPackageInfo-style query.
@@ -717,7 +717,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 16 — Guest Java PackageManager.getPackageInfo bridge
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Connected manifest-backed metadata to JniEnv::from_manifest. The JNI environment now carries typed PackageInfo only when its package identity matches the configured app identity.
 - Added Context.getPackageManager() returning a guest-managed PackageManager object.
@@ -728,12 +728,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI/diagnostics improvements: Runtime Status now exposes the guest Java PackageManager capability; PackageInfo/PackageManager/ApplicationInfo log entries are categorized under a dedicated PackageManager diagnostics stage.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: only the active app's manifest-backed metadata is supported. Package visibility, package enumeration, permission-flag filtering, signatures, install/update times and the complete Android PackageInfo field surface remain unsupported.
-- Validation: not run separately; consolidated Rust workspace validation is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported by this implementation batch.
 
 ### Phase 17 — Guest Java PackageManager.getApplicationInfo bridge
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added the classic PackageManager.getApplicationInfo(String, int) handler.
 - Reuses the same validated current-app package identity and manifest-backed metadata path as getPackageInfo.
@@ -743,12 +743,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: the Runtime Status capability card names both guest getPackageInfo and getApplicationInfo JNI methods.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: this phase does not yet implement ApplicationInfo resource paths, flags, nativeLibraryDir, sourceDir, enabled state or label/resource resolution.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 18 — Context app-private directory paths
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added Context.getFilesDir() and Context.getCacheDir() guest JNI bridges.
 - Each method returns a guest-managed java.io.File object carrying the app-scoped Android-style path derived from the configured manifest package identity.
@@ -758,12 +758,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now lists app-private files/cache path support and clearly states that disk persistence is not implemented yet.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: these are guest path objects only. File creation, directory existence, read/write streams, mkdirs, deletion and durable sandbox-backed storage remain unsupported.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 19 — Extended guest app-private File path behavior
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added Context.getNoBackupFilesDir() and Context.getCodeCacheDir() using package-scoped Android-style paths.
 - Extended runtime-created guest java.io.File objects with getName(), getParent(), isAbsolute() and getAbsoluteFile(), alongside the Phase 18 path accessors.
@@ -771,12 +771,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI refinement: Runtime Status now lists all four app-private directory categories while explicitly retaining the no-disk-persistence limitation.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: paths remain guest metadata only. Directory creation, file I/O, canonical path resolution, permissions and durable storage are not implemented.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 20 — PackageManager launcher Intent resolution
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added guest PackageManager.getLaunchIntentForPackage(String) using only the active app's parsed manifest launcher activity.
 - Builds a guest-managed Intent with ACTION_MAIN, CATEGORY_LAUNCHER, package identity and ComponentName; all object references remain connected through the managed heap for GC tracing.
@@ -786,12 +786,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now surfaces launcher Intent resolution as a separate capability.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: only the current app's manifest-declared launcher is resolved. Cross-package intent resolution, intent filters beyond the parsed launcher, chooser/system activities and actual host-side activity dispatch remain unsupported.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 21 — Guest Intent construction and mutation
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added guest Intent constructors for empty and action-based intents.
 - Added setAction(), setPackage(), setClassName(String, String), addCategory(), setFlags() and addFlags().
@@ -801,12 +801,12 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra UI improvement: Runtime Status now separates Intent creation/mutation from manifest launcher resolution.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: this phase does not dispatch activities, resolve external packages, persist intents across process boundaries, or implement Parcelable/Bundle extras.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 22 — Guest Intent extras and Bundle reads
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: Completed (Rust workspace validation passed).**
 
 - Added Intent.putExtra() overloads for String, int, long and boolean values.
 - Added getStringExtra(), getIntExtra(), getLongExtra(), getBooleanExtra(), hasExtra() and getExtras().
@@ -814,25 +814,30 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Missing keys return Android-style null/default values; typed getters do not reinterpret mismatched primitive types.
 - Added regression coverage for typed round trips, Bundle access, key presence and default values.
 - Extra UI improvement: Runtime Status now exposes typed Intent extras as a separate capability.
+- Extra runtime bug fix: added ManagedHeap.has_instance_field() so missing fields are distinguishable from explicitly stored zero/null values; Intent getters now preserve caller defaults and hasExtra() checks true field presence.
 - UI polish: redesigned all Runtime Status rows with clearer spacing, readable multi-line descriptions, a consistent READY / IN PROGRESS status pill, and combined VoiceOver labels.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: Parcelable/custom objects, nested Bundles, arrays, URI/ClipData and cross-process serialization remain unsupported.
-- Validation: initial consolidated runs caught and corrected the ManagedHeap array-length API name and a missing-field/default-value distinction in Intent extras. Added an explicit heap field-presence API and regression; the final consolidated Rust workspace pass is pending. Swift UI compile remains unverified.
+- Validation: consolidated Rust workspace tests passed in workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Latest validation checkpoint — 2026-11-13
 
-- Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
-- Phases 16–19 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
-- No new IPA build was triggered by Phases 16–19. Do not build, sign or export another IPA without explicit user authorization.
+- Final consolidated workflow #43484355383 on commit `5198d1c89f32761f8f65d844849be62aedf18798`: complete Rust workspace test suite **passed**.
+- The workflow's unsigned iOS IPA job was **skipped**. No IPA was built, signed or exported.
+- Phases 16–22 are included in this validated source revision. Swift UI compilation remains unverified because the IPA/Xcode build was not run.
+- The first validation attempts exposed and fixed the array-length method mismatch and Intent extras default/presence bug. The final consolidated Rust run passed after those corrections.
+- All implementation changes remain on `feat/dex-class-method-loader`; `main` is untouched. The feature branch is substantially diverged from `main` (752 commits ahead and 12 behind at review time), so no broad merge was attempted without a separate reconciliation/review.
+- Do not build, sign or export an IPA without explicit user authorization.
 
 ### Next small implementation batches
-These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Android framework: add guest Java PackageManager object/JNI bridge for the typed current-app PackageInfo query.
-- Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
-- Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
+These are candidates, not completed work. Start only when implementing each phase:
+- Intent data and URI handling: getData(), setData(), setDataAndType(), scheme/host accessors with URI validation.
+- Bundle completeness: string/int/long/boolean defaults, containsKey(), remove(), and safe primitive-array support.
+- Activity navigation: connect guest startActivity() to the existing in-process activity dispatcher, with explicit unsupported results for external/system targets.
+- Graphics/input: one bounded Canvas, MotionEvent multi-pointer, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
-- UI/UX: one user-visible Stride library/launch/diagnostics improvement in a dedicated batch, with matching tests where practical.
+- Dedicated UI/UX batch: improve APK library cards, import progress, launch-state feedback and diagnostics presentation with matching tests where practical.
 - Compatibility harness: one exact APK scenario and evidence record at a time.
 
 ### Named compatibility target list
