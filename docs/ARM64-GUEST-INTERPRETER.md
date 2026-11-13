@@ -96,3 +96,8 @@ in this implementation-only batch.
 - Added result-preserving local-frame pop semantics so one returned reference can survive while temporary frame references are released from the JNI root set.
 - Invalid handles and frame underflow are reported explicitly. This remains an internal Rust-side JNI environment API: guest `JNIEnv*` function-table callbacks, global references, weak references, and automatic GC-root wiring from native guest execution are still not implemented.
 - Regression tests were added but intentionally not run in this implementation-only batch.
+
+### JNI failure-safety follow-up
+- `PopLocalFrame(result)` now validates the result and reserves parent-frame capacity before mutating frame state, so invalid handles/allocation failures do not partially pop the frame.
+- Local-reference vector capacity is reserved before allocating strings and primitive arrays, avoiding an infallible `Vec::push` growth after a managed object has already been allocated.
+- `NewLocalRef(NULL)` and `DeleteLocalRef(NULL)` follow JNI null-reference behavior. Regression coverage was updated/added but remains unrun pending the single final test pass.
