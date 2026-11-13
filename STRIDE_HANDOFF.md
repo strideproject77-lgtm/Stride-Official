@@ -721,7 +721,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 - Connected manifest-backed metadata to JniEnv::from_manifest. The JNI environment now carries typed PackageInfo only when its package identity matches the configured app identity.
 - Added Context.getPackageManager() returning a guest-managed PackageManager object.
-- Added PackageManager.getPackageInfo(String, int) and getPackageInfo(String, long) handlers.
+- Added the classic PackageManager.getPackageInfo(String, int) handler.
 - Materializes guest-managed PackageInfo, ApplicationInfo, ActivityInfo and ServiceInfo objects, plus requestedPermissions String[] and activity/service arrays. Object references are stored in the managed heap graph for GC tracing.
 - Rejects null package names, missing metadata and unknown packages explicitly; no placeholder package metadata or third-party package enumeration is fabricated.
 - Added regression coverage for manifest mapping into guest objects, nested arrays/fields, version values, unknown package rejection and missing metadata.
@@ -735,7 +735,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 **Status: implementation complete; consolidated validation pending.**
 
-- Added PackageManager.getApplicationInfo(String, int) and getApplicationInfo(String, long).
+- Added the classic PackageManager.getApplicationInfo(String, int) handler.
 - Reuses the same validated current-app package identity and manifest-backed metadata path as getPackageInfo.
 - Returns the ApplicationInfo guest object populated with packageName, className, minSdkVersion and targetSdkVersion.
 - Unknown packages, null package names and unavailable manifest metadata remain explicit errors.
