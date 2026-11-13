@@ -336,3 +336,10 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 Added `JniAbiFunctionTable` in `runtime-rust/crates/dex-runtime/src/jni.rs` and exported it from the crate root. It provides checked guest function-address installation, slot validation, AArch64 little-endian pointer-table serialization, and the environment-cell pointer encoding required by the C ABI. Added stable slot constants for the JNI native-interface prefix (0–26) and JavaVM invocation interface (3–7).
 
 **Important boundary:** this is guest ABI layout groundwork, not a live JNI bridge. No callback trampoline is generated, no `JNIEnv*` is installed into a running guest image, and no guest-callable function slots are populated by this batch. Actual HCR startup remains blocked on callback dispatch, shared cross-library guest memory/calls, Bionic pthread/TLS, and EGL/GLES2 integration. Tests remain intentionally deferred to the single final pass; no IPA/workflow was run.
+
+
+## Additional HCR runtime batch: AArch64 exclusive atomics
+
+Extended `Arm64Cpu` with an exclusive-monitor reservation and added LDXR/LDAXR plus STXR/STLXR decoding for 8/16/32/64-bit integer accesses. Store-exclusive reports success/failure in the status register and uses the existing guest-memory permission checks. Acquire/release forms currently share the single-interpreter ordering model.
+
+This is not full concurrent atomic support: reservation arbitration across multiple guest threads is still missing, so pthread mutex/condition-variable correctness and HCR's native thread startup remain blocked. Tests are deliberately deferred to the one final pass.
