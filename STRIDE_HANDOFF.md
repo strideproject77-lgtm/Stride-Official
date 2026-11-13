@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-07
+Updated: 2026-11-13
 
 ## Goal
 
@@ -466,7 +466,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | Phase | Single-batch scope | Status |
 |---|---|---|
 | 1 | Class-loader safety: sticky `<clinit>` failure state and atomic DEX registration | Completed — implementation reviewed; previous Rust workspace workflow passed |
-| 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; consolidated workflow pending |
+| 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; Rust workspace workflow passed |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -498,7 +498,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added regression tests for an `i32::MAX` array request against a 64-byte heap and invalid references/out-of-range positions in zero-length copies.
 - Extra improvement: array-copy range-end arithmetic now uses checked addition to avoid integer-overflow acceptance.
 - File: `runtime-rust/crates/dex-runtime/src/heap.rs`.
-- Validation: consolidated workflow pending; no IPA build.
+- Validation: workflow run #644 (commit `144b92e5ce0ce2f5015922d78961ad4999598797`) passed the complete Rust workspace test suite; `stride-dex-runtime` passed **166 tests, 0 failed**. The unsigned iOS IPA job was **Skipped**. No IPA build/sign/export occurred.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
