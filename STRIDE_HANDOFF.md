@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-13
+Updated: 2026-11-13 (Phase 16–17 implementation added)
 
 ## Goal
 
@@ -715,10 +715,42 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 16 — Guest Java PackageManager.getPackageInfo bridge
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Connected manifest-backed metadata to JniEnv::from_manifest. The JNI environment now carries typed PackageInfo only when its package identity matches the configured app identity.
+- Added Context.getPackageManager() returning a guest-managed PackageManager object.
+- Added PackageManager.getPackageInfo(String, int) and getPackageInfo(String, long) handlers.
+- Materializes guest-managed PackageInfo, ApplicationInfo, ActivityInfo and ServiceInfo objects, plus requestedPermissions String[] and activity/service arrays. Object references are stored in the managed heap graph for GC tracing.
+- Rejects null package names, missing metadata and unknown packages explicitly; no placeholder package metadata or third-party package enumeration is fabricated.
+- Added regression coverage for manifest mapping into guest objects, nested arrays/fields, version values, unknown package rejection and missing metadata.
+- Extra UI/diagnostics improvements: Runtime Status now exposes the guest Java PackageManager capability; PackageInfo/PackageManager/ApplicationInfo log entries are categorized under a dedicated PackageManager diagnostics stage.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: only the active app's manifest-backed metadata is supported. Package visibility, package enumeration, permission-flag filtering, signatures, install/update times and the complete Android PackageInfo field surface remain unsupported.
+- Validation: not run separately; consolidated Rust workspace validation is pending. Swift UI compile remains unverified.
+- IPA: not built, signed, or exported by this implementation batch.
+
+### Phase 17 — Guest Java PackageManager.getApplicationInfo bridge
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added PackageManager.getApplicationInfo(String, int) and getApplicationInfo(String, long).
+- Reuses the same validated current-app package identity and manifest-backed metadata path as getPackageInfo.
+- Returns the ApplicationInfo guest object populated with packageName, className, minSdkVersion and targetSdkVersion.
+- Unknown packages, null package names and unavailable manifest metadata remain explicit errors.
+- Added regression coverage for ApplicationInfo object type, SDK levels and application class mapping.
+- Extra UI improvement: the Runtime Status capability card names both guest getPackageInfo and getApplicationInfo JNI methods.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Scope boundary: this phase does not yet implement ApplicationInfo resource paths, flags, nativeLibraryDir, sourceDir, enabled state or label/resource resolution.
+- Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Latest validation checkpoint — 2026-11-13
 
-- Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job is queued/in progress. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
-- This checkpoint commit intentionally contains no source changes; Phase 16 work should start after the current build completes so the IPA being produced matches the validated source revision.
+- Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
+- Phases 16–17 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
+- No new IPA build was triggered by Phases 16–17. Do not build, sign or export another IPA without explicit user authorization.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
