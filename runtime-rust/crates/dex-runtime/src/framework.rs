@@ -129,6 +129,14 @@ pub struct PackageInfo {
     pub launcher_activity: Option<String>,
 }
 
+/// Explicit outcomes for the bounded, current-app PackageManager lookup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackageManagerError {
+    MetadataUnavailable,
+    PackageNotFound(String),
+    ManifestPackageMismatch { environment: String, manifest: String },
+}
+
 impl PackageInfo {
     /// Build the PackageManager-facing package record from parsed AndroidManifest.xml metadata.
     pub fn from_manifest(manifest: &stride_axml::ManifestMetadata) -> Result<Self, String> {
@@ -303,6 +311,36 @@ impl AndroidEnvironment {
         }
     }
 
+    /// Attach manifest-derived package metadata to this app environment.
+    /// The manifest identity must match the environment identity exactly.
+    pub fn load_package_info_from_manifest(
+        &mut self,
+        manifest: &stride_axml::ManifestMetadata,
+    ) -> Result<(), PackageManagerError> {
+        let info = PackageInfo::from_manifest(manifest)
+            .map_err(|_| PackageManagerError::MetadataUnavailable)?;
+        if info.package_name != self.package_name {
+            return Err(PackageManagerError::ManifestPackageMismatch {
+                environment: self.package_name.clone(),
+                manifest: info.package_name,
+            });
+        }
+        self.package_info = Some(info);
+        Ok(())
+    }
+
+    /// Bounded PackageManager.getPackageInfo-style lookup for this app only.
+    /// Other packages are reported as not found; no fabricated metadata is returned.
+    pub fn get_package_info(
+        &self,
+        requested_package: &str,
+    ) -> Result<&PackageInfo, PackageManagerError> {
+        if requested_package != self.package_name {
+            return Err(PackageManagerError::PackageNotFound(requested_package.to_owned()));
+        }
+        self.package_info.as_ref().ok_or(PackageManagerError::MetadataUnavailable)
+    }
+
     pub fn get_preferences(&mut self, name: &str) -> &mut SharedPreferences {
         self.shared_preferences.entry(name.to_owned()).or_default()
     }
@@ -322,6 +360,49 @@ impl AndroidEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn package_fixture_manifest(package_name: Option<&str>) -> stride_axml::ManifestMetadata {
+        stride_axml::ManifestMetadata {
+            package_name: package_name.map(str::to_owned),
+            version_name: Some("1.2.3".to_owned()),
+            version_code: Some(123),
+            min_sdk: Some(23),
+            target_sdk: Some(35),
+            permissions: vec!["android.permission.INTERNET".to_owned()],
+            application_name: None,
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        }
+    }
+
+    #[test]
+    fn package_manager_returns_only_loaded_current_package_metadata() {
+        let manifest = package_fixture_manifest(Some("com.stride.fixture"));
+        let mut env = AndroidEnvironment::new("com.stride.fixture");
+        assert_eq!(env.get_package_info("com.stride.fixture"), Err(PackageManagerError::MetadataUnavailable));
+        env.load_package_info_from_manifest(&manifest).unwrap();
+        let info = env.get_package_info("com.stride.fixture").unwrap();
+        assert_eq!(info.version_name, "1.2.3");
+        assert_eq!(info.version_code, 123);
+        assert_eq!(env.get_package_info("com.other.app"), Err(PackageManagerError::PackageNotFound("com.other.app".to_owned())));
+    }
+
+    #[test]
+    fn package_manager_rejects_manifest_identity_mismatch_without_mutating_state() {
+        let mut env = AndroidEnvironment::new("com.stride.fixture");
+        let mismatch = package_fixture_manifest(Some("com.attacker.other"));
+        assert!(matches!(
+            env.load_package_info_from_manifest(&mismatch),
+            Err(PackageManagerError::ManifestPackageMismatch { .. })
+        ));
+        assert!(env.package_info.is_none());
+        assert!(matches!(
+            env.load_package_info_from_manifest(&package_fixture_manifest(None)),
+            Err(PackageManagerError::MetadataUnavailable)
+        ));
+        assert!(env.package_info.is_none());
+    }
 
     #[test]
     fn package_info_maps_manifest_identity_versions_permissions_and_components() {
