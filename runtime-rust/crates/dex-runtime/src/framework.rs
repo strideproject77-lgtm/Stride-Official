@@ -129,6 +129,48 @@ pub struct PackageInfo {
     pub launcher_activity: Option<String>,
 }
 
+impl PackageInfo {
+    /// Build the PackageManager-facing package record from parsed AndroidManifest.xml metadata.
+    pub fn from_manifest(manifest: &stride_axml::ManifestMetadata) -> Result<Self, String> {
+        let package_name = manifest.package_name.as_deref()
+            .filter(|name| !name.is_empty())
+            .ok_or("manifest package identity is required for PackageInfo")?;
+
+        let mut activities = Vec::new();
+        let mut services = Vec::new();
+        for component in &manifest.components {
+            match component.kind.as_str() {
+                "activity" | "activity-alias" => activities.push(ActivityInfo {
+                    name: component.name.clone(),
+                    exported: component.exported.unwrap_or(false),
+                    screen_orientation: component.screen_orientation
+                        .or(manifest.screen_orientation)
+                        .unwrap_or(-1),
+                }),
+                "service" => services.push(ServiceInfo {
+                    name: component.name.clone(),
+                    exported: component.exported.unwrap_or(false),
+                    permission: None,
+                }),
+                _ => {}
+            }
+        }
+
+        Ok(Self {
+            package_name: package_name.to_owned(),
+            version_code: manifest.version_code.unwrap_or(0),
+            version_name: manifest.version_name.clone().unwrap_or_default(),
+            min_sdk: manifest.min_sdk.unwrap_or(1),
+            target_sdk: manifest.target_sdk.unwrap_or(1),
+            permissions: manifest.permissions.clone(),
+            activities,
+            services,
+            application_class: manifest.application_name.clone(),
+            launcher_activity: manifest.launcher_activity.clone(),
+        })
+    }
+}
+
 /// AssetManager providing access to raw packaged assets.
 #[derive(Debug, Default, Clone)]
 pub struct AssetManager {
@@ -275,5 +317,83 @@ impl AndroidEnvironment {
 
     pub fn get_activity_state(&self, class_descriptor: &str) -> ActivityLifecycleState {
         self.activity_state.get(class_descriptor).copied().unwrap_or(ActivityLifecycleState::NotStarted)
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_info_maps_manifest_identity_versions_permissions_and_components() {
+        let manifest = stride_axml::ManifestMetadata {
+            package_name: Some("com.stride.fixture".to_owned()),
+            version_name: Some("2.4.1".to_owned()),
+            version_code: Some(241),
+            min_sdk: Some(23),
+            target_sdk: Some(35),
+            permissions: vec!["android.permission.INTERNET".to_owned()],
+            application_name: Some("com.stride.fixture.App".to_owned()),
+            components: vec![
+                stride_axml::ManifestComponent {
+                    kind: "activity".to_owned(),
+                    name: "com.stride.fixture.MainActivity".to_owned(),
+                    exported: Some(true),
+                    has_launcher_intent: true,
+                    screen_orientation: Some(0),
+                },
+                stride_axml::ManifestComponent {
+                    kind: "service".to_owned(),
+                    name: "com.stride.fixture.SyncService".to_owned(),
+                    exported: None,
+                    has_launcher_intent: false,
+                    screen_orientation: None,
+                },
+                stride_axml::ManifestComponent {
+                    kind: "receiver".to_owned(),
+                    name: "com.stride.fixture.BootReceiver".to_owned(),
+                    exported: Some(false),
+                    has_launcher_intent: false,
+                    screen_orientation: None,
+                },
+            ],
+            launcher_activity: Some("com.stride.fixture.MainActivity".to_owned()),
+            screen_orientation: Some(1),
+        };
+
+        let info = PackageInfo::from_manifest(&manifest).unwrap();
+        assert_eq!(info.package_name, "com.stride.fixture");
+        assert_eq!(info.version_code, 241);
+        assert_eq!(info.version_name, "2.4.1");
+        assert_eq!(info.min_sdk, 23);
+        assert_eq!(info.target_sdk, 35);
+        assert_eq!(info.permissions, vec!["android.permission.INTERNET"]);
+        assert_eq!(info.application_class.as_deref(), Some("com.stride.fixture.App"));
+        assert_eq!(info.launcher_activity.as_deref(), Some("com.stride.fixture.MainActivity"));
+        assert_eq!(info.activities.len(), 1);
+        assert!(info.activities[0].exported);
+        assert_eq!(info.activities[0].screen_orientation, 0);
+        assert_eq!(info.services.len(), 1);
+        assert!(!info.services[0].exported);
+        assert_eq!(info.services[0].permission, None);
+    }
+
+    #[test]
+    fn package_info_rejects_missing_manifest_package_identity() {
+        let manifest = stride_axml::ManifestMetadata {
+            package_name: None,
+            version_name: None,
+            version_code: None,
+            min_sdk: None,
+            target_sdk: None,
+            permissions: Vec::new(),
+            application_name: None,
+            components: Vec::new(),
+            launcher_activity: None,
+            screen_orientation: None,
+        };
+        assert!(matches!(
+            PackageInfo::from_manifest(&manifest),
+            Err(error) if error.contains("package identity is required")
+        ));
     }
 }
