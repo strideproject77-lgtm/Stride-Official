@@ -492,6 +492,7 @@ struct ContentView: View {
                     statusCard("Manifest → Context bootstrap", detail: "Parsed package identity initializes JNI Context", symbol: "app.badge", good: true)
                     statusCard("PackageInfo metadata mapping", detail: "Versions, SDK levels, permissions and components", symbol: "shippingbox", good: true)
                     statusCard("PackageManager lookup", detail: "Manifest-backed current-app package query", symbol: "magnifyingglass", good: true)
+                    statusCard("Guest Java PackageManager", detail: "getPackageInfo + getApplicationInfo JNI bridge", symbol: "shippingbox.fill", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native libraries and graphics", detail: "Work in progress", symbol: "square.stack.3d.up", good: false)
                 }
@@ -1656,6 +1657,7 @@ private struct APKDetailSheet: View {
         case upper.contains("JNI"): stage = "JNI"
         case upper.contains("TOUCH") || upper.contains("INPUT"): stage = "INPUT"
         case upper.contains("FRAME") || upper.contains("RENDER") || upper.contains("CANVAS"): stage = "GRAPHICS"
+        case upper.contains("PACKAGEINFO") || upper.contains("PACKAGEMANAGER") || upper.contains("APPLICATIONINFO"): stage = "PACKAGEMANAGER"
         case upper.contains("ACTIVITY") || upper.contains("LIFECYCLE"): stage = "LIFECYCLE"
         case upper.contains("ARCHIVE") || upper.contains("APK"): stage = "ARCHIVE"
         case upper.contains("CLASS") || upper.contains("METHOD"): stage = "DEX_LINKER"
