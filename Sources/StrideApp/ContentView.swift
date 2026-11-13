@@ -709,19 +709,35 @@ struct ContentView: View {
     private func statusCard(_ title: String, detail: String, symbol: String, good: Bool) -> some View {
         HStack(spacing: 12) {
             Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .foregroundStyle(good ? accent : muted)
                 .frame(width: 38, height: 38)
-                .background((good ? accent : muted).opacity(0.10), in: RoundedRectangle(cornerRadius: 11))
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 12, weight: .semibold))
-                Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                .background((good ? accent : muted).opacity(0.11), in: RoundedRectangle(cornerRadius: 11))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text(detail)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(1)
             }
-            Spacer(minLength: 0)
+            Spacer(minLength: 5)
+            Text(good ? "READY" : "IN PROGRESS")
+                .font(.system(size: 8, weight: .heavy))
+                .tracking(0.55)
+                .foregroundStyle(good ? accent : muted)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background((good ? accent : muted).opacity(0.10), in: Capsule())
         }
-        .padding(13)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 12)
         .background(panel, in: RoundedRectangle(cornerRadius: 15))
         .overlay(RoundedRectangle(cornerRadius: 15).stroke(line, lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title), \(good ? "Ready" : "In progress"). \(detail)")
     }
 
     private func packageButton(_ item: ImportedAPK) -> some View {

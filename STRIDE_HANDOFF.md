@@ -814,6 +814,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Missing keys return Android-style null/default values; typed getters do not reinterpret mismatched primitive types.
 - Added regression coverage for typed round trips, Bundle access, key presence and default values.
 - Extra UI improvement: Runtime Status now exposes typed Intent extras as a separate capability.
+- UI polish: redesigned all Runtime Status rows with clearer spacing, readable multi-line descriptions, a consistent READY / IN PROGRESS status pill, and combined VoiceOver labels.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
 - Scope boundary: Parcelable/custom objects, nested Bundles, arrays, URI/ClipData and cross-process serialization remain unsupported.
 - Validation: pending the single consolidated Rust workspace pass; Swift UI compile remains unverified.
