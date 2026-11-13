@@ -686,9 +686,24 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 14 — Manifest-backed PackageInfo mapping
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Added PackageInfo::from_manifest(&ManifestMetadata) to build the framework PackageInfo record directly from parsed AndroidManifest.xml metadata.
+- Maps package identity, version code/name, min/target SDK, permissions, application class, launcher Activity, Activities and Services.
+- Activity records preserve per-component orientation and fall back to manifest-level orientation; service records preserve exported state. Components outside the current PackageInfo model are intentionally not misrepresented as activities or services.
+- Missing package identity is rejected. Missing optional version/SDK values use explicit conservative defaults; missing exported values default to false in the current bool-based model.
+- Added regression tests for full metadata mapping, component filtering/defaults and missing package identity.
+- Extra Settings UI improvement: Runtime Status now exposes PackageInfo metadata mapping as a separate capability.
+- Files: runtime-rust/crates/dex-runtime/src/framework.rs, Sources/StrideApp/ContentView.swift.
+- Integration boundary: this batch creates a reliable PackageInfo record from manifest metadata; it does not yet implement guest Java PackageManager object construction or all PackageManager query methods.
+- Validation: consolidated Rust workspace workflow pending; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Android framework: extend Context identity into a bounded application-info or PackageManager lookup backed by parsed manifest metadata.
+- Android framework: expose manifest-backed PackageInfo through one bounded PackageManager query bridge with explicit unsupported-query behavior.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
 - Graphics/input: one bounded Canvas, MotionEvent, or surface-lifecycle behavior plus regression.
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
