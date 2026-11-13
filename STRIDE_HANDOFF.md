@@ -518,7 +518,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 2. Weak JNI references do not keep objects alive and are cleared to NULL after their referents are collected, while their tokens remain deletable.
 3. Root snapshots are deterministic and deduplicated; focused regressions cover strong-root survival, weak-root clearing, and duplicate references.
 
-**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - Added `JniEnv::collect_garbage(additional_roots)` to combine caller roots with legacy local/global roots and opaque guest local/global roots before invoking the managed heap collector.
 - After the sweep, the entry point prunes collected weak JNI referents so their still-valid opaque handles resolve as NULL.
 - Made the combined strong-root snapshot sorted and deduplicated, preventing duplicate root entries when one object is retained through multiple JNI reference kinds.
@@ -527,7 +527,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra GC improvement in this combined batch: `ManagedHeap::collect_garbage` now removes stale interned-string cache entries after sweep, preventing dead string keys/handles from accumulating. Regression verifies reclaimed entries are removed and reinterning produces a fresh live object.
 - Files: `runtime-rust/crates/dex-runtime/src/jni.rs`, `runtime-rust/crates/dex-runtime/src/heap.rs`.
 - Latest implementation commits: `e578d89bd0c4312d21d1cb6d911732ca7c81656b` and follow-up regression coverage `b9da80154618c7d2e1f9f2a90a03a8236fcd44a9`.
-- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+- Validation: complete Rust workspace workflow run #664 (`43461894563`) passed on this branch; Rust runtime tests succeeded. The iOS/IPA job was skipped. No IPA build, signing, or export was run.
 
 ### Phase 4 — Most-specific interface default-method dispatch
 
@@ -537,7 +537,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 3. A more-specific abstract redeclaration suppresses a parent default; unrelated maximal defaults are not selected based on traversal order.
 4. Focused regressions cover child-default precedence, abstract suppression, and unrelated-default ambiguity.
 
-**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - Reworked `ClassHierarchy::resolve_virtual_method` to collect reachable interface declarations and select only maximally-specific declarations using interface assignability.
 - Preserved class-chain precedence and excluded static/private methods. Abstract interface declarations now participate in specificity, so they can correctly suppress inherited defaults.
 - Ambiguous unrelated maximal declarations return unresolved instead of silently selecting whichever interface happened to be visited first.
@@ -545,7 +545,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Extra improvement: interface dispatch is now deterministic and independent of the order in which interface descriptors are traversed.
 - Files: `runtime-rust/crates/dex-runtime/src/hierarchy.rs`.
 - Implementation commits: `335f61fac0fcdc513947e267ee29ed9b60a7f26e`, `10b92c50f401b081f7a02c7c9400506912f02d7f`.
-- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+- Validation: complete Rust workspace workflow run #664 (`43461894563`) passed on this branch; Rust runtime tests succeeded. The iOS/IPA job was skipped. No IPA build, signing, or export was run.
 
 ### Phase 5 — Preserve DEX method access flags during hierarchy linking
 
@@ -555,14 +555,14 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 3. Private and static method flags are preserved for later access/invoke-kind checks.
 4. Regression coverage verifies abstract, private, and static flags through the actual loader-to-hierarchy linking path.
 
-**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - Added `RuntimeClass::register_method_with_flags`; the existing `register_method` remains source-compatible and delegates with its previous public default.
 - Updated `AppClassLoader::link_hierarchy` to pass `LoadedMethod.access_flags` for both virtual and direct methods.
 - Added a loader-level regression that links an abstract subinterface method plus private and static direct methods, checks their flags, and verifies that the abstract declaration suppresses the parent interface default after linking.
 - Extra improvement: downstream access checks and invoke-kind validation now have the real DEX flags available instead of fabricated public flags.
 - Files: `runtime-rust/crates/dex-runtime/src/hierarchy.rs`, `runtime-rust/crates/dex-runtime/src/loader.rs`.
 - Implementation commits: `8762d631bebe3fcd2a3e56a7a55fafd03020b99a`, `b5fc4b6095373e7ba6bf86a3da11c13be0a7f250`, `fa0002b79f9df93e052fb58c8efaef6ec77ba986`.
-- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+- Validation: complete Rust workspace workflow run #664 (`43461894563`) passed on this branch; Rust runtime tests succeeded. The iOS/IPA job was skipped. No IPA build, signing, or export was run.
 
 ### Phase 6 — DEX invoke-kind and access-flag compatibility
 
@@ -573,7 +573,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 4. Framework declarations without a materialized runtime class remain eligible for exact-signature JNI/framework bridge resolution.
 5. Focused regressions cover static/instance mismatch, private/direct rules, constructor invocation, and class/interface dispatch-kind mismatch.
 
-**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+**Implementation log — 2026-11-13 — Completed and validated**
 - Added invoke-kind validation at the DEX interpreter call site using the preserved `RuntimeClass` method access flags.
 - Rejects incompatible static, direct, virtual, interface, and super invoke forms before argument decoding or dispatch, with call-site PC and target signature in the error.
 - Keeps framework/JNI bridge resolution working when no linked app declaration exists.
