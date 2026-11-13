@@ -49,7 +49,7 @@ pub use types::{Value, RegisterFile};
 pub use hierarchy::{ClassHierarchy, RuntimeClass};
 pub use sync::{MonitorTable, SyncError};
 pub use exceptions::{TryBlock, CatchHandler, ThrownException, RuntimeStackTrace, StackFrameInfo};
-pub use jni::{JniNativeRegistry, JniEnv, JniReferenceTable, NativeMethodKey};
+pub use jni::{JniNativeRegistry, JniEnv, JniReferenceTable, JniAbiFunctionTable, NativeMethodKey, jni_abi_slots, java_vm_abi_slots, JNI_NATIVE_INTERFACE_MIN_SLOTS, JAVA_VM_INVOCATION_INTERFACE_MIN_SLOTS};
 pub use framework::{
     AndroidEnvironment, SharedPreferences, ActivityLifecycleState, Bundle, Intent,
     PackageInfo, ActivityInfo, ServiceInfo, AssetManager, Resources,
