@@ -44,11 +44,10 @@ impl JniReferenceTable {
     fn allocate(&mut self, object_id: u32, kind: GuestReferenceKind) -> Result<u64, String> {
         if object_id == 0 { return Ok(0); }
         let handle = self.next_handle;
-        self.next_handle = self.next_handle.checked_add(1)
+        let next_handle = self.next_handle.checked_add(1)
             .ok_or_else(|| "JNI opaque reference handle space exhausted".to_owned())?;
         self.entries.try_reserve(1)
             .map_err(|_| "JNI opaque reference table allocation failed".to_owned())?;
-        self.entries.insert(handle, GuestReference { object_id, kind });
         if kind == GuestReferenceKind::Local {
             let frame = self.local_frames.last_mut()
                 .ok_or_else(|| "JNI local-reference frame stack is empty".to_owned())?;
@@ -56,6 +55,8 @@ impl JniReferenceTable {
                 .map_err(|_| "JNI local-reference frame allocation failed".to_owned())?;
             frame.push(handle);
         }
+        self.entries.insert(handle, GuestReference { object_id, kind });
+        self.next_handle = next_handle;
         Ok(handle)
     }
 
@@ -129,6 +130,16 @@ impl JniReferenceTable {
             return Err("JNI guest PopLocalFrame cannot pop the root frame".to_owned());
         }
         let result_object = self.resolve(result)?;
+        // Reserve the destination frame and entry slot before dropping the old
+        // frame, so allocation failure cannot destroy a valid result reference.
+        if result_object.is_some() {
+            self.local_frames[self.local_frames.len() - 2].try_reserve(1)
+                .map_err(|_| "JNI parent local-frame allocation failed".to_owned())?;
+            self.entries.try_reserve(1)
+                .map_err(|_| "JNI result reference allocation failed".to_owned())?;
+            self.next_handle.checked_add(1)
+                .ok_or_else(|| "JNI opaque reference handle space exhausted".to_owned())?;
+        }
         let frame = self.local_frames.pop().expect("frame count checked");
         for handle in frame { self.entries.remove(&handle); }
         match result_object {
