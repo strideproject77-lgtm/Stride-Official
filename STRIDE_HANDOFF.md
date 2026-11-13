@@ -631,7 +631,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added a focused regression covering stale weak promotion, weak-vs-null identity, and stale strong-reference rejection.
 - Extra Library UI improvement: when search is active, show a live filtered-results count (matches out of total) with an accessibility announcement and numeric transition.
 - Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
-- Validation: one consolidated Rust workspace test pass is pending at the end of this batch; Swift UI compile remains unverified.
+- Validation: consolidated Rust runtime workflow #679 (run ID 43470693805) passed, including this JNI regression. The iOS/IPA job was skipped; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Phase 10 — Keep handled exceptions out of later stack traces
@@ -644,7 +644,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added a regression: one child exception is caught, then a second exception escapes; the second trace must contain only its own caller frame and correct DEX code-unit offset.
 - Extra Diagnostics UI improvement: Unified Diagnostics now shows live fatal and warning counts alongside retained-event/error totals, making exception/crash triage quicker.
 - Files: runtime-rust/crates/dex-runtime/src/interpreter.rs, Sources/StrideApp/ContentView.swift.
-- Validation: one consolidated Rust workspace test pass is pending; Swift UI compile remains unverified.
+- Validation: consolidated Rust runtime workflow #679 (run ID 43470693805) passed, including the new exception-trace regression. The iOS/IPA job was skipped; Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
 ### Next small implementation batches
