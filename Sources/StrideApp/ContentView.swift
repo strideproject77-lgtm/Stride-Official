@@ -344,6 +344,23 @@ struct ContentView: View {
                 .background(panel, in: RoundedRectangle(cornerRadius: 13))
                 .overlay(RoundedRectangle(cornerRadius: 13).stroke(line, lineWidth: 1))
 
+                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("FILTERED RESULTS")
+                            .font(.system(size: 8, weight: .heavy))
+                            .kerning(1.0)
+                        Spacer()
+                        Text("\(filteredPackages.count) OF \(library.packages.count)")
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .contentTransition(.numericText())
+                    }
+                    .foregroundStyle(muted)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(filteredPackages.count) matching apps out of \(library.packages.count)")
+                }
+
                 HStack {
                     Text("ALL APPS")
                         .font(.system(size: 9, weight: .heavy))
