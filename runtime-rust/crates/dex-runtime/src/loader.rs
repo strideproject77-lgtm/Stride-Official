@@ -127,8 +127,15 @@ impl AppClassLoader {
             }
         }
 
+        // Stage every registration locally. Even the practically unreachable method-ID
+        // overflow path must not leave half of a DEX registered in the live loader.
         let mut classes_loaded = 0;
         let dex_index = self.dex_inventories.len();
+        let mut next_method_id = self.next_method_id;
+        let mut pending_classes = HashMap::new();
+        let mut pending_methods = HashMap::new();
+        let mut pending_method_lookup = HashMap::new();
+        let mut pending_method_dex_indices = HashMap::new();
 
         for class_def in &inventory.classes {
             let descriptor = class_def.descriptor.clone();
@@ -152,8 +159,8 @@ impl AppClassLoader {
             let mut virtual_methods = Vec::new();
 
             for m in &class_def.methods {
-                let mid = self.next_method_id;
-                let Some(next_method_id) = self.next_method_id.checked_add(1) else {
+                let mid = next_method_id;
+                let Some(next_id) = next_method_id.checked_add(1) else {
                     let detail = format!("Runtime method ID space exhausted while loading {}->{}{}", descriptor, m.name, m.prototype);
                     if let Some(diagnostics) = diagnostics {
                         diagnostics.record_detailed(
@@ -164,7 +171,7 @@ impl AppClassLoader {
                     }
                     return Err(detail);
                 };
-                self.next_method_id = next_method_id;
+                next_method_id = next_id;
                 let code = if m.code_offset != 0 {
                     match read_code_item(dex_bytes, m.code_offset) {
                         Ok(item) => {
@@ -229,9 +236,9 @@ impl AppClassLoader {
                     code,
                 };
 
-                self.methods_by_id.insert(mid, loaded_m);
-                self.method_dex_indices.insert(mid, dex_index);
-                self.method_lookup.insert(
+                pending_methods.insert(mid, loaded_m);
+                pending_method_dex_indices.insert(mid, dex_index);
+                pending_method_lookup.insert(
                     (descriptor.clone(), m.name.clone(), m.prototype.clone()),
                     mid,
                 );
@@ -255,10 +262,16 @@ impl AppClassLoader {
                 virtual_methods,
             };
 
-            self.classes.insert(descriptor, loaded_class);
+            pending_classes.insert(descriptor, loaded_class);
             classes_loaded += 1;
         }
 
+        // Commit only after every class and method has been staged successfully.
+        self.classes.extend(pending_classes);
+        self.methods_by_id.extend(pending_methods);
+        self.method_lookup.extend(pending_method_lookup);
+        self.method_dex_indices.extend(pending_method_dex_indices);
+        self.next_method_id = next_method_id;
         self.dex_inventories.push(inventory);
         Ok(classes_loaded)
     }
@@ -570,6 +583,22 @@ mod diagnostics_tests {
         assert!(retry_error.contains("previously failed"));
         assert_eq!(loader.classes[descriptor].init_state, ClassInitState::Error);
     }
+    #[test]
+    fn method_id_overflow_does_not_partially_register_a_dex() {
+        let dex = include_bytes!("../tests/fixtures/pocket-ridge-lite-classes.dex");
+        let mut loader = AppClassLoader::new();
+        loader.next_method_id = u32::MAX;
+
+        let error = loader.load_dex(dex).expect_err("method ID overflow must reject the DEX");
+        assert!(error.contains("method ID space exhausted"));
+        assert!(loader.classes.is_empty());
+        assert!(loader.methods_by_id.is_empty());
+        assert!(loader.method_lookup.is_empty());
+        assert!(loader.method_dex_indices.is_empty());
+        assert!(loader.dex_inventories.is_empty());
+        assert_eq!(loader.next_method_id, u32::MAX);
+    }
+
 
 
 }
