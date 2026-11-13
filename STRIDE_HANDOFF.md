@@ -470,6 +470,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Completed — implementation reviewed and regressions added; consolidated workflow pending |
 | 4 | DEX virtual dispatch: choose the maximally-specific interface declaration and reject ambiguous defaults | Completed — implementation reviewed and regressions added; consolidated workflow pending |
 | 5 | DEX hierarchy linking: preserve original method access flags so abstract/private/static declarations remain distinguishable | Implemented — focused regression added; consolidated workflow pending |
+| 6 | DEX invoke-kind validation: reject static/instance and direct/virtual/interface mismatches against linked access flags | Implemented — focused regressions added; consolidated workflow pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -554,6 +555,25 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Files: `runtime-rust/crates/dex-runtime/src/hierarchy.rs`, `runtime-rust/crates/dex-runtime/src/loader.rs`.
 - Implementation commits: `8762d631bebe3fcd2a3e56a7a55fafd03020b99a`, `b5fc4b6095373e7ba6bf86a3da11c13be0a7f250`, `fa0002b79f9df93e052fb58c8efaef6ec77ba986`.
 - Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+
+### Phase 6 — DEX invoke-kind and access-flag compatibility
+
+**Acceptance criteria**
+1. For linked app declarations, `invoke-static` must target static methods; instance invoke forms must not target static methods.
+2. `invoke-direct` must target a direct private instance method or constructor; virtual/interface/super forms must reject direct or private declarations.
+3. `invoke-virtual` and `invoke-interface` must agree with whether the referenced owner is a class or interface.
+4. Framework declarations without a materialized runtime class remain eligible for exact-signature JNI/framework bridge resolution.
+5. Focused regressions cover static/instance mismatch, private/direct rules, constructor invocation, and class/interface dispatch-kind mismatch.
+
+**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+- Added invoke-kind validation at the DEX interpreter call site using the preserved `RuntimeClass` method access flags.
+- Rejects incompatible static, direct, virtual, interface, and super invoke forms before argument decoding or dispatch, with call-site PC and target signature in the error.
+- Keeps framework/JNI bridge resolution working when no linked app declaration exists.
+- Added focused regressions for static-vs-instance mismatch, private direct calls, constructors, and class/interface opcode compatibility.
+- Extra UI improvement: refreshed the Home welcome hero from the old purple/blue treatment to a dark walnut-brown gradient with warm amber highlights, carrying the same palette into the mini app mark and CTA.
+- Files: `runtime-rust/crates/dex-runtime/src/interpreter.rs`, `Sources/StrideApp/ContentView.swift`.
+- Tests: added; deliberately deferred to the single consolidated Rust workflow. Swift UI compile also remains unverified until the final app validation.
+- IPA: not built, signed, or exported.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
