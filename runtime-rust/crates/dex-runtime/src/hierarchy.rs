@@ -111,46 +111,72 @@ impl ClassHierarchy {
         false
     }
 
-    /// Resolve virtual method call against a receiver's runtime class.
-    /// Traverses the inheritance tree upward to find the most specific override.
+    /// Resolve virtual method calls against the receiver's runtime class.
+    /// Class declarations take precedence; interface defaults use maximally
+    /// specific declarations so traversal order cannot select a parent default
+    /// over a child override or an abstract redeclaration.
     pub fn resolve_virtual_method(
         &self,
         receiver_class: &str,
         name: &str,
         prototype: &str,
     ) -> Option<(&RuntimeClass, &MethodDefinition)> {
+        let key = (name.to_owned(), prototype.to_owned());
         let mut current = receiver_class.to_owned();
+        let mut pending_interfaces = Vec::new();
+
+        // A class declaration (including an abstract override) wins over any
+        // interface default. Static and private methods are not virtual targets.
         while let Some(class) = self.classes.get(&current) {
-            if let Some(method) = class.methods.get(&(name.to_owned(), prototype.to_owned())) {
+            if let Some(method) = class.methods.get(&key) {
                 if !method.is_direct && method.access_flags & (0x0008 | 0x0002) == 0 {
                     return Some((class, method));
                 }
             }
+            pending_interfaces.extend(class.interface_descriptors.iter().cloned());
             if let Some(super_desc) = &class.superclass_descriptor {
                 current = super_desc.clone();
             } else {
                 break;
             }
         }
-        let mut pending = Vec::new();
+
+        // Collect every reachable interface declaration once. Keep abstract
+        // declarations too: a more-specific abstract redeclaration suppresses
+        // an inherited parent default.
         let mut visited = std::collections::HashSet::new();
-        let mut cursor = Some(receiver_class.to_owned());
-        while let Some(descriptor) = cursor {
-            if let Some(class) = self.classes.get(&descriptor) {
-                pending.extend(class.interface_descriptors.iter().cloned());
-                cursor = class.superclass_descriptor.clone();
-            } else { cursor = None; }
-        }
-        while let Some(interface) = pending.pop() {
-            if !visited.insert(interface.clone()) { continue; }
+        let mut declarations = Vec::new();
+        while let Some(interface) = pending_interfaces.pop() {
+            if !visited.insert(interface.clone()) {
+                continue;
+            }
             if let Some(class) = self.classes.get(&interface) {
-                if let Some(method) = class.methods.get(&(name.to_owned(), prototype.to_owned())) {
-                    if !method.is_direct && !class.is_abstract() { return Some((class, method)); }
+                if let Some(method) = class.methods.get(&key) {
+                    if !method.is_direct && method.access_flags & (0x0008 | 0x0002) == 0 {
+                        declarations.push((class, method));
+                    }
                 }
-                pending.extend(class.interface_descriptors.iter().cloned());
+                pending_interfaces.extend(class.interface_descriptors.iter().cloned());
             }
         }
-        None
+
+        // Discard declarations shadowed by a declaration in a strict
+        // subinterface. Multiple unrelated maximal declarations are ambiguous.
+        let maximal: Vec<_> = declarations.iter().copied().filter(|(candidate, _)| {
+            !declarations.iter().any(|(other, _)| {
+                other.descriptor != candidate.descriptor
+                    && self.is_assignable_from(&candidate.descriptor, &other.descriptor)
+            })
+        }).collect();
+
+        if maximal.len() != 1 {
+            return None;
+        }
+        let (owner, method) = maximal[0];
+        if method.access_flags & 0x0400 != 0 {
+            return None;
+        }
+        Some((owner, method))
     }
 
     /// Resolve `invoke-super` call starting from the declaring class's superclass.
@@ -336,4 +362,77 @@ mod tests {
         let (_, super_m) = hierarchy.resolve_super_method("Lgame/Car;", "drive", "()V").unwrap();
         assert_eq!(super_m.method_index, 10);
     }
+    fn interface_with_method(
+        descriptor: &str,
+        parents: Vec<String>,
+        method_index: u32,
+        method_flags: u32,
+    ) -> RuntimeClass {
+        RuntimeClass {
+            descriptor: descriptor.into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: parents,
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: {
+                let mut methods = HashMap::new();
+                methods.insert(
+                    ("render".into(), "()V".into()),
+                    MethodDefinition {
+                        method_index,
+                        name: "render".into(),
+                        prototype: "()V".into(),
+                        access_flags: method_flags,
+                        code_offset: method_index as u64,
+                        is_direct: false,
+                    },
+                );
+                methods
+            },
+            is_initialized: true,
+        }
+    }
+
+    #[test]
+    fn interface_dispatch_prefers_most_specific_default_method() {
+        let mut hierarchy = ClassHierarchy::new();
+        hierarchy.register_class(interface_with_method("Lgame/BaseView;", vec![], 10, 0x0001));
+        hierarchy.register_class(interface_with_method(
+            "Lgame/AnimatedView;", vec!["Lgame/BaseView;".into()], 20, 0x0001
+        ));
+        let mut widget = RuntimeClass::new("Lgame/Widget;", Some("Ljava/lang/Object;"));
+        widget.interface_descriptors = vec!["Lgame/AnimatedView;".into()];
+        hierarchy.register_class(widget);
+
+        let (owner, method) = hierarchy.resolve_virtual_method("Lgame/Widget;", "render", "()V").unwrap();
+        assert_eq!(owner.descriptor, "Lgame/AnimatedView;");
+        assert_eq!(method.method_index, 20);
+    }
+
+    #[test]
+    fn abstract_subinterface_redeclaration_suppresses_parent_default() {
+        let mut hierarchy = ClassHierarchy::new();
+        hierarchy.register_class(interface_with_method("Lgame/BaseView;", vec![], 10, 0x0001));
+        hierarchy.register_class(interface_with_method(
+            "Lgame/AbstractView;", vec!["Lgame/BaseView;".into()], 20, 0x0401
+        ));
+        let mut widget = RuntimeClass::new("Lgame/Widget;", Some("Ljava/lang/Object;"));
+        widget.interface_descriptors = vec!["Lgame/AbstractView;".into()];
+        hierarchy.register_class(widget);
+
+        assert!(hierarchy.resolve_virtual_method("Lgame/Widget;", "render", "()V").is_none());
+    }
+
+    #[test]
+    fn unrelated_interface_defaults_are_not_selected_by_traversal_order() {
+        let mut hierarchy = ClassHierarchy::new();
+        hierarchy.register_class(interface_with_method("Lgame/Left;", vec![], 10, 0x0001));
+        hierarchy.register_class(interface_with_method("Lgame/Right;", vec![], 20, 0x0001));
+        let mut widget = RuntimeClass::new("Lgame/Widget;", Some("Ljava/lang/Object;"));
+        widget.interface_descriptors = vec!["Lgame/Left;".into(), "Lgame/Right;".into()];
+        hierarchy.register_class(widget);
+
+        assert!(hierarchy.resolve_virtual_method("Lgame/Widget;", "render", "()V").is_none());
+    }
+
 }
