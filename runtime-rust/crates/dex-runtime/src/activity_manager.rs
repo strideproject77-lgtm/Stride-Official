@@ -86,9 +86,17 @@ impl ActivityManager {
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> Result<u32, String> {
-        let class_name = intent.component_class.clone().unwrap_or_else(|| "UnknownActivity".to_string());
+        let class_name = intent.component_class.clone()
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| "Activity dispatch requires an explicit in-process component class".to_string())?;
         let record_id = self.next_record_id;
-        self.next_record_id += 1;
+        let next_record_id = record_id.checked_add(1)
+            .ok_or_else(|| "Activity record ID space exhausted".to_string())?;
+
+        // Allocate before changing the current activity. A failed allocation must
+        // leave the visible backstack and its lifecycle state untouched.
+        let obj_ref = vm.heap.allocate_instance(&class_name)
+            .map_err(|error| format!("Activity instance allocation failed for {}: {:?}", class_name, error))?;
 
         // 1. Pause and stop existing top activity if present
         if let Some(task) = self.tasks.get_mut(self.current_task_index) {
@@ -102,20 +110,18 @@ impl ActivityManager {
             }
         }
 
-        // 2. Allocate heap instance for the new Activity
-        let obj_ref = vm.heap.allocate_instance(&class_name).ok();
-
+        // 2. Construct the new Activity record only after allocation succeeds.
         let mut record = ActivityRecord {
             record_id,
             class_name: class_name.clone(),
             intent,
             state: ActivityLifecycleState::Created,
             saved_instance_state: None,
-            heap_object_ref: obj_ref,
+            heap_object_ref: Some(obj_ref),
         };
 
         // 3. Dispatch onCreate -> onStart -> onResume
-        Self::dispatch_method(&class_name, "onCreate", "(Landroid/os/Bundle;)V", obj_ref, class_loader, vm);
+        Self::dispatch_create(&class_name, obj_ref, class_loader, vm);
         record.state = ActivityLifecycleState::Started;
         Self::dispatch_method(&class_name, "onStart", "()V", obj_ref, class_loader, vm);
         record.state = ActivityLifecycleState::Resumed;
@@ -126,6 +132,7 @@ impl ActivityManager {
             task.stack.push(record);
         }
 
+        self.next_record_id = next_record_id;
         Ok(record_id)
     }
 
@@ -174,6 +181,24 @@ impl ActivityManager {
         self.finish_top_activity(class_loader, vm)
     }
 
+    /// Android Activity.onCreate receives both the Activity receiver and a
+    /// nullable saved-instance-state Bundle argument on first creation.
+    fn dispatch_create(
+        class_name: &str,
+        receiver: u32,
+        class_loader: &mut AppClassLoader,
+        vm: &mut ArtVm,
+    ) {
+        if let Some(loaded_method) = class_loader.find_method_in_hierarchy(
+            class_name,
+            "onCreate",
+            "(Landroid/os/Bundle;)V",
+        ) {
+            let args = [Value::Object(receiver), Value::Null];
+            let _ = vm.execute_method(loaded_method, &args, 10_000);
+        }
+    }
+
     fn dispatch_method(
         class_name: &str,
         method_name: &str,
@@ -182,7 +207,7 @@ impl ActivityManager {
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) {
-        if let Some(loaded_method) = class_loader.find_method(class_name, method_name, descriptor) {
+        if let Some(loaded_method) = class_loader.find_method_in_hierarchy(class_name, method_name, descriptor) {
             let mut args = Vec::new();
             if let Some(obj_ref) = receiver {
                 args.push(Value::Object(obj_ref));

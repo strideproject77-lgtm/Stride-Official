@@ -872,7 +872,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 ### Latest validation checkpoint — 2026-11-13
 
 - Final consolidated workflow #43486129688 on commit `839ebf34f9a0d024d46a56d8b3ef066ffb9f6027`: complete Rust workspace test suite **passed** (265 tests across the workspace; zero failures).
-- Phases 23–25 are included in that validated source revision; Phases 16–25 are now recorded as Completed.
+- Phases 23–25 are included in that validated source revision; Phases 16–25 are recorded as Completed. Phase 26 is now in progress; its current implementation has not yet been validated.
 - The workflow's unsigned iOS IPA job was **skipped**. No IPA was built, signed or exported.
 - Swift UI compilation remains unverified because no Xcode/IPA build was run.
 - All implementation changes remain on `feat/dex-class-method-loader`; `main` is untouched. The branch has substantial divergence from `main`, so no merge was attempted without a separate reconciliation and review.
@@ -885,6 +885,23 @@ These are candidates, not completed work:
 - Native compatibility: one concrete ELF relocation, Bionic symbol, or JNI native-call behavior plus regression.
 - Dedicated UI/UX batch: improve APK library cards, import progress, launch-state feedback and diagnostics presentation with matching tests where practical.
 - Compatibility harness: one exact APK scenario and evidence record at a time.
+
+
+### Phase 26 — In-process Activity dispatch foundation
+
+**Status: Partial (implementation batch; consolidated validation pending).**
+
+- Hardened ActivityManager.start_activity() to require an explicit non-empty component class instead of silently routing implicit intents to a fabricated UnknownActivity.
+- Activity allocation now happens before the current top Activity is paused/stopped. Allocation failure returns a diagnostic error and leaves the existing backstack/lifecycle unchanged.
+- Activity record IDs now use checked increment so integer overflow cannot silently wrap and collide with earlier records.
+- onCreate(Bundle) now receives the Activity receiver plus an explicit null saved-state Bundle on first creation, matching the Android method descriptor.
+- Lifecycle callback lookup now walks the loaded class hierarchy so inherited Activity callbacks can resolve.
+- Extra bug fixes: missing component and heap allocation failures are surfaced as errors rather than being converted into apparently successful launches; dispatch now avoids mutating the current task before allocation succeeds.
+- Extra UI: Runtime Status now lists in-process Activity backstack support separately and clearly labels the guest Context.startActivity bridge as pending.
+- Files: runtime-rust/crates/dex-runtime/src/activity_manager.rs, Sources/StrideApp/ContentView.swift, STRIDE_HANDOFF.md.
+- Remaining: connect guest Context.startActivity() to the runtime-owned ActivityManager/ArtVm dispatch path; resolve and reject external/system package targets explicitly; propagate guest lifecycle exceptions and synchronize the dispatched top Activity with AndroidRuntime.active_activity_obj/active_activity_class. Add end-to-end JNI dispatch tests.
+- Tests: Not run (consolidated validation pending).
+- IPA: Not built, signed or exported.
 
 ### Named compatibility target list
 
