@@ -1242,6 +1242,25 @@ private struct APKDetailSheet: View {
                                     .foregroundStyle(accent)
                             }
                             Button {
+                                let fatalCount = diagnostics.entries.filter { $0.severity == .fatal }.count
+                                let errorCount = diagnostics.entries.filter { $0.severity == .error }.count
+                                let warningCount = diagnostics.entries.filter { $0.severity == .warning }.count
+                                let recent = diagnostics.entries.suffix(12).map(\.line).joined(separator: "\n")
+                                let summary = [
+                                    "STRIDE DIAGNOSTICS SUMMARY",
+                                    "Events: \(diagnostics.entries.count)",
+                                    "Fatal: \(fatalCount) · Errors: \(errorCount) · Warnings: \(warningCount)",
+                                    "",
+                                    "RECENT EVENTS",
+                                    recent
+                                ].joined(separator: "\n")
+                                UIPasteboard.general.string = summary
+                            } label: {
+                                Label("SUMMARY", systemImage: "doc.text.magnifyingglass")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(accent)
+                            }
+                            Button {
                                 logExportURL = diagnostics.logFileURL
                                 showingLogShare = true
                             } label: {
