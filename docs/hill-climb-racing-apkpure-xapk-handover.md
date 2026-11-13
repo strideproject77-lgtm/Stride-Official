@@ -321,6 +321,7 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 ### Guest JNI reference-token layer
 - Added opaque 64-bit guest reference tokens, deliberately separate from internal `u32` managed object IDs. Local, strong-global and weak-global references now have distinct lifetime classes.
 - Added local-frame push/pop with result re-issuance, reference cloning/deletion, guest-handle resolution, same-object checks, strong-root snapshots and weak-reference pruning.
+- Weak references do not keep objects alive; after collection their referent is cleared to NULL while the JNI weak handle remains valid for comparison/deletion.
 - The table is currently Rust-side infrastructure. It is not yet installed as a guest-callable `JNIEnv*` table and does not provide callable native callback trampolines or automatic GC integration.
 - Regression coverage was added but not run; defer all tests to the one final pass.
 
