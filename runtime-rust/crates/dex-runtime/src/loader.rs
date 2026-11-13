@@ -285,12 +285,12 @@ impl AppClassLoader {
             rt_class.access_flags = class.access_flags;
             for &mid in &class.virtual_methods {
                 if let Some(m) = self.methods_by_id.get(&mid) {
-                    rt_class.register_method(&m.name, &m.prototype, mid, false);
+                    rt_class.register_method_with_flags(&m.name, &m.prototype, mid, false, m.access_flags);
                 }
             }
             for &mid in &class.direct_methods {
                 if let Some(m) = self.methods_by_id.get(&mid) {
-                    rt_class.register_method(&m.name, &m.prototype, mid, true);
+                    rt_class.register_method_with_flags(&m.name, &m.prototype, mid, true, m.access_flags);
                 }
             }
             hierarchy.register_class(rt_class);
@@ -486,6 +486,55 @@ mod diagnostics_tests {
         );
         assert_eq!(loader.find_method_in_hierarchy(child, "onClick", signature), Some(42));
         assert_eq!(loader.find_method_in_hierarchy(child, "missing", signature), None);
+    }
+
+    #[test]
+    fn hierarchy_linking_preserves_dex_access_flags_for_interface_methods() {
+        let base = "Ltest/BaseContract;";
+        let child = "Ltest/AbstractContract;";
+        let mut loader = AppClassLoader::new();
+        loader.classes.insert(base.into(), LoadedClass {
+            descriptor: base.into(),
+            super_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: Vec::new(),
+            access_flags: 0x0601,
+            init_state: ClassInitState::NotInitialized,
+            static_fields: HashMap::new(),
+            instance_field_names: Vec::new(),
+            direct_methods: Vec::new(),
+            virtual_methods: vec![10],
+        });
+        loader.classes.insert(child.into(), LoadedClass {
+            descriptor: child.into(),
+            super_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec![base.into()],
+            access_flags: 0x0601,
+            init_state: ClassInitState::NotInitialized,
+            static_fields: HashMap::new(),
+            instance_field_names: Vec::new(),
+            direct_methods: Vec::new(),
+            virtual_methods: vec![11],
+        });
+        loader.methods_by_id.insert(10, LoadedMethod {
+            method_id: 10, class_descriptor: base.into(), name: "render".into(),
+            prototype: "()V".into(), access_flags: 0x0001, is_direct: false, code: None,
+        });
+        loader.methods_by_id.insert(11, LoadedMethod {
+            method_id: 11, class_descriptor: child.into(), name: "render".into(),
+            prototype: "()V".into(), access_flags: 0x0401, is_direct: false, code: None,
+        });
+
+        let mut hierarchy = ClassHierarchy::new();
+        loader.link_hierarchy(&mut hierarchy);
+        let child_method = hierarchy.get_class(child).unwrap().methods
+            .get(&("render".into(), "()V".into())).unwrap();
+        assert_eq!(child_method.access_flags, 0x0401);
+
+        let mut widget = RuntimeClass::new("Ltest/Widget;", Some("Ljava/lang/Object;"));
+        widget.interface_descriptors = vec![child.into()];
+        hierarchy.register_class(widget);
+        assert!(hierarchy.resolve_virtual_method("Ltest/Widget;", "render", "()V").is_none(),
+            "abstract child declaration must suppress the parent default after DEX linking");
     }
 
     #[test]
