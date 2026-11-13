@@ -123,9 +123,9 @@ impl ActivityManager {
         // 3. Dispatch onCreate -> onStart -> onResume
         Self::dispatch_create(&class_name, obj_ref, class_loader, vm);
         record.state = ActivityLifecycleState::Started;
-        Self::dispatch_method(&class_name, "onStart", "()V", obj_ref, class_loader, vm);
+        Self::dispatch_method(&class_name, "onStart", "()V", Some(obj_ref), class_loader, vm);
         record.state = ActivityLifecycleState::Resumed;
-        Self::dispatch_method(&class_name, "onResume", "()V", obj_ref, class_loader, vm);
+        Self::dispatch_method(&class_name, "onResume", "()V", Some(obj_ref), class_loader, vm);
 
         // 4. Push onto active task
         if let Some(task) = self.tasks.get_mut(self.current_task_index) {
