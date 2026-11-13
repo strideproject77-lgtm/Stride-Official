@@ -383,7 +383,7 @@ mod tests {
                         name: "render".into(),
                         prototype: "()V".into(),
                         access_flags: method_flags,
-                        code_offset: method_index as u64,
+                        code_offset: 0,
                         is_direct: false,
                     },
                 );
