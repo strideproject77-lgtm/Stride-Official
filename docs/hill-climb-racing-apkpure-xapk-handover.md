@@ -316,6 +316,8 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 - New regression tests are present but have not been run.
 
 ### JNI local-reference failure-safety follow-up
+
+- Added strong JNI global-reference lifecycle APIs and combined strong-root snapshots so global references can outlive local-frame pops. Weak globals and automatic native-runtime GC root handoff remain future work.
 - Made result-preserving frame pop atomic on invalid handles or reservation failure; the active frame remains intact when validation fails.
 - Reserve local-reference capacity before creating strings/int/byte arrays, and accept null in NewLocalRef/DeleteLocalRef according to JNI semantics.
 - Regression coverage was updated/added; not run yet. Still no guest-callable JNI function table, global/weak references, or automatic GC root handoff.
