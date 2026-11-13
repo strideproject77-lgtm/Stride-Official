@@ -468,6 +468,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 1 | Class-loader safety: sticky `<clinit>` failure state and atomic DEX registration | Completed — implementation reviewed; previous Rust workspace workflow passed |
 | 2 | Managed-heap safety: reject oversized arrays before backing allocation; validate zero-length array-copy arguments | Completed — implementation and regressions added; Rust workspace workflow passed |
 | 3 | JNI-aware managed-heap collection: include legacy and opaque JNI strong refs; clear weak refs after sweep | Implemented — focused regressions added; consolidated workflow pending |
+| 4 | DEX virtual dispatch: choose the maximally-specific interface declaration and reject ambiguous defaults | Implemented — focused regressions added; consolidated workflow pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -513,13 +514,32 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Made the combined strong-root snapshot sorted and deduplicated, preventing duplicate root entries when one object is retained through multiple JNI reference kinds.
 - Added regressions proving local, legacy-global, opaque guest-global, and caller-provided roots survive; weak-only objects are reclaimed and weak handles resolve as NULL; duplicate strong handles yield one root.
 - Extra improvement: all callers using the new JNI-aware entry point get one consistent GC lifecycle instead of having to manually assemble roots and remember weak-reference pruning.
-- File: `runtime-rust/crates/dex-runtime/src/jni.rs`.
+- Extra GC improvement in this combined batch: `ManagedHeap::collect_garbage` now removes stale interned-string cache entries after sweep, preventing dead string keys/handles from accumulating. Regression verifies reclaimed entries are removed and reinterning produces a fresh live object.
+- Files: `runtime-rust/crates/dex-runtime/src/jni.rs`, `runtime-rust/crates/dex-runtime/src/heap.rs`.
 - Latest implementation commits: `e578d89bd0c4312d21d1cb6d911732ca7c81656b` and follow-up regression coverage `b9da80154618c7d2e1f9f2a90a03a8236fcd44a9`.
+- Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
+
+### Phase 4 — Most-specific interface default-method dispatch
+
+**Acceptance criteria**
+1. Class declarations retain precedence over interface defaults, with static/private methods excluded from virtual dispatch.
+2. Among inherited interface declarations, a strict subinterface declaration takes precedence over its parent declaration.
+3. A more-specific abstract redeclaration suppresses a parent default; unrelated maximal defaults are not selected based on traversal order.
+4. Focused regressions cover child-default precedence, abstract suppression, and unrelated-default ambiguity.
+
+**Implementation log — 2026-11-13 — Implemented (workflow pending)**
+- Reworked `ClassHierarchy::resolve_virtual_method` to collect reachable interface declarations and select only maximally-specific declarations using interface assignability.
+- Preserved class-chain precedence and excluded static/private methods. Abstract interface declarations now participate in specificity, so they can correctly suppress inherited defaults.
+- Ambiguous unrelated maximal declarations return unresolved instead of silently selecting whichever interface happened to be visited first.
+- Added three regressions for subinterface default precedence, abstract redeclaration suppression, and unrelated default ambiguity.
+- Extra improvement: interface dispatch is now deterministic and independent of the order in which interface descriptors are traversed.
+- Files: `runtime-rust/crates/dex-runtime/src/hierarchy.rs`.
+- Implementation commits: `335f61fac0fcdc513947e267ee29ed9b60a7f26e`, `10b92c50f401b081f7a02c7c9400506912f02d7f`.
 - Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- DEX method resolution: one precedence/access-check edge case plus focused regression.
+- DEX method resolution: remaining access-check and invoke-kind edge cases, each as a separate small batch.
 - Managed object references: one concrete GC-root/reachability edge case plus regression.
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
 - JNI: one guest-reference or argument-conversion behavior plus regression.
