@@ -465,7 +465,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | DEX Runtime & Class Loading | Partial — DEX interpreter and multi-DEX loader foundations exist; full resolution/coverage remains |
+| 1 | DEX Runtime & Class Loading | Partial — class-initializer failure state is now sticky and execution errors are captured; broader resolution/dispatch/opcode/verifier scope remains |
 | 2 | Java Object & Exception System | Partial — managed heap, hierarchy and exception foundations exist |
 | 3 | Android Context & Application | Partial — framework structures and Context groundwork exist |
 | 4 | Activity Lifecycle | Partial — lifecycle state machine and ActivityManager foundations exist |
@@ -500,6 +500,36 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 4. Link classes across multiple DEX files.
 5. Add safe missing-class/method handling and diagnostics.
 6. Expand DEX opcode compatibility and verifier coverage.
+
+### Phase 1 implementation log — 2026-11-13
+
+**Status: Partial (not Completed).**
+
+**Implemented in this batch**
+- Updated `runtime-rust/crates/dex-runtime/src/loader.rs` so an exception/error returned by `ArtVm::execute_method` during `<clinit>` marks the class `Error` instead of leaving it stuck in `Initializing`.
+- Made `ClassInitState::Error` terminal for the current class-loader session: later initialization attempts now return an explicit prior-failure error instead of silently returning success or rerunning a partially executed initializer.
+- Added regression coverage that injects an unsupported opcode into a synthetic `<clinit>`, checks the first initialization failure, and verifies the second attempt remains failed.
+- Preserved the existing recursive-initialization behavior for `Initializing` and the no-op behavior for external/framework classes.
+
+**Extra reliability improvement**
+- Class initialization now reports interpreter execution errors with the class descriptor and original runtime error, rather than propagating an uncontextualized error while leaving inconsistent state.
+
+**Remaining Phase 1 work**
+- Complete transactional DEX loading so an unexpected failure cannot leave partially registered methods/classes.
+- Review class/method resolution precedence, access checks, direct-vs-virtual dispatch and interface/default-method behavior.
+- Make instance-field resolution honor the full owner/name/type identity, including inherited/shadowed fields.
+- Audit multi-DEX ownership for every identifier table and nested invocation path.
+- Expand opcode/verifier coverage based on real APK failures and add targeted regressions.
+
+**Files changed**
+- `runtime-rust/crates/dex-runtime/src/loader.rs`
+
+**Validation**
+- Added a regression test; execution is pending the branch's Rust test workflow.
+- No IPA build, signing, export, or packaging was started.
+- `main` remains untouched.
+
+---
 
 ### Phase 2 — Java Object & Exception System
 7. Improve object allocation and lifecycle.
