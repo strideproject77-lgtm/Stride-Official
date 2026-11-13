@@ -621,9 +621,22 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Tests: consolidated Rust workspace workflow #672 (run ID `43466701440`) passed, including the new regression. The iOS/IPA job was skipped. Swift UI compile remains unverified.
 - IPA: not built, signed, or exported.
 
+### Phase 9 — JNI weak-reference promotion semantics
+
+**Status: implementation complete; consolidated validation pending.**
+
+- Fixed resolve_guest_ref so a weak global reference whose referent has already been reclaimed resolves as NULL, even if collection was invoked through the lower-level heap API before the JNI post-GC pruning pass.
+- NewLocalRef-style promotion from that cleared weak reference now creates the null handle (0) instead of returning a stale-object error.
+- Strong references that point to reclaimed objects still report an explicit invariant error; unknown/deleted guest tokens remain errors.
+- Added a focused regression covering stale weak promotion, weak-vs-null identity, and stale strong-reference rejection.
+- Extra Library UI improvement: when search is active, show a live filtered-results count (matches out of total) with an accessibility announcement and numeric transition.
+- Files: runtime-rust/crates/dex-runtime/src/jni.rs, Sources/StrideApp/ContentView.swift.
+- Validation: one consolidated Rust workspace test pass is pending at the end of this batch; Swift UI compile remains unverified.
+- IPA: not built, signed, or exported.
+
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
-- Managed object references: one concrete GC-root/reachability edge case plus regression.
+- Exception propagation: one specific handler/stack-trace correctness issue plus regression.
 - Exception propagation: one specific handler/stack-trace correctness issue plus regression.
 - JNI: one guest-reference or argument-conversion behavior plus regression.
 - Android framework: one commonly used Context/Intent/PackageManager behavior plus regression.
