@@ -319,6 +319,40 @@ impl<'a> JniEnv<'a> {
         Ok(object_id)
     }
 
+    pub fn new_guest_local_ref_from_handle(&mut self, guest_handle: u64) -> Result<u64, String> {
+        let object_id = self.resolve_guest_ref(guest_handle)?.unwrap_or(0);
+        self.new_guest_local_ref(object_id)
+    }
+
+    pub fn new_guest_global_ref_from_handle(&mut self, guest_handle: u64) -> Result<u64, String> {
+        let object_id = self.resolve_guest_ref(guest_handle)?.unwrap_or(0);
+        self.new_guest_global_ref(object_id)
+    }
+
+    pub fn new_guest_weak_global_ref_from_handle(&mut self, guest_handle: u64) -> Result<u64, String> {
+        let object_id = self.resolve_guest_ref(guest_handle)?.unwrap_or(0);
+        self.new_guest_weak_global_ref(object_id)
+    }
+
+    pub fn delete_guest_local_ref(&mut self, guest_handle: u64) -> Result<(), String> {
+        self.guest_references.delete_local(guest_handle)
+    }
+
+    pub fn delete_guest_global_ref(&mut self, guest_handle: u64) -> Result<(), String> {
+        self.guest_references.delete_global(guest_handle)
+    }
+
+    pub fn delete_guest_weak_global_ref(&mut self, guest_handle: u64) -> Result<(), String> {
+        self.guest_references.delete_weak_global(guest_handle)
+    }
+
+    pub fn guest_refs_are_same(&self, left: u64, right: u64) -> Result<bool, String> {
+        // A stale weak reference behaves as NULL once its referent has been collected.
+        let left_object = self.resolve_guest_ref(left).unwrap_or(None);
+        let right_object = self.resolve_guest_ref(right).unwrap_or(None);
+        Ok(left_object == right_object)
+    }
+
     /// Snapshot roots from both the legacy internal API and opaque guest handles.
     pub fn all_strong_reference_roots(&self) -> Vec<u32> {
         let mut roots = self.strong_reference_roots();
@@ -1040,6 +1074,25 @@ mod tests {
         env.guest_references.delete_global(global).unwrap();
         assert!(env.guest_references.strong_roots(env.heap).is_empty());
         assert_eq!(env.guest_references.resolve(weak).unwrap(), Some(object));
+    }
+
+    #[test]
+    fn guest_reference_clone_delete_and_same_object_follow_jni_rules() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let object = env.new_string_utf("same").unwrap();
+        let first = env.new_guest_local_ref(object).unwrap();
+        let second = env.new_guest_local_ref_from_handle(first).unwrap();
+        assert_ne!(first, second);
+        assert!(env.guest_refs_are_same(first, second).unwrap());
+        let global = env.new_guest_global_ref_from_handle(first).unwrap();
+        env.delete_guest_local_ref(first).unwrap();
+        assert_eq!(env.resolve_guest_ref(second).unwrap(), Some(object));
+        assert_eq!(env.resolve_guest_ref(global).unwrap(), Some(object));
+        env.delete_guest_global_ref(global).unwrap();
+        env.delete_guest_local_ref(second).unwrap();
+        assert!(env.guest_refs_are_same(0, 0).unwrap());
+        assert!(env.new_guest_local_ref_from_handle(0).unwrap() == 0);
     }
 
     #[test]
