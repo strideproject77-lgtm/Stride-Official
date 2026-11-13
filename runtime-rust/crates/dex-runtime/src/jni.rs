@@ -736,7 +736,19 @@ mod tests {
         assert!(env.new_local_ref(999).is_err());
         env.try_push_local_frame(1).unwrap();
         assert!(env.pop_local_frame_with_result(Some(999)).is_err());
+        // A failed pop must leave both frame and references unchanged.
+        assert_eq!(env.local_frames.len(), 1);
+        assert!(env.pop_local_frame_with_result(None).is_ok());
         assert!(env.local_frames.is_empty());
+    }
+
+    #[test]
+    fn null_local_reference_matches_jni_null_semantics() {
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        assert_eq!(env.new_local_ref(0).unwrap(), 0);
+        assert!(env.local_refs.is_empty());
+        assert!(env.delete_local_ref(0).is_ok());
     }
 
     #[test]
