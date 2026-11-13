@@ -46,6 +46,9 @@ pub struct Arm64Cpu {
     pub flags: Arm64Flags,
     pub instructions_executed: u64,
     pub halted: bool,
+    /// Per-interpreter exclusive reservation used by LDXR/LDAXR and
+    /// STXR/STLXR. Cross-thread reservation arbitration is not implemented yet.
+    pub exclusive_monitor: Option<(u64, usize)>,
 }
 
 impl Default for Arm64Cpu {
@@ -57,6 +60,7 @@ impl Default for Arm64Cpu {
             flags: Arm64Flags::default(),
             instructions_executed: 0,
             halted: false,
+            exclusive_monitor: None,
         }
     }
 }
@@ -696,6 +700,50 @@ pub fn run_aarch64(
                     _ => unreachable!(),
                 }
             }
+            continue;
+        }
+
+        // AArch64 exclusive loads/stores used by compiler-generated atomics.
+        // Acquire/release variants share the same single-interpreter ordering
+        // here; cross-guest-thread reservation arbitration remains a scheduler task.
+        let exclusive_class = instruction & 0x3F20_7C00;
+        if exclusive_class == 0x085F_7C00 {
+            let size_code = instruction >> 30;
+            let width = 1usize << size_code;
+            let rn = (instruction >> 5) & 0x1F;
+            let rt = instruction & 0x1F;
+            let address = read_reg(cpu, rn, true, true)?;
+            let value = match width {
+                1 => memory.read_u8(address)? as u64,
+                2 => memory.read_u16(address)? as u64,
+                4 => memory.read_u32(address)? as u64,
+                8 => memory.read_u64(address)?,
+                _ => unreachable!(),
+            };
+            write_reg(cpu, rt, value, width == 8, false)?;
+            cpu.exclusive_monitor = Some((address, width));
+            continue;
+        }
+        if exclusive_class == 0x0800_7C00 {
+            let size_code = instruction >> 30;
+            let width = 1usize << size_code;
+            let rs = (instruction >> 16) & 0x1F;
+            let rn = (instruction >> 5) & 0x1F;
+            let rt = instruction & 0x1F;
+            let address = read_reg(cpu, rn, true, true)?;
+            let value = read_reg(cpu, rt, width == 8, false)?;
+            let success = cpu.exclusive_monitor == Some((address, width));
+            cpu.exclusive_monitor = None;
+            if success {
+                match width {
+                    1 => memory.write_u8(address, value as u8)?,
+                    2 => memory.write_u16(address, value as u16)?,
+                    4 => memory.write_u32(address, value as u32)?,
+                    8 => memory.write_u64(address, value)?,
+                    _ => unreachable!(),
+                }
+            }
+            write_reg(cpu, rs, if success { 0 } else { 1 }, false, false)?;
             continue;
         }
 
