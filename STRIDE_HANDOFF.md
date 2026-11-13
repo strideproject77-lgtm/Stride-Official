@@ -514,6 +514,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 - Added regressions proving local, legacy-global, opaque guest-global, and caller-provided roots survive; weak-only objects are reclaimed and weak handles resolve as NULL; duplicate strong handles yield one root.
 - Extra improvement: all callers using the new JNI-aware entry point get one consistent GC lifecycle instead of having to manually assemble roots and remember weak-reference pruning.
 - File: `runtime-rust/crates/dex-runtime/src/jni.rs`.
+- Latest implementation commits: `e578d89bd0c4312d21d1cb6d911732ca7c81656b` and follow-up regression coverage `b9da80154618c7d2e1f9f2a90a03a8236fcd44a9`.
 - Validation: deliberately deferred to the single consolidated Rust workspace workflow. No IPA build, signing, or export was run.
 
 ### Next small implementation batches
