@@ -778,7 +778,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 - Workflow #701 (`43481239721`) on commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`: complete Rust workspace tests **passed**; unsigned iOS IPA job remains queued. Do not claim an IPA artifact until the macOS job succeeds and the artifact is available.
 - Phases 16–19 were implemented after this workflow was queued, so workflow #701 does **not** contain those source changes. It remains a pre-Phase-16 build snapshot; the new source requires its own consolidated validation before any merge.
-- No new IPA build was triggered by Phases 16–17. Do not build, sign or export another IPA without explicit user authorization.
+- No new IPA build was triggered by Phases 16–19. Do not build, sign or export another IPA without explicit user authorization.
 
 ### Next small implementation batches
 These are candidate batches, not oversized phases. Create the next numbered phase only when beginning its implementation:
