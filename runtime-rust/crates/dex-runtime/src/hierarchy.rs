@@ -28,13 +28,25 @@ impl RuntimeClass {
     }
 
     pub fn register_method(&mut self, name: &str, prototype: &str, method_index: u32, is_direct: bool) {
+        self.register_method_with_flags(name, prototype, method_index, is_direct, 0x0001);
+    }
+
+    /// Register a method while preserving its original DEX access flags.
+    pub fn register_method_with_flags(
+        &mut self,
+        name: &str,
+        prototype: &str,
+        method_index: u32,
+        is_direct: bool,
+        access_flags: u32,
+    ) {
         self.methods.insert(
             (name.to_string(), prototype.to_string()),
             MethodDefinition {
                 method_index,
                 name: name.to_string(),
                 prototype: prototype.to_string(),
-                access_flags: 0x0001,
+                access_flags,
                 code_offset: 0,
                 is_direct,
             },
