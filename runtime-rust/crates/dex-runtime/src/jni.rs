@@ -347,10 +347,13 @@ impl<'a> JniEnv<'a> {
     }
 
     pub fn guest_refs_are_same(&self, left: u64, right: u64) -> Result<bool, String> {
-        // A stale weak reference behaves as NULL once its referent has been collected.
-        let left_object = self.resolve_guest_ref(left).unwrap_or(None);
-        let right_object = self.resolve_guest_ref(right).unwrap_or(None);
-        Ok(left_object == right_object)
+        // A stale weak reference behaves as NULL once its referent has been collected,
+        // but an unknown opaque token remains an error rather than silently becoming NULL.
+        let resolve_live = |handle| -> Result<Option<u32>, String> {
+            let object = self.guest_references.resolve(handle)?;
+            Ok(object.filter(|id| self.heap.contains(*id)))
+        };
+        Ok(resolve_live(left)? == resolve_live(right)?)
     }
 
     /// Snapshot roots from both the legacy internal API and opaque guest handles.
