@@ -1099,7 +1099,7 @@ impl JniNativeRegistry {
             "()Ljava/io/File;",
             context_directory_handler("code_cache"),
         );
-        let file_path_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String| {
+        let file_path_handler = |env: &mut JniEnv, args: &[Value]| -> Result<Option<Value>, String> {
             let receiver = args.first().and_then(Value::as_object)
                 .ok_or("File path query receiver is null")?;
             let path_id = env.get_object_field(receiver, "mStridePath")?
