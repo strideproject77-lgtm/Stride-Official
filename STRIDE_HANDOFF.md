@@ -623,7 +623,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 
 ### Phase 9 — JNI weak-reference promotion semantics
 
-**Status: implementation complete; consolidated validation pending.**
+**Status: implementation complete and Rust-validated.**
 
 - Fixed resolve_guest_ref so a weak global reference whose referent has already been reclaimed resolves as NULL, even if collection was invoked through the lower-level heap API before the JNI post-GC pruning pass.
 - NewLocalRef-style promotion from that cleared weak reference now creates the null handle (0) instead of returning a stale-object error.
