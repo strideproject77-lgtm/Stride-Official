@@ -314,3 +314,8 @@ built. All changes are on `feat/dex-class-method-loader`; `main` is untouched.
 - The JNI environment now has checked local-frame reservation, local-reference creation/deletion, managed-heap root snapshots, and `PopLocalFrame(result)`-style result preservation.
 - This reduces reference-lifetime gaps for future native callbacks, but does not yet provide guest-callable `JNIEnv*`/`JavaVM*` tables or native callback trampolines. Global/weak references and automatic root handoff remain outstanding.
 - New regression tests are present but have not been run.
+
+### JNI local-reference failure-safety follow-up
+- Made result-preserving frame pop atomic on invalid handles or reservation failure; the active frame remains intact when validation fails.
+- Reserve local-reference capacity before creating strings/int/byte arrays, and accept null in NewLocalRef/DeleteLocalRef according to JNI semantics.
+- Regression coverage was updated/added; not run yet. Still no guest-callable JNI function table, global/weak references, or automatic GC root handoff.
