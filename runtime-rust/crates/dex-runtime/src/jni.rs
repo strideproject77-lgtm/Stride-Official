@@ -34,7 +34,9 @@ pub struct JniReferenceTable {
 
 impl Default for JniReferenceTable {
     fn default() -> Self {
-        Self { entries: HashMap::new(), local_frames: vec![Vec::new()], next_handle: 1 }
+        // Keep opaque guest tokens outside the 32-bit managed-object ID range.
+        // A token must never be mistaken for a raw heap object handle by bridge code.
+        Self { entries: HashMap::new(), local_frames: vec![Vec::new()], next_handle: 1u64 << 32 }
     }
 }
 
@@ -417,6 +419,10 @@ impl<'a> JniEnv<'a> {
     pub fn strong_reference_roots(&self) -> Vec<u32> {
         let mut roots = self.local_reference_roots();
         roots.extend(self.global_reference_roots());
+        // A managed object may be held by both a local and a global reference.
+        // The collector needs the object once, not one root entry per JNI handle.
+        roots.sort_unstable();
+        roots.dedup();
         roots
     }
 
