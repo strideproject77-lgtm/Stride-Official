@@ -99,6 +99,13 @@ in this implementation-only batch.
 
 ### JNI failure-safety follow-up
 
+
+### Opaque guest JNI reference handles
+- Added `JniReferenceTable`, which assigns opaque guest-facing tokens distinct from internal managed-heap object IDs. It tracks local frames, strong globals and weak globals, supports handle cloning/deletion, `IsSameObject`-style identity checks, and `PopLocalFrame(result)` token re-issuance.
+- Added strong-root snapshots and weak-reference pruning hooks. Weak references are excluded from strong GC roots and are invalidated after their referents are collected and the prune hook runs.
+- This is the reference-token/lifetime layer only. It is not yet wired to a guest `JNIEnv*` function table or machine-code callback trampolines; native guest calls still do not receive callable JNI entrypoints, and GC must explicitly consume the combined root snapshot.
+- Added regression tests for handle separation, frame lifetime, weak-root behavior, clone/delete and identity semantics. Tests remain unrun until the single final validation pass.
+
 - Added strong global-reference create/delete operations and GC-root snapshots, plus a combined local+global strong-root snapshot. Global refs are independent of local-frame lifetime; weak globals and automatic collector wiring are still not implemented.
 - `PopLocalFrame(result)` now validates the result and reserves parent-frame capacity before mutating frame state, so invalid handles/allocation failures do not partially pop the frame.
 - Local-reference vector capacity is reserved before allocating strings and primitive arrays, avoiding an infallible `Vec::push` growth after a managed object has already been allocated.
