@@ -177,6 +177,134 @@ impl JniReferenceTable {
     pub fn live_reference_count(&self) -> usize { self.entries.len() }
 }
 
+
+/// Stable slot numbers from the JNI 1.x native interface prefix. These are
+/// ABI indices, not callable implementations; a slot is usable only after a
+/// real guest callback address has been installed by the runtime.
+pub mod jni_abi_slots {
+    pub const RESERVED0: usize = 0;
+    pub const RESERVED1: usize = 1;
+    pub const RESERVED2: usize = 2;
+    pub const RESERVED3: usize = 3;
+    pub const GET_VERSION: usize = 4;
+    pub const DEFINE_CLASS: usize = 5;
+    pub const FIND_CLASS: usize = 6;
+    pub const FROM_REFLECTED_METHOD: usize = 7;
+    pub const FROM_REFLECTED_FIELD: usize = 8;
+    pub const TO_REFLECTED_METHOD: usize = 9;
+    pub const GET_SUPERCLASS: usize = 10;
+    pub const IS_ASSIGNABLE_FROM: usize = 11;
+    pub const TO_REFLECTED_FIELD: usize = 12;
+    pub const THROW: usize = 13;
+    pub const THROW_NEW: usize = 14;
+    pub const EXCEPTION_OCCURRED: usize = 15;
+    pub const EXCEPTION_DESCRIBE: usize = 16;
+    pub const EXCEPTION_CLEAR: usize = 17;
+    pub const FATAL_ERROR: usize = 18;
+    pub const PUSH_LOCAL_FRAME: usize = 19;
+    pub const POP_LOCAL_FRAME: usize = 20;
+    pub const NEW_GLOBAL_REF: usize = 21;
+    pub const DELETE_GLOBAL_REF: usize = 22;
+    pub const DELETE_LOCAL_REF: usize = 23;
+    pub const IS_SAME_OBJECT: usize = 24;
+    pub const NEW_LOCAL_REF: usize = 25;
+    pub const ENSURE_LOCAL_CAPACITY: usize = 26;
+}
+
+pub mod java_vm_abi_slots {
+    pub const DESTROY_JAVA_VM: usize = 3;
+    pub const ATTACH_CURRENT_THREAD: usize = 4;
+    pub const DETACH_CURRENT_THREAD: usize = 5;
+    pub const GET_ENV: usize = 6;
+    pub const ATTACH_CURRENT_THREAD_AS_DAEMON: usize = 7;
+}
+
+pub const JNI_NATIVE_INTERFACE_MIN_SLOTS: usize = 27;
+pub const JAVA_VM_INVOCATION_INTERFACE_MIN_SLOTS: usize = 8;
+pub const JNI_ABI_MAX_SLOTS: usize = 4096;
+
+/// Guest-address function table storage for the JNI C ABI. A JNIEnv* points to
+/// an environment cell containing the address of this table; it does not point
+/// directly at the first function pointer. The table stores guest code
+/// addresses only—never Rust closures or host function pointers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JniAbiFunctionTable {
+    entries: Vec<u64>,
+}
+
+impl JniAbiFunctionTable {
+    pub fn new(slot_count: usize) -> Result<Self, String> {
+        if slot_count == 0 || slot_count > JNI_ABI_MAX_SLOTS {
+            return Err(format!("invalid JNI ABI function-table size: {slot_count}"));
+        }
+        let mut entries = Vec::new();
+        entries.try_reserve_exact(slot_count)
+            .map_err(|_| "JNI ABI function-table allocation failed".to_owned())?;
+        entries.resize(slot_count, 0);
+        Ok(Self { entries })
+    }
+
+    pub fn native_interface() -> Result<Self, String> {
+        Self::new(JNI_NATIVE_INTERFACE_MIN_SLOTS)
+    }
+
+    pub fn java_vm_invocation_interface() -> Result<Self, String> {
+        Self::new(JAVA_VM_INVOCATION_INTERFACE_MIN_SLOTS)
+    }
+
+    pub fn slot_count(&self) -> usize { self.entries.len() }
+
+    pub fn install(&mut self, slot: usize, guest_function_address: u64) -> Result<(), String> {
+        if slot >= self.entries.len() {
+            return Err(format!("JNI ABI slot {slot} is outside the allocated table"));
+        }
+        if guest_function_address == 0 || guest_function_address & 3 != 0 {
+            return Err("JNI ABI callback must be a non-null, 4-byte-aligned guest address".into());
+        }
+        self.entries[slot] = guest_function_address;
+        Ok(())
+    }
+
+    pub fn address(&self, slot: usize) -> Option<u64> {
+        self.entries.get(slot).copied().filter(|address| *address != 0)
+    }
+
+    pub fn require_slots(&self, required: &[usize]) -> Result<(), String> {
+        for slot in required {
+            match self.entries.get(*slot) {
+                Some(address) if *address != 0 => {}
+                Some(_) => return Err(format!("required JNI ABI slot {slot} has no callback")),
+                None => return Err(format!("required JNI ABI slot {slot} is outside the table")),
+            }
+        }
+        Ok(())
+    }
+
+    /// Serialize as the little-endian 64-bit pointer array expected by AArch64.
+    /// Zero entries remain visibly unsupported; callers must not advertise
+    /// them as implemented callbacks.
+    pub fn encode_le(&self) -> Result<Vec<u8>, String> {
+        let byte_count = self.entries.len().checked_mul(8)
+            .ok_or_else(|| "JNI ABI table byte length overflow".to_owned())?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(byte_count)
+            .map_err(|_| "JNI ABI table serialization allocation failed".to_owned())?;
+        for address in &self.entries {
+            bytes.extend_from_slice(&address.to_le_bytes());
+        }
+        Ok(bytes)
+    }
+
+    /// A C JNIEnv*/JavaVM* is a pointer to a one-word environment cell whose
+    /// contents point to the function table.
+    pub fn encode_environment_cell(table_guest_address: u64) -> Result<[u8; 8], String> {
+        if table_guest_address == 0 || table_guest_address & 7 != 0 {
+            return Err("JNI ABI table address must be non-null and 8-byte aligned".into());
+        }
+        Ok(table_guest_address.to_le_bytes())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NativeMethodKey {
     pub class_descriptor: String,
