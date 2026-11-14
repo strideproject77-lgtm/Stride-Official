@@ -46,9 +46,10 @@ struct AndroidPackageImporter: @unchecked Sendable {
         let directory = uniquePackageDirectory(for: sourceURL, in: libraryFolder)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         do {
-            // The source container is temporary input, not a second library asset.
-            // Persist only the normalized APK components so plain APK imports do not
-            // consume twice their original size.
+            // Keep a zero-byte format marker for library restoration. Never retain the
+            // original XAPK/APKS/APKM container alongside its extracted APK components.
+            try Data().write(to: directory.appendingPathComponent("source.\(format.rawValue)"))
+            // Persist only normalized APK components so a plain APK is stored once.
             if format == .apk {
                 let base = directory.appendingPathComponent("base.apk")
                 try fileManager.copyItem(at: sourceURL, to: base)
