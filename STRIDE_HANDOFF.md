@@ -25,8 +25,8 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 ## Common Compatibility Engine — current implementation checkpoint (2026-11-14)
 
 - Phase 26 — Activity task/backstack dispatch: **Partial**. Runtime-owned explicit Activity dispatch and Back restoration are wired; guest DEX calls through JNI `Context.startActivity(Intent)` still need pending-event routing and end-to-end tests.
-- Phase 27 — One-Shot Diagnostic Report: **Implementation added; consolidated iOS validation pending**. The report contains package/split fingerprints, device environment, runtime metrics, stage evidence, heuristic findings, and raw session evidence. Do not claim a guaranteed root cause or that retesting is never needed.
-- Phase 28 — Storage & Latest-Session Retention: **Implementation added; consolidated validation pending**.
+- Phase 27 — One-Shot Diagnostic Report: **Completed and CI validated in workflow #757**. One TXT report combines package/split fingerprints, device environment, runtime metrics, launch-stage evidence, heuristic findings, host log and final Rust runtime snapshot. Real-device export review remains; never claim a guaranteed root cause.
+- Phase 28 — Storage & Latest-Session Retention: **Implementation + CI build validated in workflow #764; device restoration review pending**.
   - Plain APK import now stores one canonical `base.apk`, rather than both `source.apk` and `base.apk`.
   - XAPK/APKS/APKM source containers are no longer retained as an extra full-size copy; a zero-byte format marker preserves reload metadata, and the base component is extracted directly to the canonical root path rather than extracted and copied again.
   - Starting a new launch clears previous session logs, reports, archives, and pre-launch global log noise; only the current session and its one-shot report remain.
@@ -1101,3 +1101,25 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - User explicitly requested an IPA build. Trigger the existing one-shot CI gate using the exact commit message `Build Calculator validation IPA after tests` so the latest `feat/dex-class-method-loader` source is validated and packaged.
 - Build policy: unsigned IPA only; do not sign, export as a release, or merge to `main`.
 - Latest known successful unsigned artifact (#757) is older than current branch head; this rebuild is required to include the latest branch changes.
+
+
+### Phase 28 — Storage & Latest-Session Retention — validation follow-up (2026-11-14)
+- Workflow #764 passed both Rust runtime tests and the unsigned iOS build/package job on the feature branch.
+- The workflow compiled the Swift app for physical iPhones, verified the app bundle and arm64 executable, packaged the unsigned IPA and uploaded the artifact.
+- Remaining device check: restore a previously imported APK/XAPK/APKS/APKM library entry after app relaunch and confirm the zero-byte format marker plus component index restore the expected package type/splits. Existing pre-upgrade folders are cleaned on the next launch.
+- Phase 28 remains Partial until package-restoration behavior is verified on-device.
+
+### Phase 29 — Dedicated App Page & Black UI Refresh
+**Status: Implementation added · consolidated validation pending.**
+
+- Replaced the app-detail sheet with a dedicated full-screen app page.
+- Added package storage-size metadata, including extracted split components, and persistent last-successful-launch timestamp keyed by the canonical package directory.
+- Home's Recently Played section now surfaces the latest successfully launched app instead of remaining a static placeholder.
+- Added one collapsed Diagnostics disclosure on the app page with captured-event, error and warning totals plus a pointer to the complete one-shot TXT report.
+- Removed the theme selector and rotating remote image carousel. The app now uses pure-black surfaces with a warm amber accent and a dedicated full-screen About Stride page.
+- Extra UI/UX improvements: last-played is recorded only after the runtime launch call succeeds (not on a failed launch request); full-screen app navigation gives package details and launch controls a consistent dedicated surface; removing the remote carousel also removes network-dependent artwork from About.
+- Files: `Sources/StrideApp/ContentView.swift`.
+- Remaining: consolidated Swift/iOS + Rust workflow validation; inspect the full-screen app page and About page on a real iPhone; verify size/last-played presentation with plain APK and split packages.
+- Historical note: play-history timestamps begin with this build; Stride cannot reconstruct launch dates from before the feature existed.
+- Tests: deferred to the single consolidated validation workflow; no intermediate test runs.
+- IPA: unsigned build only, already explicitly requested. No signing, release export or main-branch merge.
