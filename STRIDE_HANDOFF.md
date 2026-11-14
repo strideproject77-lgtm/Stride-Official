@@ -1063,3 +1063,13 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Tests: deferred to one consolidated pass; no intermediate test runs.
 - IPA: no build/sign/export in this batch. `main` untouched.
 - Phase status: Partial — session lifecycle hardened; validation pending.
+
+**Phase 27 final evidence-completeness fix — 2026-11-14:**
+- Fixed a report-content bug found during final review: when the per-session diagnostic file was readable, the report selected it *instead of* the supplied host/session log. That could omit the final live Rust diagnostics snapshot and launch-screen output from an otherwise complete report.
+- Report generation now combines the persisted per-session diagnostic stream with the separately supplied host launch log and final runtime snapshot. Findings and stage coverage are computed across both sources, and the report preserves both under an explicit source separator.
+- Extra improvement: this closes a blind spot in the exact one-file workflow requested by the user; a successful session-file open can no longer silently suppress the guest runtime snapshot.
+- Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `STRIDE_HANDOFF.md`.
+- Remaining: one consolidated Rust test + physical-device Swift compile + unsigned IPA packaging validation. Review the artifact and, later, confirm the exported TXT from a real device run.
+- Tests: deferred to the single consolidated workflow; no intermediate test run.
+- IPA: authorized unsigned build only; no signing, release export, or main-branch merge.
+- Phase status: Partial — implementation complete pending consolidated validation.
