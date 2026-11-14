@@ -296,7 +296,7 @@ impl AndroidRuntime {
                 vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
                 vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
             }
-            self.activity_manager.handle_back_pressed(&mut self.class_loader, &mut vm)
+            self.activity_manager.handle_back_pressed(&mut self.class_loader, &mut vm)?
         };
         if let Some(top) = self.activity_manager.current_activity() {
             self.active_activity_obj = top.heap_object_ref;
