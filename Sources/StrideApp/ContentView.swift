@@ -495,7 +495,7 @@ struct ContentView: View {
                             .foregroundStyle(muted)
                     }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
-                        ForEach(StrideAccentPalette.colors, id: \.hex) { option in
+                        ForEach(StrideAccentPalette.colors) { option in
                             let color = Color(hex: option.hex) ?? accent
                             Button {
                                 accentColorHex = option.hex
@@ -738,16 +738,22 @@ private extension Color {
     }
 }
 
+private struct StrideAccentOption: Identifiable {
+    let name: String
+    let hex: String
+    var id: String { hex }
+}
+
 private enum StrideAccentPalette {
-    static let colors: [(name: String, hex: String)] = [
-        ("Amber", "E8AB64"),
-        ("Lime", "C5F477"),
-        ("Violet", "B9A2FF"),
-        ("Blue", "668CFF"),
-        ("Cyan", "63D9E8"),
-        ("Rose", "F28EAD"),
-        ("Red", "F07878"),
-        ("White", "E8EAF0")
+    static let colors: [StrideAccentOption] = [
+        .init(name: "Amber", hex: "E8AB64"),
+        .init(name: "Lime", hex: "C5F477"),
+        .init(name: "Violet", hex: "B9A2FF"),
+        .init(name: "Blue", hex: "668CFF"),
+        .init(name: "Cyan", hex: "63D9E8"),
+        .init(name: "Rose", hex: "F28EAD"),
+        .init(name: "Red", hex: "F07878"),
+        .init(name: "White", hex: "E8EAF0")
     ]
 }
 private struct StrideCoreMark: View {
