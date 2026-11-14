@@ -1232,9 +1232,26 @@ private struct APKDetailSheet: View {
                         .background(canvas, in: RoundedRectangle(cornerRadius: 11))
                         if let logExportURL {
                             Button {
-                                showingLogShare = true
+                                let runtimeStatus = executionError.map { "Failed: \($0)" } ??
+                                    executionResult.map { "Status=\($0.statusCode), lifecycle=\($0.lifecycleState)" } ??
+                                    "Session captured; final runtime state unavailable"
+                                let reportURL = diagnostics.exportSessionReport(
+                                    apkName: item.displayName,
+                                    apkURL: item.fileURL,
+                                    status: runtimeStatus,
+                                    rawLog: sessionLogLines.joined(separator: "\n"),
+                                    inspection: item.inspection,
+                                    packageFormat: String(describing: item.packageFormat),
+                                    splitCount: item.splitAPKURLs.count
+                                )
+                                if let reportURL {
+                                    logExportURL = reportURL
+                                    showingLogShare = true
+                                } else {
+                                    appendSessionLog("[ERROR] One-shot diagnostic report could not be generated")
+                                }
                             } label: {
-                                Label("Export Logs (.txt)", systemImage: "square.and.arrow.up")
+                                Label("Export One-Shot Report (.txt)", systemImage: "doc.text.magnifyingglass")
                                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
                             }
                             .sheet(isPresented: $showingLogShare) {
