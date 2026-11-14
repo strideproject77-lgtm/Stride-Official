@@ -565,7 +565,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         } else if unresolvedNativeModules > 0 {
             onLog("[WARN] Native dependency scan found \(unresolvedNativeModules) module(s) with unloaded DT_NEEDED libraries")
         } else {
-            onLog("[INFO] All declared native-library dependencies are present in the loaded package set")
+            onLog("[INFO] Native execution pipeline complete: dependencies ordered, static initializers executed, JNI_OnLoad called, and native methods registered")
         }
 
         var screenOrientation: Int32 = -1

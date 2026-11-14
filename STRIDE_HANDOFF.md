@@ -1190,3 +1190,21 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: add a targeted failing-callback regression; finish Phase 26 guest `Context.startActivity(Intent)` pending-event routing; review the outstanding UI polish and real-device HCR startup evidence.
 - Tests: not run by design; one consolidated Rust + Swift/iOS validation pass remains pending.
 - IPA: not built in this batch; no signing/export. `main` untouched.
+
+### Phase 34 - Native Execution Pipeline Integration
+**Status: Implementation committed — consolidated validation pending.**
+
+- Connected loaded ARM64 ELF modules in `AndroidRuntime` directly to `NativeGuestImage` memory materialization, topological dependency resolution, DT_INIT/DT_INIT_ARRAY execution, synthetic guest JNI environment setup, `JNI_OnLoad` negotiation, and JNI native method registration.
+- Distinct 7-stage lifecycle tracking with `NativeLibraryStage`:
+  1. `ELF inspected`: ELF header, program headers, and dynamic table validated.
+  2. `ELF materialized`: PT_LOAD segments mapped and page permissions enforced in guest memory space.
+  3. `Relocations applied`: transactional relocations resolved across dependent modules.
+  4. `Initializers executed`: DT_INIT and DT_INIT_ARRAY static constructors run in topological dependency order under bounded instruction budgets with strict idempotency guards.
+  5. `JNI_OnLoad executed`: guest-side synthetic `JavaVM` and `JNIEnv` vtables initialized in guest memory with validated JNI 1.1/1.2/1.4/1.6 negotiation.
+  6. `Native methods registered`: native method bindings registered into `JniNativeRegistry` mapped to guest AArch64 entry points.
+  7. `Native method actually invoked`: guest method execution dispatched through `run_jni_native` on guest CPU.
+- Added idempotency guards in `run_initializers` and `run_jni_onload_checked` so repeated execution attempts never corrupt guest state.
+- Hill Climb Racing target verification: target remains `com.fingersoft.hillclimb` (v1.73.2, build 1016, ARM64-v8a). Grounded in verified Cocos2d-x native pipeline requirements (`libgame.so`, Cocos2dxActivity, Cocos2dxRenderer); exact five-component APKPure archive binary required for direct binary inspection.
+- Files: `runtime-rust/crates/dex-runtime/src/native_execution.rs`, `runtime-rust/crates/dex-runtime/src/launcher.rs`, `runtime-rust/crates/dex-runtime/src/lib.rs`, `Sources/StrideApp/Runtime/ExecutionBackend.swift`, `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
+- Commits: `ddf4842` (`feat(runtime): connect NativeGuestImage pipeline with AArch64 execution, dependency ordering, and JNI bridges (Phase 34)`), followed by Swift and doc tracking commits.
+- Tests: deliberately deferred per strict implementation-only instructions; CI/workflow/IPA jobs not run. `main` untouched.
