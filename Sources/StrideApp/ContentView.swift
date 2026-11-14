@@ -15,9 +15,8 @@ struct ContentView: View {
     @State private var showingAbout = false
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
-    private var theme: StrideTheme { .blackLime }
     private var background: Color { .black }
-    private var panel: Color { Color(red: 0.035, green: 0.038, blue: 0.045) }
+    private var panel: Color { .black }
     private var raised: Color { Color(red: 0.075, green: 0.080, blue: 0.090) }
     private var accent: Color { Color(red: 0.91, green: 0.67, blue: 0.39) }
     private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
@@ -55,7 +54,7 @@ struct ContentView: View {
                     Button { showingImporter = true } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(theme.buttonForeground)
+                            .foregroundStyle(Color.black)
                             .frame(width: 58, height: 58)
                             .background(accent, in: Circle())
                             .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
@@ -290,7 +289,7 @@ struct ContentView: View {
                             Button { showingImporter = true } label: {
                                 Label("Import Android Package", systemImage: "plus")
                                     .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(theme.buttonForeground)
+                                    .foregroundStyle(Color.black)
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 11)
                                     .background(accent, in: Capsule())
