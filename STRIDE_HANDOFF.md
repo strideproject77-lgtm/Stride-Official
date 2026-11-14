@@ -1030,11 +1030,12 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Captures Stride app version/build, iPhone model family, iOS version, physical-memory capacity, session duration/status, and returned runtime metrics (classes loaded, instructions, missing APIs, FPS and managed heap bytes).
 - Extracts the Android package identity from the captured launch log when it was not passed explicitly; includes a dedicated runtime-diagnostics extract, heuristic issue categories, the full raw session log and the structured iOS diagnostic timeline in the same TXT report.
 - Expanded heuristic categories for missing Android APIs/classes, DEX/interpreter faults, JNI bridge failures, native dependency failures, graphics/rendering and input/lifecycle errors. Findings remain explicitly heuristic; they are not represented as a proven root cause.
-- Rust runtime diagnostic exports now begin with severity totals, missing class/method counts and dropped-event totals before the event timeline.
+- Rust runtime diagnostic exports now begin with severity totals, missing class/method counts and dropped-event totals before the event timeline; added a regression for the summary counters.
 - UI: replaced the ordinary log export action with **Export One-Shot Report (.txt)**; the action is available even if opening the per-session log file failed, and shares the generated report.
+- Reliability fix: if the session log file could not be opened, report generation now uses the current in-memory session log instead of accidentally selecting an older report for the same APK.
 - Extra improvement: the report fingerprints the exact APK file with SHA-256 so reports from different versions/builds are not accidentally conflated; large APKs are hashed in bounded 1 MiB chunks rather than loaded wholly into memory.
 - Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `Sources/StrideApp/ContentView.swift`, `runtime-rust/crates/dex-runtime/src/diagnostics.rs`.
 - Remaining: compile review and the one consolidated Rust + Swift/iOS workflow validation; improve signal/register/native backtrace capture only where the runtime can safely provide it; add structured guest stack frames and per-stage timing as those sources become available.
 - Limitation: a single report can provide complete captured evidence, but cannot invent missing OS-level crash data or guarantee a root cause where the runtime never observed the failure. The report explicitly labels heuristic classifications and unavailable fields.
-- Tests: deferred to the single consolidated validation pass; no repeated test runs.
+- Tests: added a Rust regression for severity/missing-symbol summary totals; deferred to the single consolidated validation pass; no repeated test runs.
 - IPA: not built, signed or exported. `main` remains untouched.
