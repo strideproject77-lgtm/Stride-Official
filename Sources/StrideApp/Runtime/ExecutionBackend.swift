@@ -416,12 +416,13 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             if resourceStatus == 0 { onLog("[INFO] Android resource table decoded") }
             else { onLog("[WARN] Resource table decode unavailable (status \(resourceStatus)); literal UI text remains available") }
         }
-        if !resourceTableData.isEmpty {
-            // Android resource tables in games can contain hundreds or thousands of
-            // file references. Eagerly decoding every image before DEX/native startup
-            // can stall launch and allocate several large temporary pixel buffers.
-            // Keep this compatibility path bounded; Cocos game assets are loaded via
-            // the package asset/native path rather than this UI-resource cache.
+        // Native game packages already carry their own engine assets and native
+        // libraries. Eagerly decoding hundreds of Android UI drawable entries before
+        // DEX/native initialization delays the actual launch and duplicates work the
+        // guest engine performs through AssetManager. Keep this optional predecode for
+        // managed-only apps; native/asset-heavy packages proceed directly to DEX load.
+        let shouldPredecodeResourceImages = !(soDataList.count > 0 && assetDataList.count > 128)
+        if !resourceTableData.isEmpty && shouldPredecodeResourceImages {
             let fileCount = stride_runtime_resource_file_count(runtime)
             let maxResourceFilesToScan = 1_024
             let maxDecodedResourceImages = 128
@@ -484,6 +485,8 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             let skippedEntries = fileCount - scanCount
             onLog("[INFO] Decoded \(decodedImages) Android image resources (\(decodedImagePixels) pixels); scanned \(scannedResourceFiles)/\(fileCount), deferred \(skippedEntries) entries")
+        } else if !resourceTableData.isEmpty {
+            onLog("[INFO] Deferred eager Android image predecode for native/asset-heavy package (native libraries=\(soDataList.count), assets=\(assetDataList.count)); proceeding to DEX initialization")
         }
         // A manifest without executable DEX code cannot enter the managed runtime.
         guard !dexDataList.isEmpty else {
