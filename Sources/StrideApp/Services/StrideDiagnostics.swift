@@ -216,8 +216,7 @@ final class StrideDiagnostics: ObservableObject {
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
             let apkSHA256 = sha256(of: apkURL) ?? "Unavailable (file could not be read)"
             flush()
-            let reportSessionURL = sessionFileURL ?? latestSessionLogURL(apkName: apkName)
-            let persistedSessionLog = reportSessionURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
+            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
             let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
             let resolvedPackage = packageName != "Not resolved" ? packageName :
