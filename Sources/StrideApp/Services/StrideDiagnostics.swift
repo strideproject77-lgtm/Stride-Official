@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Combine
 import os
 import UIKit
@@ -202,7 +203,9 @@ final class StrideDiagnostics: ObservableObject {
 
     /// Creates a portable, per-APK report while preserving the unmodified raw session log.
     func exportSessionReport(apkName: String, apkURL: URL, status: String,
-                             rawLog: String, packageName: String = "Not resolved") -> URL? {
+                             rawLog: String, packageName: String = "Not resolved",
+                             inspection: APKInspection? = nil,
+                             packageFormat: String = "APK", splitCount: Int = 0) -> URL? {
         do {
             try fileManager.createDirectory(at: reportsFolder, withIntermediateDirectories: true)
             let attrs = try? fileManager.attributesOfItem(atPath: apkURL.path)
@@ -210,11 +213,21 @@ final class StrideDiagnostics: ObservableObject {
             let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
             let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
+            let apkSHA256 = sha256(of: apkURL) ?? "Unavailable (file could not be read)"
             flush()
             let reportSessionURL = sessionFileURL ?? latestSessionLogURL(apkName: apkName)
             let persistedSessionLog = reportSessionURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
             let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
+            let resolvedPackage = packageName != "Not resolved" ? packageName :
+                (lines.first(where: { $0.contains("Android package identity:") })?
+                    .components(separatedBy: "Android package identity:").last?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Not resolved")
+            let runtimeTimeline = lines.filter {
+                $0.contains("[RUNTIME]") || $0.localizedCaseInsensitiveContains("missing api") ||
+                $0.localizedCaseInsensitiveContains("unresolved method") ||
+                $0.localizedCaseInsensitiveContains("unlinked class")
+            }
             let stamp = ISO8601DateFormatter().string(from: sessionStartedAt)
             let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
             let url = reportsFolder.appendingPathComponent("\(safeName)-\(sessionID.prefix(8))-Crash-Report.txt")
@@ -225,8 +238,17 @@ final class StrideDiagnostics: ObservableObject {
             Session ID: \(sessionID)
             Result: \(status)
             APK: \(apkName)
-            Package: \(packageName)
+            Package: \(resolvedPackage)
+            Package format: \(packageFormat)
+            Split components: \(splitCount)
             APK size: \(fileSize >= 0 ? ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file) : "Unavailable")
+            APK SHA-256: \(apkSHA256)
+            Archive entries: \(inspection?.archiveEntryCount.description ?? "Not captured")
+            Manifest present: \(inspection?.hasAndroidManifest.description ?? "Not captured")
+            DEX files: \(inspection?.dexFileCount.description ?? "Not captured") (analyzed: \(inspection?.analyzedDexFileCount.description ?? "Not captured"), skipped: \(inspection?.skippedDexFileCount.description ?? "Not captured"))
+            DEX inventory: \(inspection.map { "\($0.dexClassCount) classes / \($0.dexMethodCount) method references" } ?? "Not captured")
+            Native ABIs: \(inspection?.nativeABIs.joined(separator: ", ") ?? "Not captured")
+            Resource table: \(inspection?.hasResourceTable.description ?? "Not captured")
             Started: \(stamp)
             Duration: \(String(format: "%.1f", duration)) seconds
             Stride version: \(appVersion) (build \(appBuild))
@@ -246,7 +268,9 @@ final class StrideDiagnostics: ObservableObject {
                     report += "\n[\(item.category)] \(item.count)x — \(item.example)"
                 }
             }
-            report += "\n\nIMPORTANT INTERPRETATION NOTES\n"
+            report += "\n\nRUNTIME DIAGNOSTIC EXTRACT (all matching lines; raw log remains authoritative)\n========================================\n"
+            report += runtimeTimeline.isEmpty ? "(No runtime diagnostic markers were captured.)\n" : runtimeTimeline.joined(separator: "\n") + "\n"
+            report += "\nIMPORTANT INTERPRETATION NOTES\n"
             report += "- A missing end marker on next launch means possible previous-run termination only; it does not prove a crash or jetsam.\n"
             report += "- Unsupported syscalls and unresolved imports are compatibility findings, not proof of the crash cause by themselves.\n"
             report += "- Available-memory samples, virtual address-space mappings, and physical memory are different measurements.\n"
@@ -267,6 +291,20 @@ final class StrideDiagnostics: ObservableObject {
         }
     }
 
+    private func sha256(of url: URL) -> String? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        var hasher = SHA256()
+        do {
+            while let chunk = try file.read(upToCount: 1_048_576), !chunk.isEmpty {
+                hasher.update(data: chunk)
+            }
+            return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+        } catch {
+            return nil
+        }
+    }
+
     func clearVisibleEntries() {
         entries.removeAll()
     }
@@ -280,7 +318,13 @@ final class StrideDiagnostics: ObservableObject {
             ("RELOCATION_FAILURE", { $0.localizedCaseInsensitiveContains("relocation") && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("unresolved")) }),
             ("NETWORK_TELEMETRY_FAILURE", { $0.localizedCaseInsensitiveContains("firebaselogging") || ($0.localizedCaseInsensitiveContains("connectexception") && $0.localizedCaseInsensitiveContains("443")) }),
             ("RUNTIME_INTERPRETER_FAILURE", { $0.localizedCaseInsensitiveContains("unsupported opcode") || $0.localizedCaseInsensitiveContains("interpreter fault") }),
-            ("OUT_OF_MEMORY_EVIDENCE", { $0.localizedCaseInsensitiveContains("out of memory") || $0.localizedCaseInsensitiveContains("jetsam") })
+            ("OUT_OF_MEMORY_EVIDENCE", { $0.localizedCaseInsensitiveContains("out of memory") || $0.localizedCaseInsensitiveContains("jetsam") }),
+            ("MISSING_ANDROID_API_OR_CLASS", { $0.localizedCaseInsensitiveContains("missing_api") || $0.localizedCaseInsensitiveContains("unresolved method") || $0.localizedCaseInsensitiveContains("unlinked class") }),
+            ("DEX_OR_INTERPRETER_FAILURE", { $0.localizedCaseInsensitiveContains("unsupported opcode") || $0.localizedCaseInsensitiveContains("instruction budget") || $0.localizedCaseInsensitiveContains("verifier") }),
+            ("JNI_BRIDGE_FAILURE", { $0.localizedCaseInsensitiveContains("jni") && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("exception") || $0.localizedCaseInsensitiveContains("unresolved")) }),
+            ("NATIVE_DEPENDENCY_FAILURE", { $0.localizedCaseInsensitiveContains("dt_needed") || $0.localizedCaseInsensitiveContains("unresolved dependency") || $0.localizedCaseInsensitiveContains("native library load failed") }),
+            ("GRAPHICS_OR_RENDERING", { ($0.localizedCaseInsensitiveContains("egl") || $0.localizedCaseInsensitiveContains("gles") || $0.localizedCaseInsensitiveContains("surface")) && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("unsupported")) }),
+            ("INPUT_OR_LIFECYCLE_FAILURE", { ($0.localizedCaseInsensitiveContains("touch") || $0.localizedCaseInsensitiveContains("activity") || $0.localizedCaseInsensitiveContains("lifecycle")) && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("exception")) })
         ]
         var output: [(String, Int, String)] = []
         for (category, matches) in rules {
