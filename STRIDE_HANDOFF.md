@@ -1023,7 +1023,7 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 
 ## Phase 27 — One-Shot Diagnostic Report
 
-**Status: Implementation added · consolidated validation pending.**
+**Status: Completed · implementation and consolidated CI validation passed. Real-device report-content review remains a post-build verification item.**
 
 - Goal: make one exported report contain enough session evidence for a first-pass diagnosis, so the user can send one file without being asked for another routine log export.
 - Swift report now records the APK SHA-256 using chunked file reads, file size, package format, split count, archive entry count, manifest presence, DEX file/analyzed/skipped counts, class/method inventory, native ABI inventory and resource-table presence.
@@ -1069,7 +1069,16 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Report generation now combines the persisted per-session diagnostic stream with the separately supplied host launch log and final runtime snapshot. Findings and stage coverage are computed across both sources, and the report preserves both under an explicit source separator.
 - Extra improvement: this closes a blind spot in the exact one-file workflow requested by the user; a successful session-file open can no longer silently suppress the guest runtime snapshot.
 - Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `STRIDE_HANDOFF.md`.
-- Remaining: one consolidated Rust test + physical-device Swift compile + unsigned IPA packaging validation. Review the artifact and, later, confirm the exported TXT from a real device run.
-- Tests: deferred to the single consolidated workflow; no intermediate test run.
-- IPA: authorized unsigned build only; no signing, release export, or main-branch merge.
-- Phase status: Partial — implementation complete pending consolidated validation.
+- Validation: workflow #757 passed the complete Rust runtime test suite, built the iOS arm64 Rust library and XCFramework, generated the Xcode project, compiled Stride for physical iPhones, verified the app bundle, packaged and validated the unsigned IPA, and uploaded the artifact.
+- Artifact: `Stride-unsigned-IPA-757` (2,984,175 bytes; expires 2026-11-28). SHA-256 of the artifact archive: `63be9b44d7e24af3086c2bbaac7bbd17f544d77fbf076dc04c79a7f5c459c90d`.
+- Remaining post-build verification: inspect a real-device exported TXT report to confirm device-specific values and runtime events are populated; guest stack frames, per-stage timings and OS-provided termination details remain future instrumentation, not blockers for the one-shot captured-evidence scope.
+- Tests: consolidated workflow #757 passed. No repeated test pass requested.
+- IPA: unsigned build only; no signing or release export. `main` remains untouched.
+- Phase status: Completed — implementation, Swift/iOS compilation, Rust validation and unsigned IPA packaging all passed.
+
+**Phase 27 completion — 2026-11-14:**
+- Consolidated workflow #757 passed: Rust runtime tests, iOS arm64 Rust build, XCFramework creation, Xcode generation, physical-iPhone Swift compile, app-bundle verification, unsigned IPA package validation and artifact upload.
+- Final report fix merges persisted diagnostics with the host launch log and final Rust runtime snapshot, preventing guest evidence from being dropped when the per-session log file exists.
+- Phase 27 is Completed for implementation and CI validation. A real-device TXT export review remains a separate post-build verification; the report does not claim to recover OS data or stack frames that were never captured.
+- Artifact: `Stride-unsigned-IPA-757`, 2,984,175 bytes, expires 2026-11-28. Archive SHA-256: `63be9b44d7e24af3086c2bbaac7bbd17f544d77fbf076dc04c79a7f5c459c90d`.
+- Branch: `feat/dex-class-method-loader`; `main` untouched. No signing or release export performed.
