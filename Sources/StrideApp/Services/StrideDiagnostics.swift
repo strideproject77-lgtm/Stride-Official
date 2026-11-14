@@ -106,6 +106,7 @@ final class StrideDiagnostics: ObservableObject {
 
     func beginSession(apkName: String) {
         if sessionIsActive { finishSession(status: "replaced by a new launch") }
+        resetStoredDiagnosticsForLatestSession()
         sessionIsActive = true
         currentAPK = apkName
         issueCount = 0
@@ -493,18 +494,44 @@ final class StrideDiagnostics: ObservableObject {
         try? fileManager.removeItem(at: markerURL)
     }
 
+    /// Retain only the most recent launch's diagnostic material. Boot/preflight noise
+    /// is cleared at launch start, and old session/report/archive files are discarded.
+    private func resetStoredDiagnosticsForLatestSession() {
+        flush()
+        try? handle?.close()
+        try? structuredHandle?.close()
+        handle = nil
+        structuredHandle = nil
+        try? fileManager.removeItem(at: logFileURL)
+        try? fileManager.removeItem(at: structuredLogFileURL)
+        let root = documentsURL.appendingPathComponent("StrideLogs", isDirectory: true)
+        for name in ["Sessions", "Reports", "Archive"] {
+            let folder = root.appendingPathComponent(name, isDirectory: true)
+            if let children = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
+                for child in children { try? fileManager.removeItem(at: child) }
+            }
+        }
+        try? fileManager.removeItem(at: root.appendingPathComponent("Possible-Previous-Run-Termination.txt"))
+        pendingText.removeAll(keepingCapacity: true)
+        pendingStructured.removeAll(keepingCapacity: true)
+        pendingSession.removeAll(keepingCapacity: true)
+        entries.removeAll(keepingCapacity: true)
+        issueCount = 0
+        openLog()
+    }
+
     private func rotateLogIfNeeded(_ url: URL) {
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber,
               size.int64Value > 8 * 1024 * 1024 else { return }
-        let archiveFolder = documentsURL.appendingPathComponent("StrideLogs/Archive", isDirectory: true)
+        // Never create timestamped diagnostic archives: the app keeps a single
+        // rolling log and the exported one-shot report for the latest launch.
         do {
-            try fileManager.createDirectory(at: archiveFolder, withIntermediateDirectories: true)
-            let suffix = Int(Date().timeIntervalSince1970)
-            let archived = archiveFolder.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-\(suffix).\(url.pathExtension)")
-            try fileManager.moveItem(at: url, to: archived)
+            let file = try FileHandle(forWritingTo: url)
+            try file.truncate(atOffset: 0)
+            try file.close()
         } catch {
-            logger.error("Could not rotate diagnostics file: \(error.localizedDescription, privacy: .public)")
+            logger.error("Could not reset oversized diagnostics file: \(error.localizedDescription, privacy: .public)")
         }
     }
 
