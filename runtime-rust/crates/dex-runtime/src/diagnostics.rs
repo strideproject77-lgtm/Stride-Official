@@ -220,7 +220,18 @@ impl RuntimeDiagnostics {
         };
 
         let mut output = String::from("STRIDE SESSION DIAGNOSTICS\n");
-        output.push_str(&format!("Retained events: {}\nDropped older events: {}\n", records.len(), dropped));
+        let count = |severity| records.iter().filter(|event| event.severity == severity).count();
+        output.push_str("SESSION SUMMARY\n");
+        output.push_str(&format!(
+            "Retained events: {}\nDropped older events: {}\nInfo: {}\nWarnings: {}\nMissing API events: {}\nRuntime errors: {}\nFatal events: {}\nMissing classes: {}\nMissing methods: {}\n",
+            records.len(), dropped,
+            count(DiagnosticSeverity::Info),
+            count(DiagnosticSeverity::Warning),
+            count(DiagnosticSeverity::MissingApi),
+            count(DiagnosticSeverity::RuntimeError),
+            count(DiagnosticSeverity::FatalCrash),
+            classes.len(), methods.len()
+        ));
         output.push_str("\nEVENT TIMELINE\n");
         for event in records {
             let code = event.code.as_deref()
