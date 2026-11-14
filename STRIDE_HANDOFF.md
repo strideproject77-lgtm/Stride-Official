@@ -1009,3 +1009,11 @@ Append a dated entry under this roadmap after every meaningful implementation ba
 - IPA: Not built (unless explicitly authorized).
 
 Do not mark a phase complete merely because its files or API names exist. A phase is complete only when its full scope has been implemented and reviewed. The final consolidated validation remains a separate gate before merging any changes into `main`.
+
+
+**Build failure follow-up — 2026-11-14 (workflow #730):**
+- Rust runtime test suite passed (job #132276986512).
+- iOS compile failed at `Sources/StrideApp/ContentView.swift:357`: `.contentTransition(.numericText())` requires iOS 16+, while the project deployment target is older.
+- Fixed by removing only this optional numeric text transition from the filtered-results count. The live count, filtering, accessibility label, and layout remain unchanged; this avoids raising the deployment target or dropping older-device support.
+- Extra UI compatibility fix: kept the Library's filtered-result count and search feedback intact across the supported iOS deployment range.
+- Next: run the consolidated Rust + unsigned iOS IPA workflow once against this fix. No signing, no release export, and no merge to main.
