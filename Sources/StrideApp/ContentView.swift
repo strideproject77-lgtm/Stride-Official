@@ -1073,7 +1073,6 @@ private struct APKDetailSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
 
                     Button {
-                        UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
                         showingExecutionScreen = true
                         launchTask = Task {
                             isExecuting = true
@@ -1100,6 +1099,7 @@ private struct APKDetailSheet: View {
                                     return
                                 }
                                 executionResult = res
+                                UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
                                 // Seed the guest surface before accepting the first gesture. The
                                 // touch mapper needs real framebuffer dimensions; waiting for the
                                 // first CADisplayLink tick can silently drop an immediate tap.
