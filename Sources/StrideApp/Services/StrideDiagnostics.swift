@@ -218,7 +218,8 @@ final class StrideDiagnostics: ObservableObject {
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
             let apkSHA256 = sha256(of: apkURL) ?? "Unavailable (file could not be read)"
             let splitInventory = splitAPKURLs.enumerated().map { index, url in
-                let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? -1
+                let splitAttributes = try? fileManager.attributesOfItem(atPath: url.path)
+                let size = (splitAttributes?[.size] as? NSNumber)?.int64Value ?? -1
                 let hash = sha256(of: url) ?? "Unavailable"
                 return "Split \(index + 1): \(url.lastPathComponent) · \(size >= 0 ? ByteCountFormatter.string(fromByteCount: size, countStyle: .file) : "size unavailable") · SHA-256 \(hash)"
             }
@@ -240,7 +241,7 @@ final class StrideDiagnostics: ObservableObject {
             }
             let stamp = ISO8601DateFormatter().string(from: sessionStartedAt)
             let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-            let url = reportsFolder.appendingPathComponent("\(safeName)-\(sessionID.prefix(8))-Crash-Report.txt")
+            let url = reportsFolder.appendingPathComponent("\(safeName)-\(sessionID.prefix(8))-Diagnostic-Report.txt")
 
             var report = """
             STRIDE SESSION / CRASH REPORT
