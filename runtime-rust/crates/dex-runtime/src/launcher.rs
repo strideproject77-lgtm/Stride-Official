@@ -1,4 +1,4 @@
-﻿//! APK Application Launcher and Runtime Execution Coordinator.
+//! APK Application Launcher and Runtime Execution Coordinator.
 //!
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
@@ -24,6 +24,7 @@ use crate::telemetry::PerformanceTelemetry;
 use crate::canvas::{Canvas, Paint, PaintStyle, RectF};
 use crate::resources::ResourceCatalog;
 use crate::unity::UnityPlayerBridge;
+use crate::cocos2dx::Cocos2dxEngineBridge;
 use crate::audio::AudioSession;
 use crate::handler::LooperCoordinator;
 use crate::native_activity::NativeActivityLauncher;
@@ -94,6 +95,8 @@ pub struct AndroidRuntime {
     pub image_assets: std::collections::HashMap<u32,(u32,u32,Vec<u32>)>,
     /// Unity engine bridge for Unity IL2CPP applications.
     pub unity_bridge: UnityPlayerBridge,
+    /// Cocos2d-x engine bridge for Cocos2dxActivity/Cocos2dxRenderer (Hill Climb Racing).
+    pub cocos2dx_bridge: Cocos2dxEngineBridge,
     /// Audio session coordinating SoundPool and MediaPlayer subsystems.
     pub audio_session: AudioSession,
     /// Android Handler/Looper/MessageQueue scheduler.
@@ -492,6 +495,8 @@ impl AndroidRuntime {
         Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone());
         Self::register_game_jni(&mut jni);
         UnityPlayerBridge::register_unity_jni(&mut jni);
+        let mut cocos2dx_bridge = Cocos2dxEngineBridge::new();
+        cocos2dx_bridge.register_jni_bridges(&mut jni);
 
         Self {
             class_loader: AppClassLoader::new(),
@@ -524,6 +529,7 @@ impl AndroidRuntime {
             resources: ResourceCatalog::default(),
             image_assets: std::collections::HashMap::new(),
             unity_bridge: UnityPlayerBridge::new(),
+            cocos2dx_bridge,
             audio_session: AudioSession::new(),
             looper_coordinator: LooperCoordinator::new(),
             native_activity_launcher: NativeActivityLauncher::new(),
@@ -2213,6 +2219,7 @@ impl AndroidRuntime {
 
         while delivered < max_events {
             let Some(event) = self.input_queue.poll_motion() else { break };
+            self.cocos2dx_bridge.dispatch_motion_event(&event);
             latest_event_enqueued_at = Some(event.host_enqueued_at);
             had_events = true;
             let pointer = event.pointers.first();

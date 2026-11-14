@@ -1208,3 +1208,22 @@ Status: UI implementation committed · consolidated validation and visual review
 - Files: `runtime-rust/crates/dex-runtime/src/native_execution.rs`, `runtime-rust/crates/dex-runtime/src/launcher.rs`, `runtime-rust/crates/dex-runtime/src/lib.rs`, `Sources/StrideApp/Runtime/ExecutionBackend.swift`, `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
 - Commits: `ddf4842` (`feat(runtime): connect NativeGuestImage pipeline with AArch64 execution, dependency ordering, and JNI bridges (Phase 34)`), followed by Swift and doc tracking commits.
 - Tests: deliberately deferred per strict implementation-only instructions; CI/workflow/IPA jobs not run. `main` untouched.
+### Phase 35 - AArch64 Arithmetic/System Expansion & Cocos2d-x Engine Bridge
+**Status: Implementation committed — consolidated validation pending.**
+
+- Expanded AArch64 guest interpreter (`Arm64Cpu` & `run_aarch64`) with vital instructions required by compiled C/C++ game engines and Bionic libc:
+  - System registers: `MRS` and `MSR` for `TPIDR_EL0` and `TPIDRRO_EL0` (Thread Local Storage for Bionic libc TLS, `errno`, and stack guard canary `__stack_chk_guard`).
+  - 3-source data processing: `MADD`, `MSUB`, `MUL`, `MNEG`, `SMULH`, `UMULH`, `SMADDL`, `SMSUBL`, `UMADDL`, `UMSUBL`.
+  - Integer divide: `SDIV` and `UDIV` with ARMv8 standard zero-division semantics and two's complement overflow handling.
+  - FP/SIMD unsigned-offset loads/stores: `LDR` and `STR` for B (8-bit), H (16-bit), S (32-bit), D (64-bit), and Q (128-bit) vector registers `V0..V31`.
+  - Floating-point transfers: `FMOV` between general-purpose integer registers (`X`/`W`) and vector registers (`D`/`S`).
+- Implemented dedicated `Cocos2dxEngineBridge` in `dex-runtime::cocos2dx`:
+  - Lifecycle state management: `Uninitialized`, `SurfaceCreated`, `Running`, `Paused`, `Stopped`.
+  - JNI native callbacks for `Cocos2dxRenderer`: `nativeInit`, `nativeRender`, `nativeOnSurfaceCreated`, `nativeOnSurfaceChanged`, `nativeOnPause`, `nativeOnResume`, `nativeTouchesBegin`, `nativeTouchesMove`, `nativeTouchesEnd`, `nativeTouchesCancel`, `nativeKeyDown`.
+  - JNI native callbacks for `Cocos2dxHelper`: `nativeSetApkPath`, `nativeSetContext`, `nativeSetEditTextDialogResult`, `getIntegerForKey`, `getStringForKey`, `setIntegerForKey`, `setStringForKey`, `getDeviceModel`, `getCurrentLanguage`.
+  - Multi-touch coordinate translation and queuing from Android `MotionEvent` to Cocos2d-x touch streams.
+  - Integrated into `AndroidRuntime` lifecycle, input dispatch pipeline, and JNI registry.
+- Target verification: directly addresses the documented Cocos2d-x architecture of Hill Climb Racing (`libgame.so`), moving beyond generic Unity stubs into actual Cocos2d-x surface, touch, and helper integration.
+- Files: `runtime-rust/crates/dex-runtime/src/arm64_guest.rs`, `runtime-rust/crates/dex-runtime/src/cocos2dx.rs`, `runtime-rust/crates/dex-runtime/src/launcher.rs`, `runtime-rust/crates/dex-runtime/src/lib.rs`, `docs/ARM64-GUEST-INTERPRETER.md`, `STRIDE_HANDOFF.md`.
+- Commits: `ca7cdd2`, followed by Cocos2d-x engine integration commit.
+- Tests: deliberately deferred per strict implementation-only instructions; CI/workflow/IPA jobs not run. `main` untouched.

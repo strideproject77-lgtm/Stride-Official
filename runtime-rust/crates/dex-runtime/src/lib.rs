@@ -1,4 +1,4 @@
-﻿//! A deliberately small, bounds-checked Dalvik integer interpreter.
+//! A deliberately small, bounds-checked Dalvik integer interpreter.
 //!
 //! This crate provides a limited Dalvik integer interpreter, Android API scaffolds,
 //! a metadata class/method registry, and a bounded AArch64 guest execution bridge.
@@ -32,6 +32,7 @@ pub mod package;
 pub mod paint;
 pub mod telemetry;
 pub mod unity;
+pub mod cocos2dx;
 pub mod audio;
 pub mod handler;
 pub mod native_activity;
@@ -72,6 +73,7 @@ pub use service_manager::{ServiceManager, ServiceRecord, ServiceState};
 pub use package::{XapkBundle, ObbFile};
 pub use telemetry::{PerformanceTelemetry, RuntimeTelemetrySnapshot, AnrWatchdog};
 pub use unity::{UnityPlayerBridge, UnityEngineState, UnityMessage};
+pub use cocos2dx::{Cocos2dxEngineBridge, Cocos2dxEngineState, Cocos2dxTouchEvent};
 pub use audio::AudioSession;
 pub use handler::LooperCoordinator;
 pub use native_activity::NativeActivityLauncher;
