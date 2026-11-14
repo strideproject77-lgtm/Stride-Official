@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-14 (Phase 31 native-game startup optimization added)
+Updated: 2026-11-14 (Phase 32 accent color picker and HCR follow-up evidence)
 
 ## Goal
 
@@ -1155,3 +1155,25 @@ Status: Implementation committed · consolidated validation and real-device rete
 - Remaining: one consolidated Rust + Swift/iOS validation; build the authorized unsigned IPA; retest HCR and confirm DEX loading, native library loading and Activity dispatch appear in the session log. Do not claim HCR compatibility until the game's own UI is visibly running and sustained behavior is checked.
 - Tests: not run in this batch by design; perform only the consolidated validation pass.
 - IPA: unsigned build only is authorized; no signing or release export. main untouched.
+
+
+### Phase 32 — Persistent Accent Color Picker
+Status: UI implementation committed · consolidated validation and visual review pending.
+
+- Added an Accent Color section to Settings; this changes only the app's accent color, not the black background or surface theme.
+- Added eight choices: Amber (default), Lime, Violet, Blue, Cyan, Rose, Red and White.
+- Selection is saved with AppStorage/UserDefaults and applies immediately across the shared ContentView accent passed into Home, Library, Settings, app details and About controls/icons.
+- Added selected-state ring/checkmark, accessible option labels, compact four-column swatch layout and explanatory copy that backgrounds remain black.
+- Removed the unused full StrideTheme enum so this is explicitly an accent-color selector, not a full theme system.
+- Extra UI improvement: the palette is keyboard/VoiceOver discoverable through accessibility labels and selected traits; no restart required.
+- Files: Sources/StrideApp/ContentView.swift.
+- Commits: 3a92c9c (accent picker); 8522403 (Swift key-path/interpolation correction).
+- Remaining: consolidated Swift/iOS + Rust validation, unsigned IPA build, and real-device visual check for selected accent persistence and contrast.
+- Tests: deferred to the single consolidated validation workflow; no repeated test runs.
+- IPA: unsigned build only is authorized. No signing, release export or merge to main.
+
+### Phase 31 — HCR follow-up evidence (2026-11-14)
+- The second HCR session log still shows eager image scanning progress at 128/955, 256/955 and 384/955. It contains no DEX load events.
+- This log does not contain the Phase 31 marker 'Deferred eager Android image predecode for native/asset-heavy package'; therefore the tested IPA predates the Phase 31 code or was not rebuilt from the updated branch. Do not interpret it as a failure of the new conditional path.
+- The user manually ended the session while scanning was in progress. Next build must include commit 713f52d and should log the defer marker for this HCR package (7 ARM64 libraries, 2,399 assets).
+- After the new IPA is installed, leave HCR running long enough to capture DEX load, native library materialization and Activity/JNI/graphics events. Do not claim compatibility before the actual game UI is visible.
