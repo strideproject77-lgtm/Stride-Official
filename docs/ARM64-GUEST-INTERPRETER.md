@@ -24,6 +24,11 @@ materializer in `dex-runtime::arm64_guest` and
 - Added SBFM/BFM/UBFM bitfield instructions and sign-extending LDRSB/LDRSH/LDRSW unsigned-offset forms.
 - Unsigned-offset byte/halfword/word/doubleword LDR/STR
 - Unscaled-offset LDUR/STUR byte/halfword/word/doubleword
+- System registers: MRS and MSR for TPIDR_EL0 and TPIDRRO_EL0 (Thread ID Register for Bionic libc TLS and stack canary protection)
+- 3-source data-processing: MADD, MSUB, MUL, MNEG, SMULH, UMULH, SMADDL, SMSUBL, UMADDL, UMSUBL
+- Integer divide: SDIV and UDIV (supporting ARMv8 zero-divisor semantics)
+- FP/SIMD vector unsigned-offset loads/stores: LDR and STR for B (8-bit), H (16-bit), S (32-bit), D (64-bit), and Q (128-bit)
+- Floating-point register transfers: FMOV between X/W general-purpose registers and D/S vector registers
 
 Native image integration also preserves DT_INIT/DT_INIT_ARRAY metadata and can
 run the discovered constructors after relocations. The caller must initialize

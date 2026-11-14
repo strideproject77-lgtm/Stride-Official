@@ -49,6 +49,10 @@ pub struct Arm64Cpu {
     /// Per-interpreter exclusive reservation used by LDXR/LDAXR and
     /// STXR/STLXR. Cross-thread reservation arbitration is not implemented yet.
     pub exclusive_monitor: Option<(u64, usize)>,
+    /// Thread Local Storage pointer (TPIDR_EL0) for Bionic libc TLS and stack canary.
+    pub tpidr_el0: u64,
+    /// V0..V31 SIMD/FP registers (128-bit).
+    pub v: [u128; 32],
 }
 
 impl Default for Arm64Cpu {
@@ -61,7 +65,9 @@ impl Default for Arm64Cpu {
             instructions_executed: 0,
             halted: false,
             exclusive_monitor: None,
-        }
+            exclusive_monitor: None,
+            tpidr_el0: 0,
+            v: [0; 32],
     }
 }
 
@@ -747,6 +753,247 @@ pub fn run_aarch64(
             continue;
         }
 
+        // MRS TPIDR_EL0 / TPIDRRO_EL0 (Thread ID Register used for Bionic TLS and stack guard)
+        if instruction & 0xFFD0_FFE0 == 0xD530_D040 {
+            let rt = instruction & 0x1F;
+            let op2 = (instruction >> 5) & 0x7;
+            let val = match op2 {
+                2 => cpu.tpidr_el0,
+                3 => cpu.tpidr_el0, // Read-only user TLS alias
+                _ => return Err(Arm64Error::UnsupportedInstruction(instruction)),
+            };
+            write_reg(cpu, rt, val, true, false)?;
+            continue;
+        }
+
+        // MSR TPIDR_EL0 (Write Thread ID Register)
+        if instruction & 0xFFF0_FFE0 == 0xD510_D040 {
+            let rt = instruction & 0x1F;
+            let val = read_reg(cpu, rt, true, false)?;
+            cpu.tpidr_el0 = val;
+            continue;
+        }
+
+        // Data-processing (3 source): MADD, MSUB, SMADDL, SMSUBL, SMULH, UMADDL, UMSUBL, UMULH
+        if instruction & 0x1F00_0000 == 0x1B00_0000 {
+            let is_64 = instruction >> 31 != 0;
+            let op54 = (instruction >> 29) & 0x3;
+            let op31 = (instruction >> 21) & 0x7;
+            let rm = (instruction >> 16) & 0x1F;
+            let o0 = (instruction >> 15) & 1;
+            let ra = (instruction >> 10) & 0x1F;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+
+            if op54 != 0 {
+                return Err(Arm64Error::UnsupportedInstruction(instruction));
+            }
+
+            match (is_64, op31, o0) {
+                // MADD (32-bit and 64-bit) including MUL aliases (Ra = 31 / XZR / WZR)
+                (true, 0, 0) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, true, false)?;
+                    let m = read_reg(cpu, rm, true, false)?;
+                    let res = a.wrapping_add(n.wrapping_mul(m));
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                // MSUB (32-bit and 64-bit) including MNEG aliases
+                (true, 0, 1) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, true, false)?;
+                    let m = read_reg(cpu, rm, true, false)?;
+                    let res = a.wrapping_sub(n.wrapping_mul(m));
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                (false, 0, 0) => {
+                    let a = read_reg(cpu, ra, false, false)? as u32;
+                    let n = read_reg(cpu, rn, false, false)? as u32;
+                    let m = read_reg(cpu, rm, false, false)? as u32;
+                    let res = a.wrapping_add(n.wrapping_mul(m)) as u64;
+                    write_reg(cpu, rd, res, false, false)?;
+                }
+                (false, 0, 1) => {
+                    let a = read_reg(cpu, ra, false, false)? as u32;
+                    let n = read_reg(cpu, rn, false, false)? as u32;
+                    let m = read_reg(cpu, rm, false, false)? as u32;
+                    let res = a.wrapping_sub(n.wrapping_mul(m)) as u64;
+                    write_reg(cpu, rd, res, false, false)?;
+                }
+                // SMULH (signed multiply high 64-bit)
+                (true, 2, 0) => {
+                    let n = read_reg(cpu, rn, true, false)? as i64 as i128;
+                    let m = read_reg(cpu, rm, true, false)? as i64 as i128;
+                    let prod = n.wrapping_mul(m);
+                    let res = (prod >> 64) as u64;
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                // UMULH (unsigned multiply high 64-bit)
+                (true, 6, 0) => {
+                    let n = read_reg(cpu, rn, true, false)? as u128;
+                    let m = read_reg(cpu, rm, true, false)? as u128;
+                    let prod = n.wrapping_mul(m);
+                    let res = (prod >> 64) as u64;
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                // SMADDL / SMSUBL (signed 32x32 -> 64 with accumulate)
+                (false, 1, 0) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, false, false)? as u32 as i32 as i64;
+                    let m = read_reg(cpu, rm, false, false)? as u32 as i32 as i64;
+                    let res = a.wrapping_add(n.wrapping_mul(m) as u64);
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                (false, 1, 1) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, false, false)? as u32 as i32 as i64;
+                    let m = read_reg(cpu, rm, false, false)? as u32 as i32 as i64;
+                    let res = a.wrapping_sub(n.wrapping_mul(m) as u64);
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                // UMADDL / UMSUBL (unsigned 32x32 -> 64 with accumulate)
+                (false, 5, 0) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, false, false)? as u32 as u64;
+                    let m = read_reg(cpu, rm, false, false)? as u32 as u64;
+                    let res = a.wrapping_add(n.wrapping_mul(m));
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                (false, 5, 1) => {
+                    let a = read_reg(cpu, ra, true, false)?;
+                    let n = read_reg(cpu, rn, false, false)? as u32 as u64;
+                    let m = read_reg(cpu, rm, false, false)? as u32 as u64;
+                    let res = a.wrapping_sub(n.wrapping_mul(m));
+                    write_reg(cpu, rd, res, true, false)?;
+                }
+                _ => return Err(Arm64Error::UnsupportedInstruction(instruction)),
+            }
+            continue;
+        }
+
+        // Integer divide: SDIV and UDIV
+        if instruction & 0x7FE0_F800 == 0x1AC0_0800 {
+            let is_64 = instruction >> 31 != 0;
+            let is_sdiv = (instruction >> 10) & 1 != 0;
+            let rm = (instruction >> 16) & 0x1F;
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = instruction & 0x1F;
+
+            let res = if is_64 {
+                let n = read_reg(cpu, rn, true, false)?;
+                let m = read_reg(cpu, rm, true, false)?;
+                if is_sdiv {
+                    let sn = n as i64;
+                    let sm = m as i64;
+                    if sm == 0 {
+                        0u64
+                    } else if sn == i64::MIN && sm == -1 {
+                        i64::MIN as u64
+                    } else {
+                        (sn / sm) as u64
+                    }
+                } else {
+                    if m == 0 { 0u64 } else { n / m }
+                }
+            } else {
+                let n = read_reg(cpu, rn, false, false)? as u32;
+                let m = read_reg(cpu, rm, false, false)? as u32;
+                if is_sdiv {
+                    let sn = n as i32;
+                    let sm = m as i32;
+                    if sm == 0 {
+                        0u64
+                    } else if sn == i32::MIN && sm == -1 {
+                        i32::MIN as u32 as u64
+                    } else {
+                        (sn / sm) as u32 as u64
+                    }
+                } else {
+                    if m == 0 { 0u64 } else { (n / m) as u64 }
+                }
+            };
+            write_reg(cpu, rd, res, is_64, false)?;
+            continue;
+        }
+
+        // FP / SIMD unsigned-offset LDR/STR (32-bit single, 64-bit double, 128-bit quad)
+        if instruction & 0x3B80_0000 == 0x3D80_0000 && instruction & 0x0020_0000 == 0 {
+            let size_code = instruction >> 30;
+            let opc = (instruction >> 22) & 0x3;
+            let load = opc != 0;
+            let width = match (size_code, opc) {
+                (0, 0) | (0, 1) => 1usize, // B
+                (1, 0) | (1, 1) => 2usize, // H
+                (2, 0) | (2, 1) => 4usize, // S
+                (3, 0) | (3, 1) => 8usize, // D
+                (0, 2) | (0, 3) => 16usize, // Q
+                _ => return Err(Arm64Error::UnsupportedInstruction(instruction)),
+            };
+            let imm = ((instruction >> 10) & 0xFFF) as u64;
+            let address_offset = imm.checked_mul(width as u64).ok_or(Arm64Error::AddressOverflow)?;
+            let rn = (instruction >> 5) & 0x1F;
+            let rt = (instruction & 0x1F) as usize;
+            let base = read_reg(cpu, rn, true, true)?;
+            let address = base.checked_add(address_offset).ok_or(Arm64Error::AddressOverflow)?;
+
+            if load {
+                let val: u128 = match width {
+                    1 => memory.read_u8(address)? as u128,
+                    2 => memory.read_u16(address)? as u128,
+                    4 => memory.read_u32(address)? as u128,
+                    8 => memory.read_u64(address)? as u128,
+                    16 => {
+                        let lo = memory.read_u64(address)? as u128;
+                        let hi = memory.read_u64(address.checked_add(8).ok_or(Arm64Error::AddressOverflow)?)? as u128;
+                        (hi << 64) | lo
+                    }
+                    _ => unreachable!(),
+                };
+                cpu.v[rt] = val;
+            } else {
+                let val = cpu.v[rt];
+                match width {
+                    1 => memory.write_u8(address, val as u8)?,
+                    2 => memory.write_u16(address, val as u16)?,
+                    4 => memory.write_u32(address, val as u32)?,
+                    8 => memory.write_u64(address, val as u64)?,
+                    16 => {
+                        memory.write_u64(address, val as u64)?;
+                        memory.write_u64(address.checked_add(8).ok_or(Arm64Error::AddressOverflow)?, (val >> 64) as u64)?;
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            continue;
+        }
+
+        // FMOV between integer and FP registers
+        if instruction & 0xFFFF_FC00 == 0x1E26_0000 { // FMOV Wd, Sn
+            let rn = ((instruction >> 5) & 0x1F) as usize;
+            let rd = instruction & 0x1F;
+            write_reg(cpu, rd, (cpu.v[rn] as u32) as u64, false, false)?;
+            continue;
+        }
+        if instruction & 0xFFFF_FC00 == 0x1E27_0000 { // FMOV Sn, Wd
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = (instruction & 0x1F) as usize;
+            let val = read_reg(cpu, rn, false, false)? as u32;
+            cpu.v[rd] = val as u128;
+            continue;
+        }
+        if instruction & 0xFFFF_FC00 == 0x9E66_0000 { // FMOV Xd, Dn
+            let rn = ((instruction >> 5) & 0x1F) as usize;
+            let rd = instruction & 0x1F;
+            write_reg(cpu, rd, cpu.v[rn] as u64, true, false)?;
+            continue;
+        }
+        if instruction & 0xFFFF_FC00 == 0x9E67_0000 { // FMOV Dn, Xd
+            let rn = (instruction >> 5) & 0x1F;
+            let rd = (instruction & 0x1F) as usize;
+            let val = read_reg(cpu, rn, true, false)?;
+            cpu.v[rd] = val as u128;
+            continue;
+        }
         // BR, BLR and RET.
         let branch_kind = instruction & 0xFFFF_FC1F;
         if branch_kind == 0xD61F_0000 || branch_kind == 0xD63F_0000 || branch_kind == 0xD65F_0000 {
@@ -847,5 +1094,59 @@ mod tests {
         let mut memory = words(0x7000, &[0xD503201F]);
         let mut cpu = Arm64Cpu::default();
         assert_eq!(run_aarch64(&mut cpu, &mut memory, 0x7000, MAX_INSTRUCTIONS_PER_RUN + 1), Err(Arm64Error::InstructionLimit));
+    }
+    #[test]
+    fn executes_mrs_msr_tpidr_el0() {
+        // msr tpidr_el0, x0 (0xD513D040)
+        // mrs x1, tpidr_el0 (0xD533D041)
+        // ret (0xD65F03C0)
+        let mut memory = words(0x1000, &[0xD513D040, 0xD533D041, 0xD65F03C0]);
+        let mut cpu = Arm64Cpu::default();
+        cpu.x[0] = 0xDEAD_BEEF_CAFE_BABE;
+        cpu.x[30] = 0;
+        let report = run_aarch64(&mut cpu, &mut memory, 0x1000, 10).unwrap();
+        assert_eq!(report.stop_reason, Arm64StopReason::Halted);
+        assert_eq!(cpu.tpidr_el0, 0xDEAD_BEEF_CAFE_BABE);
+        assert_eq!(cpu.x[1], 0xDEAD_BEEF_CAFE_BABE);
+    }
+
+    #[test]
+    fn executes_madd_and_msub() {
+        // madd x0, x1, x2, x3 -> x0 = x3 + (x1 * x2)
+        // mul x4, x1, x2 -> x4 = xzr + (x1 * x2) = x1 * x2
+        // msub x5, x1, x2, x3 -> x5 = x3 - (x1 * x2)
+        // ret
+        // madd: 0x9B020C20 (rm=2, ra=3, rn=1, rd=0)
+        // mul:  0x9B027C24 (rm=2, ra=31, rn=1, rd=4)
+        // msub: 0x9B028C25 (rm=2, ra=3, rn=1, rd=5)
+        let mut memory = words(0x1000, &[0x9B020C20, 0x9B027C24, 0x9B028C25, 0xD65F03C0]);
+        let mut cpu = Arm64Cpu::default();
+        cpu.x[1] = 6;
+        cpu.x[2] = 7;
+        cpu.x[3] = 10;
+        cpu.x[30] = 0;
+        let report = run_aarch64(&mut cpu, &mut memory, 0x1000, 10).unwrap();
+        assert_eq!(report.stop_reason, Arm64StopReason::Halted);
+        assert_eq!(cpu.x[0], 52); // 10 + 42
+        assert_eq!(cpu.x[4], 42); // 6 * 7
+        assert_eq!(cpu.x[5], 10u64.wrapping_sub(42)); // 10 - 42
+    }
+
+    #[test]
+    fn executes_sdiv_and_udiv() {
+        // sdiv x0, x1, x2 (0x9AC20C20)
+        // udiv x3, x4, x5 (0x9AC50883)
+        // ret
+        let mut memory = words(0x1000, &[0x9AC20C20, 0x9AC50883, 0xD65F03C0]);
+        let mut cpu = Arm64Cpu::default();
+        cpu.x[1] = (-42i64) as u64;
+        cpu.x[2] = 6;
+        cpu.x[4] = 100;
+        cpu.x[5] = 5;
+        cpu.x[30] = 0;
+        let report = run_aarch64(&mut cpu, &mut memory, 0x1000, 10).unwrap();
+        assert_eq!(report.stop_reason, Arm64StopReason::Halted);
+        assert_eq!(cpu.x[0] as i64, -7);
+        assert_eq!(cpu.x[3], 20);
     }
 }
