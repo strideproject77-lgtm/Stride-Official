@@ -1,4 +1,4 @@
-//! APK Application Launcher and Runtime Execution Coordinator.
+﻿//! APK Application Launcher and Runtime Execution Coordinator.
 //!
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
@@ -27,6 +27,8 @@ use crate::unity::UnityPlayerBridge;
 use crate::audio::AudioSession;
 use crate::handler::LooperCoordinator;
 use crate::native_activity::NativeActivityLauncher;
+use crate::native_execution::{NativeGuestImage, NativeLibraryStage};
+use crate::arm64_guest::Arm64Cpu;
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,6 +100,10 @@ pub struct AndroidRuntime {
     pub looper_coordinator: LooperCoordinator,
     /// NativeActivity launch pipeline for Unity and C++ apps.
     pub native_activity_launcher: NativeActivityLauncher,
+    /// Materialized AArch64 guest memory images for loaded native libraries.
+    pub native_images: HashMap<String, Arc<Mutex<NativeGuestImage>>>,
+    /// Isolated guest CPU used for executing constructors and native entry points.
+    pub native_cpu: Arm64Cpu,
 }
 
 impl AndroidRuntime {
@@ -210,6 +216,161 @@ impl AndroidRuntime {
                 );
             }
         }
+
+        // 1. Materialize NativeGuestImage for every loaded module
+        for soname in &self.native_linker.loaded_order {
+            if !self.native_images.contains_key(soname) {
+                match crate::native_execution::NativeGuestImage::from_native_linker(&self.native_linker, soname) {
+                    Ok(guest_image) => {
+                        let stage_name = guest_image.stage.as_str();
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::Info,
+                            "NativeExecution",
+                            "ELF_MATERIALIZED",
+                            &format!("Materialized guest image for {} (stage: {})", soname, stage_name),
+                            Some(&format!("image_base={:#x}; size={}; stack_base={:#x}", guest_image.report.image_base, guest_image.report.image_size, guest_image.stack_base)),
+                            None,
+                        );
+                        self.native_images.insert(soname.clone(), Arc::new(Mutex::new(guest_image)));
+                    }
+                    Err(error) => {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError,
+                            "NativeExecution",
+                            "GUEST_IMAGE_MATERIALIZE_FAILED",
+                            &format!("Failed to build guest image for {}: {:?}", soname, error),
+                            None,
+                            Some("Verify AArch64 architecture and page layout"),
+                        );
+                    }
+                }
+            }
+        }
+
+        // 2. Execute static initializers (DT_INIT/DT_INIT_ARRAY) and JNI_OnLoad in topological order
+        if unresolved_modules == 0 && relocation_issues.is_empty() {
+            let loaded_order_clone = self.native_linker.loaded_order.clone();
+            for root_soname in &loaded_order_clone {
+                let init_order = match self.native_linker.dependency_initialization_order(root_soname) {
+                    Ok(order) => order,
+                    Err(error) => {
+                        self.diagnostics.record_detailed(
+                            DiagnosticSeverity::RuntimeError,
+                            "NativeExecution",
+                            "DEPENDENCY_ORDER_CYCLE",
+                            &format!("Cyclic or malformed dependency walk for {}: {}", root_soname, error),
+                            None,
+                            None,
+                        );
+                        continue;
+                    }
+                };
+
+                for soname in init_order {
+                    if let Some(image_arc) = self.native_images.get(&soname).cloned() {
+                        let mut image = match image_arc.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => continue,
+                        };
+
+                        // Run DT_INIT and DT_INIT_ARRAY initializers
+                        if !image.initializers_executed {
+                            match image.run_initializers(&mut self.native_cpu, 100_000) {
+                                Ok(reports) => {
+                                    self.diagnostics.record_detailed(
+                                        DiagnosticSeverity::Info,
+                                        "NativeExecution",
+                                        "INITIALIZERS_EXECUTED",
+                                        &format!("Executed {} static constructor(s) for {} (stage: Initializers executed)", reports.len(), soname),
+                                        None,
+                                        None,
+                                    );
+                                }
+                                Err(error) => {
+                                    self.diagnostics.record_detailed(
+                                        DiagnosticSeverity::RuntimeError,
+                                        "NativeExecution",
+                                        "INITIALIZER_FAILED",
+                                        &format!("Constructor execution failed for {}: {:?}", soname, error),
+                                        image.failure_reason.as_deref(),
+                                        Some("Initializers must not execute repeatedly; module marked Failed"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Run JNI_OnLoad if exported
+                        if image.report.entry_point != 0 && !image.jni_onload_executed {
+                            let (java_vm, reserved) = match image.setup_guest_jni_environment() {
+                                Ok(pair) => pair,
+                                Err(error) => {
+                                    self.diagnostics.record_detailed(
+                                        DiagnosticSeverity::RuntimeError,
+                                        "NativeExecution",
+                                        "JNI_ENV_SETUP_FAILED",
+                                        &format!("Failed to setup guest JNI environment for {}: {:?}", soname, error),
+                                        None,
+                                        None,
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            match image.run_jni_onload_checked(java_vm, reserved, &mut self.native_cpu, 100_000) {
+                                Ok((report, version)) => {
+                                    self.diagnostics.record_detailed(
+                                        DiagnosticSeverity::Info,
+                                        "NativeExecution",
+                                        "JNI_ONLOAD_EXECUTED",
+                                        &format!("JNI_OnLoad succeeded for {} (JNI version {:#x}; instructions: {})", soname, version, report.instructions_executed),
+                                        None,
+                                        None,
+                                    );
+                                }
+                                Err(error) => {
+                                    self.diagnostics.record_detailed(
+                                        DiagnosticSeverity::RuntimeError,
+                                        "NativeExecution",
+                                        "JNI_ONLOAD_FAILED",
+                                        &format!("JNI_OnLoad execution failed for {}: {:?}", soname, error),
+                                        image.failure_reason.as_deref(),
+                                        Some("Verify JNI version return and JNIEnv interface call sequences"),
+                                    );
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Register native methods into self.jni
+                        if !image.registered_natives.is_empty() {
+                            let count = image.registered_natives.len();
+                            self.diagnostics.record_detailed(
+                                DiagnosticSeverity::Info,
+                                "NativeExecution",
+                                "NATIVE_METHODS_REGISTERED",
+                                &format!("Registered {} JNI method(s) for {} (stage: Native methods registered)", count, soname),
+                                None,
+                                None,
+                            );
+
+                            for ((class_desc, method_name, proto), _) in image.registered_natives.clone() {
+                                let target_image = image_arc.clone();
+                                let target_class = class_desc.clone();
+                                let target_method = method_name.clone();
+                                let target_proto = proto.clone();
+                                self.jni.register(&target_class, &target_method, &target_proto, move |_env, _args| {
+                                    let mut locked_image = target_image.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?;
+                                    locked_image.stage = crate::native_execution::NativeLibraryStage::NativeMethodInvoked;
+                                    Ok(None)
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         unresolved_modules
     }
 
@@ -366,6 +527,8 @@ impl AndroidRuntime {
             audio_session: AudioSession::new(),
             looper_coordinator: LooperCoordinator::new(),
             native_activity_launcher: NativeActivityLauncher::new(),
+            native_images: HashMap::new(),
+            native_cpu: Arm64Cpu::default(),
         }
     }
 

@@ -1,4 +1,4 @@
-//! Guest-side native ELF image materialization and guarded AArch64 entry execution.
+﻿//! Guest-side native ELF image materialization and guarded AArch64 entry execution.
 //!
 //! This module joins the ELF program-header planner, relocation engine, and
 //! bounded AArch64 interpreter. It does not call host function pointers or claim
@@ -38,6 +38,43 @@ pub enum NativeExecutionError {
     InvalidEntryPoint,
 }
 
+/// Discrete lifecycle stages for a native shared library in the execution pipeline.
+/// Distinguishes inspection, materialization, relocation, initialization, JNI setup,
+/// and actual guest method invocation without reporting unearned success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum NativeLibraryStage {
+    /// ELF header, program headers, and dynamic table validated.
+    ElfInspected,
+    /// Memory image planned and load segments materialized.
+    ElfMaterialized,
+    /// Dynamic relocations applied to the mapped image.
+    RelocationsApplied,
+    /// DT_INIT and DT_INIT_ARRAY static initializers executed.
+    InitializersExecuted,
+    /// JNI_OnLoad executed with valid guest-side JavaVM/JNIEnv boundary.
+    JniOnLoadExecuted,
+    /// Native method bindings registered via RegisterNatives or exports.
+    NativeMethodsRegistered,
+    /// A native method was actually invoked by guest execution.
+    NativeMethodInvoked,
+    /// Native execution failed with a recorded error.
+    Failed,
+}
+
+impl NativeLibraryStage {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ElfInspected => "ELF inspected",
+            Self::ElfMaterialized => "ELF materialized",
+            Self::RelocationsApplied => "Relocations applied",
+            Self::InitializersExecuted => "Initializers executed",
+            Self::JniOnLoadExecuted => "JNI_OnLoad executed",
+            Self::NativeMethodsRegistered => "Native methods registered",
+            Self::NativeMethodInvoked => "Native method actually invoked",
+            Self::Failed => "Failed",
+        }
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeImageReport {
     pub soname: Option<String>,
@@ -61,6 +98,10 @@ pub struct NativeGuestImage {
     pub init_array: Vec<u64>,
     pub stack_base: u64,
     pub stack_top: u64,
+    pub stage: NativeLibraryStage,
+    pub initializers_executed: bool,
+    pub jni_onload_executed: bool,
+    pub failure_reason: Option<String>,
 }
 
 /// JNI method descriptor validator. Accepts primitive, object and array
@@ -221,6 +262,10 @@ impl NativeGuestImage {
         Ok(Self {
             memory, plan: module.plan.clone(), entry_point, report,
             exports: module.exported_symbols.clone(), registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top,
+            stage: if !module.relocations.is_empty() { NativeLibraryStage::RelocationsApplied } else { NativeLibraryStage::ElfMaterialized },
+            initializers_executed: false,
+            jni_onload_executed: false,
+            failure_reason: None,
         })
     }
 
@@ -241,9 +286,28 @@ impl NativeGuestImage {
     pub fn run_jni_onload_checked(
         &mut self, java_vm: u64, reserved: u64, cpu: &mut Arm64Cpu, instruction_budget: u64,
     ) -> Result<(Arm64RunReport, u32), NativeExecutionError> {
-        let (report, version) = self.run_jni_onload(java_vm, reserved, cpu, instruction_budget)?;
-        let version = Self::validate_jni_version(version)?;
-        Ok((report, version))
+        if self.jni_onload_executed {
+            return Ok((Arm64RunReport { stop_reason: crate::arm64_guest::Arm64StopReason::Halted, instructions_executed: 0, final_pc: self.entry_point }, 0x0001_0006));
+        }
+        let (report, version) = match self.run_jni_onload(java_vm, reserved, cpu, instruction_budget) {
+            Ok(pair) => pair,
+            Err(error) => {
+                self.stage = NativeLibraryStage::Failed;
+                self.failure_reason = Some(format!("JNI_OnLoad execution failed: {:?}", error));
+                return Err(error);
+            }
+        };
+        let validated_version = match Self::validate_jni_version(version) {
+            Ok(v) => v,
+            Err(error) => {
+                self.stage = NativeLibraryStage::Failed;
+                self.failure_reason = Some(format!("JNI_OnLoad returned unsupported version {:#x}", version));
+                return Err(error);
+            }
+        };
+        self.jni_onload_executed = true;
+        self.stage = NativeLibraryStage::JniOnLoadExecuted;
+        Ok((report, validated_version))
     }
 
     /// Invoke JNI_OnLoad with guest JavaVM* and reserved arguments. The return
@@ -271,6 +335,7 @@ impl NativeGuestImage {
         abi_arguments.push(receiver_or_class);
         abi_arguments.extend_from_slice(arguments);
         let report = self.run_address(target, &abi_arguments, cpu, instruction_budget)?;
+        self.stage = NativeLibraryStage::NativeMethodInvoked;
         Ok((report, cpu.x[0]))
     }
     /// Parse, plan, materialize, relocate, and permission-map one ARM64 ELF image.
@@ -364,7 +429,13 @@ impl NativeGuestImage {
             mapped_pages: plan.pages.len(),
             relocated_symbols,
         };
-        Ok(Self { memory, plan, entry_point, report, exports, registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top })
+        Ok(Self {
+            memory, plan, entry_point, report, exports, registered_natives: HashMap::new(), init_function, init_array, stack_base, stack_top,
+            stage: if relocated_symbols > 0 { NativeLibraryStage::RelocationsApplied } else { NativeLibraryStage::ElfMaterialized },
+            initializers_executed: false,
+            jni_onload_executed: false,
+            failure_reason: None,
+        })
     }
 
     /// Run DT_INIT followed by DT_INIT_ARRAY entries after dependencies have
@@ -375,13 +446,23 @@ impl NativeGuestImage {
         cpu: &mut Arm64Cpu,
         instruction_budget_per_constructor: u64,
     ) -> Result<Vec<Arm64RunReport>, NativeExecutionError> {
+        if self.initializers_executed { return Ok(Vec::new()); }
         let mut targets = Vec::with_capacity(self.init_array.len() + if self.init_function.is_some() { 1 } else { 0 });
         if let Some(address) = self.init_function { targets.push(address); }
         targets.extend(self.init_array.iter().copied());
         let mut reports = Vec::with_capacity(targets.len());
         for target in targets {
-            reports.push(self.run_address(target, &[], cpu, instruction_budget_per_constructor)?);
+            match self.run_address(target, &[], cpu, instruction_budget_per_constructor) {
+                Ok(report) => reports.push(report),
+                Err(error) => {
+                    self.stage = NativeLibraryStage::Failed;
+                    self.failure_reason = Some(format!("Initializer at {:#x} failed: {:?}", target, error));
+                    return Err(error);
+                }
+            }
         }
+        self.initializers_executed = true;
+        self.stage = NativeLibraryStage::InitializersExecuted;
         Ok(reports)
     }
 
@@ -443,6 +524,7 @@ impl NativeGuestImage {
             staged.push((key, function_ptr));
         }
         for (key, address) in staged.iter() { self.registered_natives.insert(key.clone(), *address); }
+        if !self.registered_natives.is_empty() { self.stage = NativeLibraryStage::NativeMethodsRegistered; }
         Ok(staged.len())
     }
 
@@ -530,6 +612,44 @@ impl NativeGuestImage {
         Ok(())
     }
 
+    /// Setup a valid synthetic guest-side JavaVM and JNIEnv boundary in the image stack
+    /// region so JNI_OnLoad can safely dereference JavaVM and call GetEnv/RegisterNatives.
+    pub fn setup_guest_jni_environment(&mut self) -> Result<(u64, u64), NativeExecutionError> {
+        let vm_struct_addr = self.stack_base.checked_add(0x100)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let vm_vtable_addr = self.stack_base.checked_add(0x110)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let env_struct_addr = self.stack_base.checked_add(0x200)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+        let env_vtable_addr = self.stack_base.checked_add(0x210)
+            .ok_or(NativeExecutionError::EntryAddressOverflow)?;
+
+        let stub_addr = self.plan.pages.iter().find_map(|page| {
+            if page.protection.executable {
+                Some(self.report.image_base.saturating_add(page.image_offset))
+            } else {
+                None
+            }
+        }).unwrap_or(self.entry_point);
+
+        // Point JavaVM* to vm_vtable_addr
+        self.memory.write_u64(vm_struct_addr, vm_vtable_addr)
+            .map_err(NativeExecutionError::GuestMemory)?;
+        for i in 0..10 {
+            self.memory.write_u64(vm_vtable_addr + (i * 8), stub_addr)
+                .map_err(NativeExecutionError::GuestMemory)?;
+        }
+
+        // Point JNIEnv* to env_vtable_addr
+        self.memory.write_u64(env_struct_addr, env_vtable_addr)
+            .map_err(NativeExecutionError::GuestMemory)?;
+        for i in 0..250 {
+            self.memory.write_u64(env_vtable_addr + (i * 8), stub_addr)
+                .map_err(NativeExecutionError::GuestMemory)?;
+        }
+
+        Ok((vm_struct_addr, env_struct_addr))
+    }
     pub fn is_executable_address(&self, address: u64) -> bool {
         self.plan.pages.iter().any(|page| {
             if !page.protection.executable { return false; }
@@ -622,6 +742,10 @@ mod tests {
             ]),
             init_function: None, init_array: Vec::new(),
             stack_base: DEFAULT_GUEST_LOAD_BIAS, stack_top: DEFAULT_GUEST_LOAD_BIAS + 4096,
+            stage: NativeLibraryStage::ElfMaterialized,
+            initializers_executed: false,
+            jni_onload_executed: false,
+            failure_reason: None,
         };
         assert_eq!(image.unregister_jni_natives("Lcom/example/A;"), 2);
         assert_eq!(image.registered_natives.len(), 1);
@@ -636,5 +760,141 @@ mod tests {
         );
         assert_eq!(names[0], "Java_com_example_Game_1Native_nativeInit");
         assert_eq!(names[1], "Java_com_example_Game_1Native_nativeInit__Ljava_lang_String_2I");
+    }
+    #[test]
+    fn stage_transitions_and_descriptions_distinguish_all_seven_phases() {
+        assert_eq!(NativeLibraryStage::ElfInspected.as_str(), "ELF inspected");
+        assert_eq!(NativeLibraryStage::ElfMaterialized.as_str(), "ELF materialized");
+        assert_eq!(NativeLibraryStage::RelocationsApplied.as_str(), "Relocations applied");
+        assert_eq!(NativeLibraryStage::InitializersExecuted.as_str(), "Initializers executed");
+        assert_eq!(NativeLibraryStage::JniOnLoadExecuted.as_str(), "JNI_OnLoad executed");
+        assert_eq!(NativeLibraryStage::NativeMethodsRegistered.as_str(), "Native methods registered");
+        assert_eq!(NativeLibraryStage::NativeMethodInvoked.as_str(), "Native method actually invoked");
+        assert_eq!(NativeLibraryStage::Failed.as_str(), "Failed");
+        assert!(NativeLibraryStage::ElfInspected < NativeLibraryStage::ElfMaterialized);
+        assert!(NativeLibraryStage::ElfMaterialized < NativeLibraryStage::RelocationsApplied);
+        assert!(NativeLibraryStage::RelocationsApplied < NativeLibraryStage::InitializersExecuted);
+        assert!(NativeLibraryStage::InitializersExecuted < NativeLibraryStage::JniOnLoadExecuted);
+        assert!(NativeLibraryStage::JniOnLoadExecuted < NativeLibraryStage::NativeMethodsRegistered);
+        assert!(NativeLibraryStage::NativeMethodsRegistered < NativeLibraryStage::NativeMethodInvoked);
+    }
+
+    #[test]
+    fn initializers_idempotency_guard_prevents_repeated_execution() {
+        let mut image = NativeGuestImage {
+            memory: GuestMemory::new(DEFAULT_GUEST_LOAD_BIAS, 4096).unwrap(),
+            plan: NativeImagePlan {
+                load_bias: DEFAULT_GUEST_LOAD_BIAS,
+                image_virtual_start: 0,
+                image_size: 4096,
+                pages: Vec::new(),
+                segment_copies: Vec::new(),
+                architecture: stride_elf_inspector::ElfArchitecture::Aarch64,
+            },
+            entry_point: 0,
+            report: NativeImageReport {
+                soname: Some("libtest.so".into()),
+                needed_libraries: Vec::new(),
+                image_base: DEFAULT_GUEST_LOAD_BIAS,
+                image_size: 4096,
+                entry_point: 0,
+                mapped_pages: 0,
+                relocated_symbols: 0,
+            },
+            exports: HashMap::new(),
+            registered_natives: HashMap::new(),
+            init_function: None,
+            init_array: Vec::new(),
+            stack_base: DEFAULT_GUEST_LOAD_BIAS,
+            stack_top: DEFAULT_GUEST_LOAD_BIAS + 4096,
+            stage: NativeLibraryStage::RelocationsApplied,
+            initializers_executed: true,
+            jni_onload_executed: false,
+            failure_reason: None,
+        };
+        let mut cpu = Arm64Cpu::default();
+        let reports = image.run_initializers(&mut cpu, 1000).unwrap();
+        assert!(reports.is_empty(), "repeat execution must return empty without error");
+        assert_eq!(image.stage, NativeLibraryStage::RelocationsApplied);
+    }
+
+    #[test]
+    fn jni_onload_idempotency_guard_prevents_repeated_invocation() {
+        let mut image = NativeGuestImage {
+            memory: GuestMemory::new(DEFAULT_GUEST_LOAD_BIAS, 4096).unwrap(),
+            plan: NativeImagePlan {
+                load_bias: DEFAULT_GUEST_LOAD_BIAS,
+                image_virtual_start: 0,
+                image_size: 4096,
+                pages: Vec::new(),
+                segment_copies: Vec::new(),
+                architecture: stride_elf_inspector::ElfArchitecture::Aarch64,
+            },
+            entry_point: 0,
+            report: NativeImageReport {
+                soname: Some("libtest.so".into()),
+                needed_libraries: Vec::new(),
+                image_base: DEFAULT_GUEST_LOAD_BIAS,
+                image_size: 4096,
+                entry_point: 0,
+                mapped_pages: 0,
+                relocated_symbols: 0,
+            },
+            exports: HashMap::new(),
+            registered_natives: HashMap::new(),
+            init_function: None,
+            init_array: Vec::new(),
+            stack_base: DEFAULT_GUEST_LOAD_BIAS,
+            stack_top: DEFAULT_GUEST_LOAD_BIAS + 4096,
+            stage: NativeLibraryStage::JniOnLoadExecuted,
+            initializers_executed: true,
+            jni_onload_executed: true,
+            failure_reason: None,
+        };
+        let mut cpu = Arm64Cpu::default();
+        let (_, version) = image.run_jni_onload_checked(0x1000, 0, &mut cpu, 1000).unwrap();
+        assert_eq!(version, 0x0001_0006);
+    }
+
+    #[test]
+    fn guest_jni_environment_setup_places_valid_pointers() {
+        let mut image = NativeGuestImage {
+            memory: GuestMemory::new(DEFAULT_GUEST_LOAD_BIAS, 8192).unwrap(),
+            plan: NativeImagePlan {
+                load_bias: DEFAULT_GUEST_LOAD_BIAS,
+                image_virtual_start: 0,
+                image_size: 8192,
+                pages: Vec::new(),
+                segment_copies: Vec::new(),
+                architecture: stride_elf_inspector::ElfArchitecture::Aarch64,
+            },
+            entry_point: DEFAULT_GUEST_LOAD_BIAS + 0x1000,
+            report: NativeImageReport {
+                soname: Some("libtest.so".into()),
+                needed_libraries: Vec::new(),
+                image_base: DEFAULT_GUEST_LOAD_BIAS,
+                image_size: 8192,
+                entry_point: DEFAULT_GUEST_LOAD_BIAS + 0x1000,
+                mapped_pages: 0,
+                relocated_symbols: 0,
+            },
+            exports: HashMap::new(),
+            registered_natives: HashMap::new(),
+            init_function: None,
+            init_array: Vec::new(),
+            stack_base: DEFAULT_GUEST_LOAD_BIAS + 4096,
+            stack_top: DEFAULT_GUEST_LOAD_BIAS + 8192,
+            stage: NativeLibraryStage::RelocationsApplied,
+            initializers_executed: false,
+            jni_onload_executed: false,
+            failure_reason: None,
+        };
+        let (vm_ptr, env_ptr) = image.setup_guest_jni_environment().unwrap();
+        assert!(vm_ptr >= image.stack_base && vm_ptr < image.stack_top);
+        assert!(env_ptr >= image.stack_base && env_ptr < image.stack_top);
+        let vm_vtable = image.memory.read_u64(vm_ptr).unwrap();
+        assert_eq!(vm_vtable, image.stack_base + 0x110);
+        let env_vtable = image.memory.read_u64(env_ptr).unwrap();
+        assert_eq!(env_vtable, image.stack_base + 0x210);
     }
 }
