@@ -1036,7 +1036,33 @@ private struct APKDetailSheet: View {
                             metricRow("Captured events", value: "\(diagnostics.entries.count)")
                             metricRow("Errors", value: "\(diagnostics.issueCount)")
                             metricRow("Warnings", value: "\(diagnostics.entries.filter { $0.severity == .warning }.count)")
-                            Text("Export the Complete Diagnostic Report after a launch attempt for the full captured evidence.")
+                            HStack(spacing: 10) {
+                                Button {
+                                    UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n")
+                                } label: {
+                                    Label("Copy Log", systemImage: "doc.on.doc")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(raised, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    exportSessionLog()
+                                } label: {
+                                    Label("Export Report", systemImage: "square.and.arrow.up")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Color.black)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(accent, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.top, 4)
+                            Text("Export the Complete Diagnostic Report for package fingerprints, environment metrics, and Rust runtime diagnostics.")
                                 .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1813,6 +1839,7 @@ private struct APKIconView: View {
                     .resizable()
                     .interpolation(.high)
                     .scaledToFit()
+                    .background(Color(red: 0.12, green: 0.12, blue: 0.14))
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.25)
