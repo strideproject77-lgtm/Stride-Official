@@ -1263,7 +1263,7 @@ private struct APKDetailSheet: View {
                                 appendSessionLog("[ERROR] One-shot diagnostic report could not be generated")
                             }
                         } label: {
-                            Label("Export One-Shot Report (.txt)", systemImage: "doc.text.magnifyingglass")
+                            Label("Export Complete Diagnostic Report (.txt)", systemImage: "doc.text.magnifyingglass")
                                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
                         }
                     }
