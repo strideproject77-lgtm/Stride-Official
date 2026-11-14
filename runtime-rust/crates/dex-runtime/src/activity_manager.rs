@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(am.current_activity().unwrap().class_name, "SettingsActivity");
 
         // Back pressed finishes SettingsActivity, restoring MainActivity to Resumed
-        let handled = am.handle_back_pressed(&mut class_loader, &mut vm);
+        let handled = am.handle_back_pressed(&mut class_loader, &mut vm).unwrap();
         assert!(handled);
         assert_eq!(am.activity_count(), 1);
         assert_eq!(am.current_activity().unwrap().class_name, "MainActivity");
