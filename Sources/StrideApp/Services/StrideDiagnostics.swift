@@ -3,6 +3,7 @@ import CryptoKit
 import Combine
 import os
 import UIKit
+import Darwin
 
 /// Unified append-only diagnostics shared by import, preflight and runtime execution.
 @MainActor
@@ -206,7 +207,8 @@ final class StrideDiagnostics: ObservableObject {
                              rawLog: String, packageName: String = "Not resolved",
                              inspection: APKInspection? = nil,
                              packageFormat: String = "APK", splitCount: Int = 0,
-                             runtimeMetrics: String = "Not captured") -> URL? {
+                             runtimeMetrics: String = "Not captured",
+                             splitAPKURLs: [URL] = []) -> URL? {
         do {
             try fileManager.createDirectory(at: reportsFolder, withIntermediateDirectories: true)
             let attrs = try? fileManager.attributesOfItem(atPath: apkURL.path)
@@ -215,10 +217,18 @@ final class StrideDiagnostics: ObservableObject {
             let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             let duration = max(0, Date().timeIntervalSince(sessionStartedAt))
             let apkSHA256 = sha256(of: apkURL) ?? "Unavailable (file could not be read)"
+            let splitInventory = splitAPKURLs.enumerated().map { index, url in
+                let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.int64Value ?? -1
+                let hash = sha256(of: url) ?? "Unavailable"
+                return "Split \(index + 1): \(url.lastPathComponent) · \(size >= 0 ? ByteCountFormatter.string(fromByteCount: size, countStyle: .file) : "size unavailable") · SHA-256 \(hash)"
+            }
+            let deviceEnvironment = environmentSnapshot()
             flush()
             let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
             let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
+            let assessment = primaryAssessment(findings)
+            let observedStages = stageCoverage(lines)
             let resolvedPackage = packageName != "Not resolved" ? packageName :
                 (lines.first(where: { $0.contains("Android package identity:") })?
                     .components(separatedBy: "Android package identity:").last?
@@ -249,6 +259,8 @@ final class StrideDiagnostics: ObservableObject {
             DEX inventory: \(inspection.map { "\($0.dexClassCount) classes / \($0.dexMethodCount) method references" } ?? "Not captured")
             Native ABIs: \(inspection?.nativeABIs.joined(separator: ", ") ?? "Not captured")
             Resource table: \(inspection?.hasResourceTable.description ?? "Not captured")
+            Split file fingerprints:
+            \(splitInventory.isEmpty ? "No separate split files supplied" : splitInventory.joined(separator: "\n"))
             Started: \(stamp)
             Duration: \(String(format: "%.1f", duration)) seconds
             Stride version: \(appVersion) (build \(appBuild))
@@ -258,6 +270,18 @@ final class StrideDiagnostics: ObservableObject {
             Runtime metrics: \(runtimeMetrics)
             Retained structured events: \(entries.count)
             Structured errors/fatals: \(issueCount)
+
+            DEVICE / EXECUTION ENVIRONMENT
+            ========================================
+            \(deviceEnvironment)
+
+            LAUNCH STAGE COVERAGE (presence of log evidence only; not proof of successful completion)
+            ========================================
+            \(observedStages)
+
+            LEADING DIAGNOSTIC SIGNAL (heuristic; not a proven root cause)
+            ========================================
+            \(assessment)
 
             FINDINGS (heuristic classification; raw evidence follows)
             ========================================
@@ -276,6 +300,8 @@ final class StrideDiagnostics: ObservableObject {
             report += "- Unsupported syscalls and unresolved imports are compatibility findings, not proof of the crash cause by themselves.\n"
             report += "- Available-memory samples, virtual address-space mappings, and physical memory are different measurements.\n"
             report += "- Native signal/register/backtrace details appear only if the runtime supplied them; this report does not install a competing signal handler.\n"
+            report += "- Device thermal and low-power values are point-in-time snapshots taken during report export, not historical measurements from the crash moment.\n"
+            report += "- Split APK fingerprints identify the exact supplied split files; a missing split URL cannot be reconstructed from the base APK.\n"
             report += "\nFULL RAW SESSION LOG (preserved)\n========================================\n"
             report += persistedSessionLog.isEmpty ? "(No raw session lines were captured.)\n" : persistedSessionLog + (persistedSessionLog.hasSuffix("\n") ? "" : "\n")
             report += "\nSTRUCTURED DIAGNOSTIC TIMELINE\n========================================\n"
@@ -290,6 +316,103 @@ final class StrideDiagnostics: ObservableObject {
                    "Could not create session report: \(error.localizedDescription)")
             return nil
         }
+    }
+
+
+    /// Captures the device/build context needed to compare reports across hardware and OS releases.
+    private func environmentSnapshot() -> String {
+        let machine = sysctlString("hw.machine")
+        let osBuild = sysctlString("kern.osversion")
+        let screen = UIScreen.main
+        let points = screen.bounds.size
+        let pixels = screen.nativeBounds.size
+        let freeBytes = (try? fileManager.attributesOfFileSystem(forPath: documentsURL.path)[.systemFreeSize] as? NSNumber)?.int64Value
+        let thermal: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = "Nominal"
+        case .fair: thermal = "Fair"
+        case .serious: thermal = "Serious"
+        case .critical: thermal = "Critical"
+        @unknown default: thermal = "Unknown"
+        }
+        return [
+            "Hardware identifier: \(machine)",
+            "OS build: \(osBuild)",
+            "Display: \(Int(points.width))x\(Int(points.height)) pt / \(Int(pixels.width))x\(Int(pixels.height)) px @\(screen.scale)x",
+            "CPU cores: \(ProcessInfo.processInfo.activeProcessorCount) active / \(ProcessInfo.processInfo.processorCount) logical",
+            "Thermal state at export: \(thermal)",
+            "Low Power Mode at export: \(ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")",
+            "Free app-container filesystem space: \(freeBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable")",
+            "Preferred language: \(Locale.preferredLanguages.first ?? "Unknown")",
+            "Time zone: \(TimeZone.current.identifier)"
+        ].joined(separator: "\n")
+    }
+
+    private func sysctlString(_ key: String) -> String {
+        var size = 0
+        guard sysctlbyname(key, nil, &size, nil, 0) == 0, size > 0 else { return "Unavailable" }
+        var value = [CChar](repeating: 0, count: size)
+        guard sysctlbyname(key, &value, &size, nil, 0) == 0 else { return "Unavailable" }
+        return String(cString: value)
+    }
+
+    private func primaryAssessment(_ findings: [(category: String, count: Int, example: String)]) -> String {
+        let priority = [
+            "NATIVE_CRASH", "OUT_OF_MEMORY_EVIDENCE", "JAVA_UNCAUGHT_EXCEPTION",
+            "JNI_BRIDGE_FAILURE", "RUNTIME_INTERPRETER_FAILURE", "DEX_OR_INTERPRETER_FAILURE",
+            "RELOCATION_FAILURE", "UNRESOLVED_NATIVE_IMPORT", "NATIVE_DEPENDENCY_FAILURE",
+            "MISSING_ANDROID_API_OR_CLASS", "GRAPHICS_OR_RENDERING",
+            "INPUT_OR_LIFECYCLE_FAILURE", "UNSUPPORTED_SYSCALL", "NETWORK_TELEMETRY_FAILURE"
+        ]
+        guard let leading = priority.compactMap({ category in findings.first { $0.category == category } }).first else {
+            return "No recognized failure signature. Review the chronological raw log and stage coverage; a silent exit may have no captured cause."
+        }
+        let action: String
+        switch leading.category {
+        case "NATIVE_CRASH":
+            action = "Inspect the signal, fault address, module and backtrace evidence. Match offsets to the exact native-library build."
+        case "OUT_OF_MEMORY_EVIDENCE":
+            action = "Compare heap trend, allocation failures and OS termination evidence. Do not infer jetsam from a low guest-heap reading alone."
+        case "JAVA_UNCAUGHT_EXCEPTION":
+            action = "Trace the first uncaught guest exception to its DEX method and missing framework dependency."
+        case "JNI_BRIDGE_FAILURE":
+            action = "Trace the JNI call signature, argument types, pending exception and native-to-managed transition."
+        case "RUNTIME_INTERPRETER_FAILURE", "DEX_OR_INTERPRETER_FAILURE":
+            action = "Map the failing opcode/instruction offset to the DEX method, then implement or validate that opcode semantics."
+        case "RELOCATION_FAILURE", "UNRESOLVED_NATIVE_IMPORT", "NATIVE_DEPENDENCY_FAILURE":
+            action = "Resolve the exact ELF dependency, symbol/version and relocation type; do not substitute unsafe no-op stubs."
+        case "MISSING_ANDROID_API_OR_CLASS":
+            action = "Implement the exact missing Android class/method signature and required behavior, then add a focused regression."
+        case "GRAPHICS_OR_RENDERING":
+            action = "Trace surface creation, graphics API calls, framebuffer dimensions and renderer initialization order."
+        case "INPUT_OR_LIFECYCLE_FAILURE":
+            action = "Trace Activity lifecycle ordering and the first failed callback/input dispatch."
+        case "UNSUPPORTED_SYSCALL":
+            action = "Identify the syscall number and arguments, then implement only the required safe guest semantics."
+        default:
+            action = "Check whether this is optional telemetry or a required app dependency before changing runtime behavior."
+        }
+        return "Candidate: \(leading.category) (\(leading.count) matching event(s))\nEvidence: \(leading.example)\nNext engineering action: \(action)\nConfidence: heuristic only; verify chronology and correlated events before treating this as the root cause."
+    }
+
+    private func stageCoverage(_ lines: [String]) -> String {
+        let stages: [(String, [String])] = [
+            ("Archive/import", ["ARCHIVE", "APK", "SPLIT"]),
+            ("Manifest", ["MANIFEST", "AXML"]),
+            ("DEX/class loading", ["DEX", "CLASS", "METHOD"]),
+            ("Native ELF/linker", ["ELF", "NATIVE LIBRARY", "DT_NEEDED"]),
+            ("JNI", ["JNI"]),
+            ("Activity lifecycle", ["ACTIVITY", "LIFECYCLE", "ONCREATE", "ONRESUME"]),
+            ("Graphics/framebuffer", ["FRAMEBUFFER", "RENDER", "GLES", "EGL", "SURFACE"]),
+            ("Input", ["TOUCH", "INPUT", "KEY EVENT"])
+        ]
+        return stages.map { label, tokens in
+            let found = lines.contains { line in
+                let upper = line.uppercased()
+                return tokens.contains { upper.contains($0) }
+            }
+            return "\(found ? "[OBSERVED]" : "[NOT CAPTURED]") \(label)"
+        }.joined(separator: "\n")
     }
 
     private func sha256(of url: URL) -> String? {
