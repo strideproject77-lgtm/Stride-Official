@@ -1110,7 +1110,7 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Phase 28 remains Partial until package-restoration behavior is verified on-device.
 
 ### Phase 29 — Dedicated App Page & Black UI Refresh
-**Status: Implementation added · consolidated validation pending.**
+**Status: Implementation + CI build validated in workflow #764 · real-device visual review pending.**
 
 - Replaced the app-detail sheet with a dedicated full-screen app page.
 - Added package storage-size metadata, including extracted split components, and persistent last-successful-launch timestamp keyed by the canonical package directory.
@@ -1123,3 +1123,20 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Historical note: play-history timestamps begin with this build; Stride cannot reconstruct launch dates from before the feature existed.
 - Tests: deferred to the single consolidated validation workflow; no intermediate test runs.
 - IPA: unsigned build only, already explicitly requested. No signing, release export or main-branch merge.
+
+
+
+### Phase 30 — Session Log Copy & Export Reliability
+**Status: Implementation committed · consolidated validation pending.**
+
+- Fixed the log export source: the previous Unified Diagnostics Export action pointed directly at the global `stride-diagnostics.log`, which may not contain the active per-session log after the latest-session retention reset.
+- Added explicit **COPY LOG** and **EXPORT** actions beside Session Logs so both remain directly accessible without relying on the separate Diagnostics disclosure.
+- Copy/export now assemble a single text snapshot from the in-memory session timeline, persisted current-session log fallback, and structured diagnostic entries.
+- Export writes a real, non-empty UTF-8 `.txt` file to the app temporary directory, validates that the file exists and has content, then presents that exact file through the iOS share sheet.
+- Unified Diagnostics Export now uses the same reliable session snapshot path instead of sharing the potentially empty global log file.
+- Extra improvements: export filenames include a sanitized APK name and timestamp; clipboard/export content includes both raw session events and structured diagnostics; accessible labels clarify each action.
+- Files: `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
+- Commits: `7e290b1` (restore copy/export actions and create session snapshot); `1012a23` (harden non-empty export-file validation).
+- Remaining: review the share-sheet flow and clipboard contents on a real iPhone; verify exporting after a failed launch and after a successful launch; then include this batch in the one consolidated Rust + iOS validation pass.
+- Tests: deferred to the single consolidated validation pass; no repeated test runs.
+- IPA: not built, signed or exported for this batch. `main` untouched.
