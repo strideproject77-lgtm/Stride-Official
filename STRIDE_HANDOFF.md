@@ -28,7 +28,7 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Phase 27 — One-Shot Diagnostic Report: **Implementation added; consolidated iOS validation pending**. The report contains package/split fingerprints, device environment, runtime metrics, stage evidence, heuristic findings, and raw session evidence. Do not claim a guaranteed root cause or that retesting is never needed.
 - Phase 28 — Storage & Latest-Session Retention: **Implementation added; consolidated validation pending**.
   - Plain APK import now stores one canonical `base.apk`, rather than both `source.apk` and `base.apk`.
-  - XAPK/APKS/APKM source containers are no longer retained as an extra full-size copy; the base component is extracted directly to the canonical root path rather than extracted and copied again.
+  - XAPK/APKS/APKM source containers are no longer retained as an extra full-size copy; a zero-byte format marker preserves reload metadata, and the base component is extracted directly to the canonical root path rather than extracted and copied again.
   - Starting a new launch clears previous session logs, reports, archives, and pre-launch global log noise; only the current session and its one-shot report remain.
   - Oversized rolling logs are truncated rather than moved into timestamped archive files.
   - Remaining: verify package restoration for APK/XAPK/APKS/APKM, ensure report export remains complete after log reset, and run the single consolidated Rust + iOS compile validation. Existing files from earlier app versions may remain until the next launch cleanup.
