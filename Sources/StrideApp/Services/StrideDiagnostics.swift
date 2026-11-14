@@ -250,7 +250,7 @@ final class StrideDiagnostics: ObservableObject {
             let url = reportsFolder.appendingPathComponent("\(safeName)-\(sessionID.prefix(8))-Diagnostic-Report.txt")
 
             var report = """
-            STRIDE SESSION / CRASH REPORT
+            STRIDE COMPLETE DIAGNOSTIC REPORT
             ========================================
             Session ID: \(sessionID)
             Result: \(status)
@@ -315,7 +315,7 @@ final class StrideDiagnostics: ObservableObject {
             report += entries.map(\.line).joined(separator: "\n")
             report += "\n"
             try report.write(to: url, atomically: true, encoding: .utf8)
-            record(.info, stage: "REPORT", code: "CRASH_REPORT_EXPORTED",
+            record(.info, stage: "REPORT", code: "DIAGNOSTIC_REPORT_EXPORTED",
                    "Saved session report: \(url.lastPathComponent)")
             return url
         } catch {
