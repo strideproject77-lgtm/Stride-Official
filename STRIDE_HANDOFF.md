@@ -909,6 +909,13 @@ These are candidates, not completed work:
 - Remaining known limitation: guest DEX calls to `Context.startActivity(Intent)` are not yet routed through a pending-JNI-event queue into `dispatch_activity_intent()`. This must remain clearly reported as pending; do not describe all Android in-app navigation as connected.
 - Validation: first consolidated run #727 found four integration compile errors (Result propagation and metadata borrow lifetime); those exact sites are fixed by commits 9307515 and 1406414. A single consolidated rerun will compile/test the full Rust workspace and, if tests pass, build the unsigned iOS IPA.
 
+
+
+**Build failure follow-up — 2026-11-14:**
+- Workflow #729: Rust runtime tests passed; iOS compile stopped at a Swift generic type mismatch in bounded resource-image scanning (`min(Int, UInt32)`).
+- Fixed by making `maxResourceFilesToScan` an `Int`; no scan limit or runtime behavior changed.
+- Next: rerun consolidated Rust + unsigned IPA workflow. No signing, no release export, no main-branch merge.
+
 ### Phase 26 — In-process Activity dispatch foundation
 
 **Status: Partial · runtime-owned dispatch and Back synchronization implemented; guest JNI entry point and end-to-end validation remain.**
