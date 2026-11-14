@@ -46,7 +46,9 @@ struct AndroidPackageImporter: @unchecked Sendable {
         let directory = uniquePackageDirectory(for: sourceURL, in: libraryFolder)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         do {
-            try fileManager.copyItem(at: sourceURL, to: directory.appendingPathComponent("source.\(format.rawValue)"))
+            // The source container is temporary input, not a second library asset.
+            // Persist only the normalized APK components so plain APK imports do not
+            // consume twice their original size.
             if format == .apk {
                 let base = directory.appendingPathComponent("base.apk")
                 try fileManager.copyItem(at: sourceURL, to: base)
@@ -139,9 +141,14 @@ struct AndroidPackageImporter: @unchecked Sendable {
             guard normalizedPaths.insert(collisionKey).inserted else {
                 throw APKLibraryImportError.duplicatePackageEntry(relativePath)
             }
-            let destination = pathParts.reduce(componentFolder) { partial, part in
-                partial.appendingPathComponent(String(part), isDirectory: true)
-            }
+            // Extract the base APK directly to the canonical root path. Previously it
+            // was extracted under components/ and copied again to base.apk, doubling the
+            // largest component's storage footprint.
+            let destination = entry.path == baseEntry.path
+                ? directory.appendingPathComponent("base.apk")
+                : pathParts.reduce(componentFolder) { partial, part in
+                    partial.appendingPathComponent(String(part), isDirectory: true)
+                }
             let parent = destination.deletingLastPathComponent()
             try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
             guard !fileManager.fileExists(atPath: destination.path) else {
@@ -160,9 +167,8 @@ struct AndroidPackageImporter: @unchecked Sendable {
             try data.write(to: destination, options: .atomic)
             extracted[entry.path] = destination
         }
-        guard let sourceBase = extracted[baseEntry.path] else { throw APKLibraryImportError.missingBaseAPK }
-        let base = directory.appendingPathComponent("base.apk")
-        try fileManager.copyItem(at: sourceBase, to: base)
+        guard let base = extracted[baseEntry.path],
+              fileManager.fileExists(atPath: base.path) else { throw APKLibraryImportError.missingBaseAPK }
         let splits = entries.filter { $0.path != baseEntry.path }.compactMap { extracted[$0.path] }
         let components = entries.compactMap { entry -> AndroidPackageComponent? in
             guard extracted[entry.path] != nil else { return nil }
