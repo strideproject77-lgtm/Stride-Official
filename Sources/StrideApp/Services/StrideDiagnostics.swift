@@ -231,8 +231,19 @@ final class StrideDiagnostics: ObservableObject {
             }
             let deviceEnvironment = environmentSnapshot()
             flush()
-            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? rawLog
-            let lines = persistedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
+            // Keep both sources: the per-session diagnostics file contains structured host
+            // events, while rawLog carries the screen's launch output and final Rust snapshot.
+            // Previously, a readable session file caused rawLog to be discarded, silently
+            // omitting the guest runtime evidence from otherwise "complete" reports.
+            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+            let suppliedSessionLog = rawLog.trimmingCharacters(in: .whitespacesAndNewlines)
+            let combinedSessionLog: String
+            if !persistedSessionLog.isEmpty && !suppliedSessionLog.isEmpty {
+                combinedSessionLog = persistedSessionLog + "\n\n--- HOST SESSION LOG / FINAL RUNTIME SNAPSHOT ---\n" + suppliedSessionLog
+            } else {
+                combinedSessionLog = persistedSessionLog.isEmpty ? suppliedSessionLog : persistedSessionLog
+            }
+            let lines = combinedSessionLog.components(separatedBy: .newlines).filter { !$0.isEmpty }
             let findings = classify(lines)
             let assessment = primaryAssessment(findings)
             let observedStages = stageCoverage(lines)
@@ -310,7 +321,7 @@ final class StrideDiagnostics: ObservableObject {
             report += "- Device thermal and low-power values are point-in-time snapshots taken during report export, not historical measurements from the crash moment.\n"
             report += "- Split APK fingerprints identify the exact supplied split files; a missing split URL cannot be reconstructed from the base APK.\n"
             report += "\nFULL RAW SESSION LOG (preserved)\n========================================\n"
-            report += persistedSessionLog.isEmpty ? "(No raw session lines were captured.)\n" : persistedSessionLog + (persistedSessionLog.hasSuffix("\n") ? "" : "\n")
+            report += combinedSessionLog.isEmpty ? "(No raw session lines were captured.)\n" : combinedSessionLog + (combinedSessionLog.hasSuffix("\n") ? "" : "\n")
             report += "\nSTRUCTURED DIAGNOSTIC TIMELINE\n========================================\n"
             report += entries.map(\.line).joined(separator: "\n")
             report += "\n"
