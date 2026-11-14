@@ -313,6 +313,23 @@ mod tests {
         assert_eq!(events[1].sequence, events[0].sequence + 1);
     }
     #[test]
+    fn export_summary_includes_severity_and_missing_symbol_totals() {
+        let diagnostics = RuntimeDiagnostics::new();
+        diagnostics.record(DiagnosticSeverity::Warning, "Archive", "split warning", None);
+        diagnostics.record(DiagnosticSeverity::RuntimeError, "DEX", "interpreter failed", None);
+        diagnostics.record(DiagnosticSeverity::FatalCrash, "Native", "guest panic", None);
+        diagnostics.record_missing_class("Lmissing/Screen;");
+        diagnostics.record_missing_method("Lmissing/Screen;", "draw", "()V");
+        let report = diagnostics.export_text();
+        assert!(report.contains("Warnings: 1"));
+        assert!(report.contains("Missing API events: 2"));
+        assert!(report.contains("Runtime errors: 1"));
+        assert!(report.contains("Fatal events: 1"));
+        assert!(report.contains("Missing classes: 1"));
+        assert!(report.contains("Missing methods: 1"));
+    }
+
+    #[test]
     fn detailed_faults_export_code_details_and_recovery() {
         let diagnostics = RuntimeDiagnostics::new();
         diagnostics.record_detailed(
