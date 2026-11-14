@@ -257,10 +257,13 @@ impl AndroidRuntime {
             );
             vm.attach_diagnostics(&self.diagnostics);
             vm.attach_static_fields(&mut self.static_fields);
-            vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+            let dex_inventories = self.class_loader.dex_inventories.clone();
+            let method_dex_indices = self.class_loader.method_dex_indices.clone();
+            let method_lookup = self.class_loader.method_lookup.clone();
+            vm.attach_multi_dex_metadata(&dex_inventories, &method_dex_indices);
             if let Some(inventory) = dex_metadata.as_ref() {
                 vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
-                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                vm.attach_method_resolver(&inventory.method_references, &method_lookup);
             }
             self.activity_manager.start_activity(intent, &mut self.class_loader, &mut vm)?
         };
@@ -291,10 +294,13 @@ impl AndroidRuntime {
             );
             vm.attach_diagnostics(&self.diagnostics);
             vm.attach_static_fields(&mut self.static_fields);
-            vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+            let dex_inventories = self.class_loader.dex_inventories.clone();
+            let method_dex_indices = self.class_loader.method_dex_indices.clone();
+            let method_lookup = self.class_loader.method_lookup.clone();
+            vm.attach_multi_dex_metadata(&dex_inventories, &method_dex_indices);
             if let Some(inventory) = dex_metadata.as_ref() {
                 vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
-                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+                vm.attach_method_resolver(&inventory.method_references, &method_lookup);
             }
             self.activity_manager.handle_back_pressed(&mut self.class_loader, &mut vm)?
         };
