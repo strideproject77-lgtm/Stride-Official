@@ -1177,3 +1177,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - This log does not contain the Phase 31 marker 'Deferred eager Android image predecode for native/asset-heavy package'; therefore the tested IPA predates the Phase 31 code or was not rebuilt from the updated branch. Do not interpret it as a failure of the new conditional path.
 - The user manually ended the session while scanning was in progress. Next build must include commit 713f52d and should log the defer marker for this HCR package (7 ARM64 libraries, 2,399 assets).
 - After the new IPA is installed, leave HCR running long enough to capture DEX load, native library materialization and Activity/JNI/graphics events. Do not claim compatibility before the actual game UI is visible.
+
+
+### Phase 33 — Activity Backstack Failure Recovery
+**Status: Implementation committed · consolidated validation pending.**
+
+- Hardened `ActivityManager::finish_top_activity`: the current Activity record now remains on the task backstack while `onPause`, `onStop` and `onDestroy` callbacks execute. It is removed only after all finish callbacks return successfully.
+- If a finish callback throws or exceeds its instruction budget, the host-visible lifecycle state is restored to its original value and the Activity record remains available for recovery/diagnosis instead of being silently lost.
+- Extra reliability improvement: finishing an Activity no longer destroys the only host-side record before the guest lifecycle callbacks have succeeded. The original callback error is returned unchanged.
+- Files: `runtime-rust/crates/dex-runtime/src/activity_manager.rs`, `STRIDE_HANDOFF.md`.
+- Commit: `2b1e0f1` — Preserve Activity backstack when finish callbacks fail.
+- Remaining: add a targeted failing-callback regression; finish Phase 26 guest `Context.startActivity(Intent)` pending-event routing; review the outstanding UI polish and real-device HCR startup evidence.
+- Tests: not run by design; one consolidated Rust + Swift/iOS validation pass remains pending.
+- IPA: not built in this batch; no signing/export. `main` untouched.
