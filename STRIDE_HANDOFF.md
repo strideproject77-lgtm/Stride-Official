@@ -1095,3 +1095,9 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Phase 27 is Completed for implementation and CI validation. A real-device TXT export review remains a separate post-build verification; the report does not claim to recover OS data or stack frames that were never captured.
 - Artifact: `Stride-unsigned-IPA-757`, 2,984,175 bytes, expires 2026-11-28. Archive SHA-256: `63be9b44d7e24af3086c2bbaac7bbd17f544d77fbf076dc04c79a7f5c459c90d`.
 - Branch: `feat/dex-class-method-loader`; `main` untouched. No signing or release export performed.
+
+
+**Unsigned IPA rebuild request — 2026-11-14:**
+- User explicitly requested an IPA build. Trigger the existing one-shot CI gate using the exact commit message `Build Calculator validation IPA after tests` so the latest `feat/dex-class-method-loader` source is validated and packaged.
+- Build policy: unsigned IPA only; do not sign, export as a release, or merge to `main`.
+- Latest known successful unsigned artifact (#757) is older than current branch head; this rebuild is required to include the latest branch changes.
