@@ -1705,7 +1705,7 @@ private struct APKDetailSheet: View {
         do {
             try report.write(to: url, atomically: true, encoding: .utf8)
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            guard (attributes[.size] as? NSNumber)?.intValue ?? 0 > 0 else {
+            guard ((attributes[.size] as? NSNumber)?.intValue ?? 0) > 0 else {
                 throw CocoaError(.fileWriteUnknown)
             }
             logExportURL = url
