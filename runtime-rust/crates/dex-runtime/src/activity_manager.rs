@@ -144,25 +144,48 @@ impl ActivityManager {
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
     ) -> Result<bool, String> {
-        let current_task = match self.tasks.get_mut(self.current_task_index) {
-            Some(t) => t,
-            None => return Ok(false),
+        let Some(original) = self.tasks.get(self.current_task_index)
+            .and_then(|task| task.top()).cloned() else {
+            return Ok(false);
         };
 
-        if current_task.stack.is_empty() {
-            return Ok(false);
+        // Keep the record on the stack until all of its finish callbacks return.
+        // A guest exception or instruction-budget failure must not silently lose
+        // the only Activity record that can be shown or diagnosed by the host.
+        let finish_result = (|| {
+            if original.state == ActivityLifecycleState::Resumed {
+                if let Some(top) = self.tasks.get_mut(self.current_task_index).and_then(|task| task.top_mut()) {
+                    top.state = ActivityLifecycleState::Paused;
+                }
+                Self::dispatch_method(&original.class_name, "onPause", "()V", original.heap_object_ref, class_loader, vm)?;
+                if let Some(top) = self.tasks.get_mut(self.current_task_index).and_then(|task| task.top_mut()) {
+                    top.state = ActivityLifecycleState::Stopped;
+                }
+                Self::dispatch_method(&original.class_name, "onStop", "()V", original.heap_object_ref, class_loader, vm)?;
+            }
+            if let Some(top) = self.tasks.get_mut(self.current_task_index).and_then(|task| task.top_mut()) {
+                top.state = ActivityLifecycleState::Destroyed;
+            }
+            Self::dispatch_method(&original.class_name, "onDestroy", "()V", original.heap_object_ref, class_loader, vm)
+        })();
+
+        if let Err(error) = finish_result {
+            // Restore the host-visible lifecycle state and retain the Activity.
+            // Guest-side callback effects cannot be rolled back, but the task
+            // remains recoverable and the original failure is preserved.
+            if let Some(top) = self.tasks.get_mut(self.current_task_index).and_then(|task| task.top_mut()) {
+                top.state = original.state;
+            }
+            return Err(error);
         }
 
-        // 1. Pop top activity and dispatch pause, stop, destroy
-        let mut finished = current_task.stack.pop().unwrap();
-        finished.state = ActivityLifecycleState::Paused;
-        Self::dispatch_method(&finished.class_name, "onPause", "()V", finished.heap_object_ref, class_loader, vm)?;
-        finished.state = ActivityLifecycleState::Stopped;
-        Self::dispatch_method(&finished.class_name, "onStop", "()V", finished.heap_object_ref, class_loader, vm)?;
-        finished.state = ActivityLifecycleState::Destroyed;
-        Self::dispatch_method(&finished.class_name, "onDestroy", "()V", finished.heap_object_ref, class_loader, vm)?;
+        let current_task = self.tasks.get_mut(self.current_task_index)
+            .ok_or_else(|| "Current Activity task disappeared during finish".to_owned())?;
+        let finished = current_task.stack.pop()
+            .ok_or_else(|| "Activity backstack changed during finish".to_owned())?;
 
-        // 2. Resume new top activity if one exists
+        // Resume the previous Activity only after the finished record is safely
+        // removed. If resume fails, preserve the remaining task and report it.
         if let Some(new_top) = current_task.top_mut() {
             new_top.state = ActivityLifecycleState::Started;
             Self::dispatch_method(&new_top.class_name, "onStart", "()V", new_top.heap_object_ref, class_loader, vm)?;
@@ -170,6 +193,7 @@ impl ActivityManager {
             Self::dispatch_method(&new_top.class_name, "onResume", "()V", new_top.heap_object_ref, class_loader, vm)?;
         }
 
+        let _ = finished;
         Ok(true)
     }
 
