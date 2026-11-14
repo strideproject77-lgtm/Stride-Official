@@ -1192,7 +1192,24 @@ private struct APKDetailSheet: View {
                             Spacer()
                             Image(systemName: "clock.arrow.circlepath").foregroundStyle(accent)
                         }
-                        Text("Session Logs").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        HStack {
+                            Text("Session Logs").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            Spacer()
+                            Button { copySessionLog() } label: {
+                                Label("COPY LOG", systemImage: "doc.on.doc")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(accent)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Copy complete session log")
+                            Button { exportSessionLog() } label: {
+                                Label("EXPORT", systemImage: "square.and.arrow.up")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(accent)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Export complete session log as text")
+                        }
                         ScrollView {
                             VStack(alignment: .leading, spacing: 5) {
                                 if sessionLogLines.isEmpty {
@@ -1295,8 +1312,7 @@ private struct APKDetailSheet: View {
                                     .foregroundStyle(accent)
                             }
                             Button {
-                                logExportURL = diagnostics.logFileURL
-                                showingLogShare = true
+                                exportSessionLog()
                             } label: {
                                 Label("EXPORT", systemImage: "square.and.arrow.up")
                                     .font(.system(size: 9, weight: .bold))
@@ -1650,6 +1666,53 @@ private struct APKDetailSheet: View {
 
     private func logFileURL() -> URL {
         diagnostics.latestSessionLogURL(apkName: item.displayName) ?? diagnostics.logFileURL
+    }
+
+    private func sessionLogExportText() -> String {
+        diagnostics.flush()
+        let inMemoryLog = sessionLogLines.joined(separator: "\n")
+        let persistedLog = diagnostics.currentSessionLogURL
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+        let sessionText = inMemoryLog.isEmpty ? persistedLog : inMemoryLog
+        let structuredText = diagnostics.entries.map(\.line).joined(separator: "\n")
+        return [
+            "STRIDE SESSION LOG",
+            "APK: \(item.displayName)",
+            "Exported: \(Date().formatted(date: .abbreviated, time: .standard))",
+            "",
+            "SESSION EVENTS",
+            sessionText.isEmpty ? "(No session events were captured.)" : sessionText,
+            "",
+            "UNIFIED DIAGNOSTICS",
+            structuredText.isEmpty ? "(No structured diagnostic events were captured.)" : structuredText
+        ].joined(separator: "\n") + "\n"
+    }
+
+    private func copySessionLog() {
+        UIPasteboard.general.string = sessionLogExportText()
+    }
+
+    private func exportSessionLog() {
+        let report = sessionLogExportText()
+        let safeName = item.displayName.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression
+        )
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: ".", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Stride-\(safeName)-\(timestamp)-Session-Log.txt")
+        do {
+            try report.write(to: url, atomically: true, encoding: .utf8)
+            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+            guard (attributes[.size] as? NSNumber)?.intValue ?? 0 > 0 else {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            logExportURL = url
+            showingLogShare = true
+        } catch {
+            appendSessionLog("[ERROR] Session log export failed: \(error.localizedDescription)")
+        }
     }
 
     private func appendSessionLog(_ message: String) {
