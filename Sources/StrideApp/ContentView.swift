@@ -1261,11 +1261,6 @@ private struct APKDetailSheet: View {
                             Label("Export One-Shot Report (.txt)", systemImage: "doc.text.magnifyingglass")
                                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
                         }
-                        .sheet(isPresented: $showingLogShare) {
-                            if let logExportURL {
-                                ActivityViewController(activityItems: [logExportURL])
-                            }
-                        }
                     }
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
