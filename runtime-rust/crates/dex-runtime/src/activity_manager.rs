@@ -6,7 +6,7 @@
 
 use crate::framework::{ActivityLifecycleState, Intent, Bundle};
 use crate::loader::AppClassLoader;
-use crate::interpreter::ArtVm;
+use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
 
 /// An active or paused Activity record in a task backstack.
@@ -103,9 +103,9 @@ impl ActivityManager {
             if let Some(top) = task.top_mut() {
                 if top.state == ActivityLifecycleState::Resumed {
                     top.state = ActivityLifecycleState::Paused;
-                    Self::dispatch_method(&top.class_name, "onPause", "()V", top.heap_object_ref, class_loader, vm);
+                    Self::dispatch_method(&top.class_name, "onPause", "()V", top.heap_object_ref, class_loader, vm)?;
                     top.state = ActivityLifecycleState::Stopped;
-                    Self::dispatch_method(&top.class_name, "onStop", "()V", top.heap_object_ref, class_loader, vm);
+                    Self::dispatch_method(&top.class_name, "onStop", "()V", top.heap_object_ref, class_loader, vm)?;
                 }
             }
         }
@@ -121,11 +121,12 @@ impl ActivityManager {
         };
 
         // 3. Dispatch onCreate -> onStart -> onResume
-        Self::dispatch_create(&class_name, obj_ref, class_loader, vm);
+        Self::dispatch_constructor(&class_name, obj_ref, class_loader, vm)?;
+        Self::dispatch_create(&class_name, obj_ref, class_loader, vm)?;
         record.state = ActivityLifecycleState::Started;
-        Self::dispatch_method(&class_name, "onStart", "()V", Some(obj_ref), class_loader, vm);
+        Self::dispatch_method(&class_name, "onStart", "()V", Some(obj_ref), class_loader, vm)?;
         record.state = ActivityLifecycleState::Resumed;
-        Self::dispatch_method(&class_name, "onResume", "()V", Some(obj_ref), class_loader, vm);
+        Self::dispatch_method(&class_name, "onResume", "()V", Some(obj_ref), class_loader, vm)?;
 
         // 4. Push onto active task
         if let Some(task) = self.tasks.get_mut(self.current_task_index) {
@@ -142,34 +143,34 @@ impl ActivityManager {
         &mut self,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
-    ) -> bool {
+    ) -> Result<bool, String> {
         let current_task = match self.tasks.get_mut(self.current_task_index) {
             Some(t) => t,
-            None => return false,
+            None => return Ok(false),
         };
 
         if current_task.stack.is_empty() {
-            return false;
+            return Ok(false);
         }
 
         // 1. Pop top activity and dispatch pause, stop, destroy
         let mut finished = current_task.stack.pop().unwrap();
         finished.state = ActivityLifecycleState::Paused;
-        Self::dispatch_method(&finished.class_name, "onPause", "()V", finished.heap_object_ref, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onPause", "()V", finished.heap_object_ref, class_loader, vm)?;
         finished.state = ActivityLifecycleState::Stopped;
-        Self::dispatch_method(&finished.class_name, "onStop", "()V", finished.heap_object_ref, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onStop", "()V", finished.heap_object_ref, class_loader, vm)?;
         finished.state = ActivityLifecycleState::Destroyed;
-        Self::dispatch_method(&finished.class_name, "onDestroy", "()V", finished.heap_object_ref, class_loader, vm);
+        Self::dispatch_method(&finished.class_name, "onDestroy", "()V", finished.heap_object_ref, class_loader, vm)?;
 
         // 2. Resume new top activity if one exists
         if let Some(new_top) = current_task.top_mut() {
             new_top.state = ActivityLifecycleState::Started;
-            Self::dispatch_method(&new_top.class_name, "onStart", "()V", new_top.heap_object_ref, class_loader, vm);
+            Self::dispatch_method(&new_top.class_name, "onStart", "()V", new_top.heap_object_ref, class_loader, vm)?;
             new_top.state = ActivityLifecycleState::Resumed;
-            Self::dispatch_method(&new_top.class_name, "onResume", "()V", new_top.heap_object_ref, class_loader, vm);
+            Self::dispatch_method(&new_top.class_name, "onResume", "()V", new_top.heap_object_ref, class_loader, vm)?;
         }
 
-        true
+        Ok(true)
     }
 
     /// Handles Android hardware back button press.
@@ -177,44 +178,49 @@ impl ActivityManager {
         &mut self,
         class_loader: &mut AppClassLoader,
         vm: &mut ArtVm,
-    ) -> bool {
+    ) -> Result<bool, String> {
         self.finish_top_activity(class_loader, vm)
     }
 
-    /// Android Activity.onCreate receives both the Activity receiver and a
-    /// nullable saved-instance-state Bundle argument on first creation.
-    fn dispatch_create(
-        class_name: &str,
-        receiver: u32,
-        class_loader: &mut AppClassLoader,
-        vm: &mut ArtVm,
-    ) {
-        if let Some(loaded_method) = class_loader.find_method_in_hierarchy(
-            class_name,
-            "onCreate",
-            "(Landroid/os/Bundle;)V",
-        ) {
-            let args = [Value::Object(receiver), Value::Null];
-            let _ = vm.execute_method(loaded_method, &args, 10_000);
+    /// Runs the Activity constructor before lifecycle creation, matching Java object setup.
+    fn dispatch_constructor(class_name: &str, receiver: u32, class_loader: &mut AppClassLoader, vm: &mut ArtVm) -> Result<(), String> {
+        if let Some(method) = class_loader.find_method_in_hierarchy(class_name, "<init>", "()V") {
+            let report = vm.execute_method(method, &[Value::Object(receiver)], 10_000)
+                .map_err(|error| format!("Activity constructor interpreter error in {}: {:?}", class_name, error))?;
+            Self::validate_lifecycle_report(class_name, "<init>", report.stop_reason)?;
+        }
+        Ok(())
+    }
+
+    /// Android Activity.onCreate receives the Activity receiver and nullable saved state.
+    fn dispatch_create(class_name: &str, receiver: u32, class_loader: &mut AppClassLoader, vm: &mut ArtVm) -> Result<(), String> {
+        if let Some(method) = class_loader.find_method_in_hierarchy(class_name, "onCreate", "(Landroid/os/Bundle;)V") {
+            let report = vm.execute_method(method, &[Value::Object(receiver), Value::Null], 10_000)
+                .map_err(|error| format!("Activity onCreate interpreter error in {}: {:?}", class_name, error))?;
+            Self::validate_lifecycle_report(class_name, "onCreate", report.stop_reason)?;
+        }
+        Ok(())
+    }
+
+    fn dispatch_method(class_name: &str, method_name: &str, descriptor: &str, receiver: Option<u32>, class_loader: &mut AppClassLoader, vm: &mut ArtVm) -> Result<(), String> {
+        if let Some(method) = class_loader.find_method_in_hierarchy(class_name, method_name, descriptor) {
+            let mut args = Vec::new();
+            if let Some(obj_ref) = receiver { args.push(Value::Object(obj_ref)); }
+            let report = vm.execute_method(method, &args, 10_000)
+                .map_err(|error| format!("Activity {} interpreter error in {}: {:?}", method_name, class_name, error))?;
+            Self::validate_lifecycle_report(class_name, method_name, report.stop_reason)?;
+        }
+        Ok(())
+    }
+
+    fn validate_lifecycle_report(class_name: &str, method_name: &str, stop_reason: ExecutionStopReason) -> Result<(), String> {
+        match stop_reason {
+            ExecutionStopReason::UncaughtException(exception) => Err(format!("Activity {}.{} threw {}: {:?}", class_name, method_name, exception.class_descriptor, exception.message)),
+            ExecutionStopReason::StepLimitExceeded => Err(format!("Activity {}.{} exceeded its lifecycle instruction budget", class_name, method_name)),
+            ExecutionStopReason::ReturnedVoid | ExecutionStopReason::ReturnedValue(_) => Ok(()),
         }
     }
 
-    fn dispatch_method(
-        class_name: &str,
-        method_name: &str,
-        descriptor: &str,
-        receiver: Option<u32>,
-        class_loader: &mut AppClassLoader,
-        vm: &mut ArtVm,
-    ) {
-        if let Some(loaded_method) = class_loader.find_method_in_hierarchy(class_name, method_name, descriptor) {
-            let mut args = Vec::new();
-            if let Some(obj_ref) = receiver {
-                args.push(Value::Object(obj_ref));
-            }
-            let _ = vm.execute_method(loaded_method, &args, 10_000);
-        }
-    }
 }
 
 #[cfg(test)]
