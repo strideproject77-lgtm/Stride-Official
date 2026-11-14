@@ -14,11 +14,12 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showingAbout = false
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
+    @AppStorage("stride.accentColorHex") private var accentColorHex = "E8AB64"
 
     private var background: Color { .black }
     private var panel: Color { .black }
     private var raised: Color { Color(red: 0.075, green: 0.080, blue: 0.090) }
-    private var accent: Color { Color(red: 0.91, green: 0.67, blue: 0.39) }
+    private var accent: Color { Color(hex: accentColorHex) ?? Color(red: 0.91, green: 0.67, blue: 0.39) }
     private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
     private var line: Color { Color.white.opacity(0.075) }
 
@@ -483,6 +484,56 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(muted)
                 }
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("ACCENT COLOR")
+                            .font(.system(size: 9, weight: .heavy))
+                            .kerning(1.3)
+                            .foregroundStyle(muted)
+                        Text("Change button, icon and highlight colors")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(muted)
+                    }
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
+                        ForEach(StrideAccentPalette.colors, id: \\.hex) { option in
+                            let color = Color(hex: option.hex) ?? accent
+                            Button {
+                                accentColorHex = option.hex
+                            } label: {
+                                VStack(spacing: 7) {
+                                    ZStack {
+                                        Circle().fill(color).frame(width: 31, height: 31)
+                                        if accentColorHex == option.hex {
+                                            Circle().stroke(Color.white, lineWidth: 2).frame(width: 38, height: 38)
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 12, weight: .black))
+                                                .foregroundStyle(Color.black.opacity(0.82))
+                                        }
+                                    }
+                                    Text(option.name)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.88))
+                                        .lineLimit(1)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                                .background(raised.opacity(accentColorHex == option.hex ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(accentColorHex == option.hex ? color.opacity(0.75) : line, lineWidth: 1))
+                                .contentShape(RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\\(option.name) accent color")
+                            .accessibilityAddTraits(accentColorHex == option.hex ? .isSelected : [])
+                        }
+                    }
+                    Text("Your choice is saved automatically. App backgrounds stay black.")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(muted)
+                }
+                .padding(14)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+
                 Button { showingAbout = true } label: {
                     HStack(spacing: 13) {
                         Image(systemName: "info.circle.fill").font(.system(size: 19, weight: .semibold)).foregroundStyle(accent)
@@ -687,98 +738,18 @@ private extension Color {
     }
 }
 
-private enum StrideTheme: String, CaseIterable, Identifiable {
-    case blackLime
-    case graphiteViolet
-    case darkBronze
-    case indigoNavy
-    case white
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .blackLime: return "Black + Lime"
-        case .graphiteViolet: return "Graphite + Violet"
-        case .darkBronze: return "Dark Bronze"
-        case .indigoNavy: return "Indigo Navy"
-        case .white: return "White"
-        }
-    }
-    var subtitle: String {
-        switch self {
-        case .blackLime: return "Sharp contrast with a bright lime accent"
-        case .graphiteViolet: return "Cool graphite surfaces and soft violet"
-        case .darkBronze: return "Warm, understated bronze finish"
-        case .indigoNavy: return "Deep navy with royal purple accents"
-        case .white: return "Bright, clean surfaces with crisp dark text"
-        }
-    }
-    var background: Color {
-        switch self {
-        case .blackLime: return Color(red: 0.025, green: 0.027, blue: 0.032)
-        case .graphiteViolet: return Color(red: 0.055, green: 0.050, blue: 0.075)
-        case .darkBronze: return Color(red: 0.045, green: 0.030, blue: 0.022)
-        case .indigoNavy: return Color(red: 10/255, green: 13/255, blue: 24/255)
-        case .white: return Color(red: 0.965, green: 0.970, blue: 0.980)
-        }
-    }
-    var panel: Color {
-        switch self {
-        case .blackLime: return Color(red: 0.075, green: 0.078, blue: 0.085)
-        case .graphiteViolet: return Color(red: 0.105, green: 0.095, blue: 0.135)
-        case .darkBronze: return Color(red: 0.115, green: 0.082, blue: 0.058)
-        case .indigoNavy: return Color(red: 21/255, green: 25/255, blue: 40/255)
-        case .white: return Color.white
-        }
-    }
-    var raised: Color {
-        switch self {
-        case .blackLime: return Color(red: 0.115, green: 0.120, blue: 0.130)
-        case .graphiteViolet: return Color(red: 0.165, green: 0.145, blue: 0.205)
-        case .darkBronze: return Color(red: 0.175, green: 0.125, blue: 0.085)
-        case .indigoNavy: return Color(red: 29/255, green: 34/255, blue: 53/255)
-        case .white: return Color(red: 0.925, green: 0.935, blue: 0.955)
-        }
-    }
-    var accent: Color {
-        switch self {
-        case .blackLime: return Color(red: 0.77, green: 0.96, blue: 0.48)
-        case .graphiteViolet: return Color(red: 0.73, green: 0.64, blue: 1.0)
-        case .darkBronze: return Color(red: 0.91, green: 0.70, blue: 0.47)
-        case .indigoNavy: return Color(red: 79/255, green: 70/255, blue: 229/255)
-        case .white: return Color(red: 0.22, green: 0.34, blue: 0.56)
-        }
-    }
-    var muted: Color {
-        self == .indigoNavy
-            ? Color(red: 148/255, green: 163/255, blue: 184/255)
-            : Color(red: 0.59, green: 0.60, blue: 0.64)
-    }
-    var featured: LinearGradient {
-        switch self {
-        case .blackLime:
-            return LinearGradient(colors: [Color(red: 0.16, green: 0.21, blue: 0.12), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .graphiteViolet:
-            return LinearGradient(colors: [Color(red: 0.20, green: 0.17, blue: 0.29), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .darkBronze:
-            return LinearGradient(colors: [Color(red: 0.23, green: 0.16, blue: 0.10), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .indigoNavy:
-            return LinearGradient(colors: [Color(red: 99/255, green: 102/255, blue: 241/255).opacity(0.22), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
-        case .white:
-            return LinearGradient(colors: [Color(red: 0.91, green: 0.94, blue: 0.99), panel], startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-    }
-    var buttonForeground: Color {
-        switch self {
-        case .blackLime: return Color(red: 0.06, green: 0.08, blue: 0.04)
-        case .graphiteViolet: return Color(red: 0.08, green: 0.06, blue: 0.12)
-        case .darkBronze: return Color(red: 0.13, green: 0.08, blue: 0.04)
-        case .indigoNavy: return .white
-        case .white: return Color.white
-        }
-    }
+private enum StrideAccentPalette {
+    static let colors: [(name: String, hex: String)] = [
+        ("Amber", "E8AB64"),
+        ("Lime", "C5F477"),
+        ("Violet", "B9A2FF"),
+        ("Blue", "668CFF"),
+        ("Cyan", "63D9E8"),
+        ("Rose", "F28EAD"),
+        ("Red", "F07878"),
+        ("White", "E8EAF0")
+    ]
 }
-
 private struct StrideCoreMark: View {
     let size: CGFloat
     let accent: Color
