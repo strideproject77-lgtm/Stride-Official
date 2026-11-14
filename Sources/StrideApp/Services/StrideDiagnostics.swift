@@ -205,7 +205,8 @@ final class StrideDiagnostics: ObservableObject {
     func exportSessionReport(apkName: String, apkURL: URL, status: String,
                              rawLog: String, packageName: String = "Not resolved",
                              inspection: APKInspection? = nil,
-                             packageFormat: String = "APK", splitCount: Int = 0) -> URL? {
+                             packageFormat: String = "APK", splitCount: Int = 0,
+                             runtimeMetrics: String = "Not captured") -> URL? {
         do {
             try fileManager.createDirectory(at: reportsFolder, withIntermediateDirectories: true)
             let attrs = try? fileManager.attributesOfItem(atPath: apkURL.path)
@@ -255,6 +256,7 @@ final class StrideDiagnostics: ObservableObject {
             Device: \(UIDevice.current.model)
             OS: iOS \(UIDevice.current.systemVersion)
             Physical memory: \(ByteCountFormatter.string(fromByteCount: Int64(ProcessInfo.processInfo.physicalMemory), countStyle: .memory))
+            Runtime metrics: \(runtimeMetrics)
             Retained structured events: \(entries.count)
             Structured errors/fatals: \(issueCount)
 
