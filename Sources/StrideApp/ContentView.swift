@@ -12,19 +12,16 @@ struct ContentView: View {
     @State private var isImporting = false
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
-    @State private var showingThemeSettings = false
-    @AppStorage("stride.selectedTheme.v3") private var themeRawValue = StrideTheme.indigoNavy.rawValue
-    @AppStorage("stride.customAccentHex") private var customAccentHex = "#4F46E5"
+    @State private var showingAbout = false
     @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
 
-    private var theme: StrideTheme { StrideTheme(rawValue: themeRawValue) ?? .indigoNavy }
-    private var themeIsLight: Bool { theme == .white }
-    private var background: Color { theme.background }
-    private var panel: Color { theme.panel }
-    private var raised: Color { theme.raised }
-    private var accent: Color { Color(hex: customAccentHex) ?? theme.accent }
-    private var muted: Color { theme.muted }
-    private var line: Color { theme == .white ? Color.black.opacity(0.09) : Color.white.opacity(0.075) }
+    private var theme: StrideTheme { .blackLime }
+    private var background: Color { .black }
+    private var panel: Color { Color(red: 0.035, green: 0.038, blue: 0.045) }
+    private var raised: Color { Color(red: 0.075, green: 0.080, blue: 0.090) }
+    private var accent: Color { Color(red: 0.91, green: 0.67, blue: 0.39) }
+    private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
+    private var line: Color { Color.white.opacity(0.075) }
 
     var body: some View {
         ZStack {
@@ -39,15 +36,16 @@ struct ContentView: View {
                         home
                     } else if selectedTab == 1 {
                         libraryView
-                    } else if showingThemeSettings {
-                        themeSettingsView
                     } else {
                         settingsView
                     }
                 }
-                .sheet(item: $selectedPackage) { item in
+                .fullScreenCover(item: $selectedPackage) { item in
                     APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted)
                         .interactiveDismissDisabled(true)
+                }
+                .fullScreenCover(isPresented: $showingAbout) {
+                    AboutStrideView(accent: accent, panel: panel, muted: muted)
                 }
                 Spacer(minLength: 12)
                 tabBar
@@ -96,7 +94,7 @@ struct ContentView: View {
         } message: {
             Text(importError ?? "Please try another Android package file.")
         }
-        .preferredColorScheme(theme == .white ? .light : .dark)
+        .preferredColorScheme(.dark)
     }
 
     private var header: some View {
@@ -238,18 +236,32 @@ struct ContentView: View {
                         .kerning(0.8)
                         .foregroundStyle(muted.opacity(0.75))
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Your recently played apps will appear here.")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(themeIsLight ? Color.black.opacity(0.75) : Color.white.opacity(0.82))
-                    Text("No launch history is available yet.")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(muted)
+                if let recent = recentlyPlayedPackages.first {
+                    Button { selectedPackage = recent } label: {
+                        HStack(spacing: 12) {
+                            APKIconView(data: recent.iconData, accent: accent, size: 45)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(recent.displayName).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                Text("Last played · \(lastPlayedLabel(for: recent))").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).foregroundStyle(accent)
+                        }
+                        .padding(13).background(panel, in: RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Your recently played apps will appear here.")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.82))
+                        Text("Launch an app to start your play history.")
+                            .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(15).background(panel, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(15)
-                .background(panel, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
 
                 HStack {
                     Text("YOUR GAMES")
@@ -442,6 +454,26 @@ struct ContentView: View {
         }
     }
 
+    private var recentlyPlayedPackages: [ImportedAPK] {
+        library.packages
+            .filter { UserDefaults.standard.object(forKey: lastPlayedKey(for: $0)) != nil }
+            .sorted {
+                let a = UserDefaults.standard.object(forKey: lastPlayedKey(for: $0)) as? Date ?? .distantPast
+                let b = UserDefaults.standard.object(forKey: lastPlayedKey(for: $1)) as? Date ?? .distantPast
+                return a > b
+            }
+            .prefix(3).map { $0 }
+    }
+
+    private func lastPlayedKey(for item: ImportedAPK) -> String {
+        "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)"
+    }
+
+    private func lastPlayedLabel(for item: ImportedAPK) -> String {
+        guard let date = UserDefaults.standard.object(forKey: lastPlayedKey(for: item)) as? Date else { return "Not played yet" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     private var settingsView: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 18) {
@@ -452,35 +484,23 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(muted)
                 }
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) { showingThemeSettings = true }
-                } label: {
+                Button { showingAbout = true } label: {
                     HStack(spacing: 13) {
-                        Image(systemName: "paintpalette.fill")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(accent)
-                            .frame(width: 44, height: 44)
-                            .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                        Image(systemName: "info.circle.fill").font(.system(size: 19, weight: .semibold)).foregroundStyle(accent)
+                            .frame(width: 44, height: 44).background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Theme")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.primary)
-                            Text("\(theme.title) · Customize appearance and accent")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(muted)
+                            Text("About Stride").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                            Text("Project details, runtime scope and build information").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(muted)
+                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(muted)
                     }
-                    .padding(14)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                    .padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Open Theme settings")
-                aboutStrideCard
+                .accessibilityLabel("About Stride")
+
                 VStack(alignment: .leading, spacing: 11) {
                     Text("RUNTIME STATUS")
                         .font(.system(size: 9, weight: .heavy))
@@ -514,137 +534,6 @@ struct ContentView: View {
             .padding(.top, 10)
             .padding(.bottom, 24)
         }
-    }
-
-    private var themeSettingsView: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 17) {
-                HStack(spacing: 12) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { showingThemeSettings = false }
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(accent)
-                            .frame(width: 36, height: 36)
-                            .background(panel, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    Text("THEME")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                    Spacer()
-                }
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("ACCENT COLOR")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.3)
-                        .foregroundStyle(muted)
-                    HStack(spacing: 10) {
-                        ForEach(["#4F46E5", "#6366F1", "#22C55E", "#F97316", "#EC4899", "#06B6D4", "#EAB308", "#FFFFFF"], id: \.self) { hex in
-                            Button { customAccentHex = hex } label: {
-                                Circle().fill(Color(hex: hex) ?? .indigo).frame(width: 29, height: 29)
-                                    .overlay(Circle().stroke(Color.white.opacity(customAccentHex == hex ? 0.95 : 0.16), lineWidth: customAccentHex == hex ? 2.5 : 1))
-                                    .overlay { if customAccentHex == hex { Image(systemName: "checkmark").font(.system(size: 10, weight: .black)).foregroundStyle(hex == "#FFFFFF" ? .black : .white) } }
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Accent color \(hex)")
-                        }
-                    }
-                    ColorPicker("Custom accent", selection: Binding(
-                        get: { Color(hex: customAccentHex) ?? theme.accent },
-                        set: { customAccentHex = $0.hexString }
-                    ), supportsOpacity: false)
-                    .font(.system(size: 12, weight: .medium))
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("APPEARANCE")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.3)
-                        .foregroundStyle(muted)
-                    ForEach(StrideTheme.allCases.filter { $0 != .darkBronze }) { option in
-                        Button { themeRawValue = option.rawValue } label: {
-                            HStack(spacing: 12) {
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(option.panel)
-                                    .frame(width: 43, height: 43)
-                                    .overlay {
-                                        Image(systemName: "hexagon")
-                                            .font(.system(size: 25, weight: .medium))
-                                            .foregroundStyle(option.accent)
-                                            .overlay {
-                                                Text("S")
-                                                    .font(.system(size: 11, weight: .black, design: .rounded))
-                                                    .foregroundStyle(.primary)
-                                            }
-                                    }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(option.title)
-                                        .font(.system(size: 12, weight: .bold))
-                                        .foregroundStyle(.primary)
-                                    Text(option.subtitle)
-                                        .font(.system(size: 9, weight: .medium))
-                                        .foregroundStyle(muted)
-                                }
-                                Spacer()
-                                if theme == option {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 19))
-                                        .foregroundStyle(option.accent)
-                                } else {
-                                    Circle().stroke(Color.primary.opacity(0.18), lineWidth: 1.2)
-                                        .frame(width: 18, height: 18)
-                                }
-                            }
-                            .padding(11)
-                            .background(theme == option ? option.accent.opacity(0.09) : panel, in: RoundedRectangle(cornerRadius: 15))
-                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(theme == option ? option.accent.opacity(0.45) : line, lineWidth: 1))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 24)
-        }
-    }
-
-    private var aboutStrideCard: some View {
-        let slides = [
-            URL(string: "https://images.unsplash.com/photo-1542751371-adc38448a05e?w=1200&q=85&fit=crop")!,
-            URL(string: "https://images.unsplash.com/photo-1593305841991-05c297ba4575?w=1200&q=85&fit=crop")!,
-            URL(string: "https://images.unsplash.com/photo-1598550476439-6847785fcea6?w=1200&q=85&fit=crop")!
-        ]
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("ABOUT STRIDE")
-                .font(.system(size: 9, weight: .heavy))
-                .kerning(1.3)
-                .foregroundStyle(muted)
-            TimelineView(.periodic(from: .now, by: 5)) { timeline in
-                let index = Int(timeline.date.timeIntervalSinceReferenceDate / 5) % slides.count
-                AsyncImage(url: slides[index]) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        ZStack {
-                            LinearGradient(colors: [Color(red: 0.16, green: 0.12, blue: 0.30), Color(red: 0.07, green: 0.08, blue: 0.14)], startPoint: .topLeading, endPoint: .bottomTrailing)
-                            Image(systemName: "gamecontroller.fill")
-                                .font(.system(size: 42, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.7))
-                        }
-                    }
-                }
-                .frame(height: 142)
-                .frame(maxWidth: .infinity)
-                .clipped()
-                .clipShape(RoundedRectangle(cornerRadius: 15))
-                .id(index)
-                .transition(.opacity)
-            }
-        }
-        .padding(12)
-        .background(panel, in: RoundedRectangle(cornerRadius: 17))
-        .overlay(RoundedRectangle(cornerRadius: 17).stroke(line, lineWidth: 1))
     }
 
     private var emptyState: some View {
@@ -981,8 +870,53 @@ private struct APKGridCard: View {
     }
 }
 
+private struct AboutStrideView: View {
+    @Environment(\.dismiss) private var dismiss
+    let accent: Color
+    let panel: Color
+    let muted: Color
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: 20) {
+                HStack {
+                    Text("ABOUT STRIDE").font(.system(size: 11, weight: .heavy)).tracking(1.4).foregroundStyle(muted)
+                    Spacer()
+                    Button("Done") { dismiss() }.font(.system(size: 13, weight: .bold)).foregroundStyle(accent)
+                }
+                Spacer()
+                StrideCoreMark(size: 82, accent: accent)
+                Text("Stride").font(.system(size: 34, weight: .black, design: .rounded)).foregroundStyle(.white)
+                Text("An experimental Android compatibility layer for iOS, focused on inspecting and executing Android app packages through native runtime components.")
+                    .font(.system(size: 14, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 12) {
+                    aboutRow("Execution model", "Native iOS runtime components")
+                    aboutRow("Package formats", "APK · XAPK · APKS · APKM")
+                    aboutRow("Compatibility", "Experimental; app support requires real-device verification")
+                }
+                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                Spacer()
+                Text("STRIDE · EXPERIMENTAL BUILD").font(.system(size: 9, weight: .bold)).tracking(1.1)
+                    .foregroundStyle(muted.opacity(0.75)).frame(maxWidth: .infinity)
+            }
+            .padding(24)
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private func aboutRow(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased()).font(.system(size: 8, weight: .heavy)).tracking(1).foregroundStyle(muted)
+            Text(value).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+        }
+    }
+}
+
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
+    @State private var showingDiagnostics = false
     @State private var showingExecutionScreen = false
     @State private var isExecutionChromeHidden = false
     @State private var launchTask: Task<Void, Never>?
@@ -1011,6 +945,29 @@ private struct APKDetailSheet: View {
     let panel: Color
     let raised: Color
     let muted: Color
+
+    private var packageSizeLabel: String {
+        let manager = FileManager.default
+        let root = item.packageDirectoryURL
+        var total: Int64 = 0
+        var directory: ObjCBool = false
+        if manager.fileExists(atPath: root.path, isDirectory: &directory), directory.boolValue,
+           let iterator = manager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
+            for case let url as URL in iterator {
+                guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]), values.isRegularFile == true else { continue }
+                total += Int64(values.fileSize ?? 0)
+            }
+        } else {
+            total = Int64((try? root.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        }
+        return total > 0 ? ByteCountFormatter.string(fromByteCount: total, countStyle: .file) : "Unknown size"
+    }
+
+    private var lastPlayedLabel: String {
+        let key = "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)"
+        guard let date = UserDefaults.standard.object(forKey: key) as? Date else { return "Never played" }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1048,6 +1005,13 @@ private struct APKDetailSheet: View {
                             Text("Package information")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(muted)
+                            HStack(spacing: 7) {
+                                Label(packageSizeLabel, systemImage: "internaldrive")
+                                Label(lastPlayedLabel, systemImage: "clock")
+                            }
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(muted)
+                            .lineLimit(1)
                         }
                         Spacer(minLength: 0)
                     }
@@ -1090,7 +1054,26 @@ private struct APKDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
 
+                    DisclosureGroup(isExpanded: $showingDiagnostics) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            metricRow("Captured events", value: "\(diagnostics.entries.count)")
+                            metricRow("Errors", value: "\(diagnostics.issueCount)")
+                            metricRow("Warnings", value: "\(diagnostics.entries.filter { $0.severity == .warning }.count)")
+                            Text("Export the Complete Diagnostic Report after a launch attempt for the full captured evidence.")
+                                .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.top, 8)
+                    } label: {
+                        Label("Diagnostics", systemImage: "waveform.path.ecg")
+                            .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    }
+                    .tint(accent).padding(15)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
+
                     Button {
+                        UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
                         showingExecutionScreen = true
                         launchTask = Task {
                             isExecuting = true
@@ -1377,6 +1360,7 @@ private struct APKDetailSheet: View {
                 .padding(.bottom, 30)
             }
         }
+        .background(canvas.ignoresSafeArea())
         .background(canvas.ignoresSafeArea())
         .fullScreenCover(isPresented: $showingExecutionScreen) {
             executionScreen
@@ -1728,6 +1712,15 @@ private struct APKDetailSheet: View {
         sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         logExportURL = url
         if let last = sessionLogLines.last { lastRunLabel = "Saved session · \(last)" }
+    }
+
+    private func metricRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).monospacedDigit().foregroundStyle(muted)
+        }
+        .font(.system(size: 11, weight: .medium))
     }
 
     private func detailRow(_ title: String, value: String, symbol: String) -> some View {
