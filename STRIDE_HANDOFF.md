@@ -1039,3 +1039,16 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Limitation: a single report can provide complete captured evidence, but cannot invent missing OS-level crash data or guarantee a root cause where the runtime never observed the failure. The report explicitly labels heuristic classifications and unavailable fields.
 - Tests: added a Rust regression for severity/missing-symbol summary totals; deferred to the single consolidated validation pass; no repeated test runs.
 - IPA: not built, signed or exported. `main` remains untouched.
+
+
+**Phase 27 implementation progress — 2026-11-14:**
+- Added a device/environment snapshot to the one-shot report: exact hardware identifier (hw.machine), OS build, display point/pixel dimensions and scale, active/logical CPU counts, thermal state, Low Power Mode, free app-container storage, preferred language and time zone.
+- Added SHA-256 and size fingerprints for every supplied split APK, not just the base APK, so split-package reports can be matched to the exact tested package set.
+- Added launch-stage evidence coverage for archive/import, manifest, DEX/class loading, ELF/linker, JNI, Activity lifecycle, graphics/framebuffer and input. These are explicitly marked as observed/not captured, not as proof that a stage completed successfully.
+- Added a ranked leading diagnostic signal with a suggested next engineering action. It is explicitly heuristic and cannot claim a root cause without corroborating evidence.
+- UI extra: report panel explains what the single file contains and the action is labeled Export Complete Diagnostic Report. Renamed output from Crash-Report to Diagnostic-Report so normal/partial sessions are not mislabeled as crashes.
+- Files updated: Sources/StrideApp/Services/StrideDiagnostics.swift, Sources/StrideApp/ContentView.swift, STRIDE_HANDOFF.md.
+- Remaining: consolidated compile/test review; confirm the report export path in the iOS build; future additions include guest stack frames and per-stage timing, and OS-provided termination diagnostics where safely available.
+- Tests: not run by design; one consolidated validation only.
+- IPA: not built, signed or exported. main untouched.
+- Phase status: Partial — implementation expanded; validation pending.
