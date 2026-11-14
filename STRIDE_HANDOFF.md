@@ -1256,3 +1256,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Consolidated Rust CI validation: workflow #790 passed the complete `cargo test --manifest-path runtime-rust/Cargo.toml` suite. Test summaries: 10 + 6 + 33 + 216 + 1 + 13 = **279 passed, 0 failed**; remaining crates reported zero unit tests.
 - Workflow #790's unsigned IPA job was skipped because its push event did not match the workflow's explicit build trigger. The next authorized run will use the workflow's existing unsigned-build trigger; signing, release export, and changes to `main` remain prohibited.
 - Commits: `d67d8da` (ARM64 initializer repair), `1d91890` (Activity/Cocos/JNI integration fixes), `32f3b64` (TPIDR_EL0 MRS decode fix).
+
+
+### Unsigned iOS IPA build completed — 2026-11-14
+
+- Workflow #791 completed successfully on `feat/dex-class-method-loader` at source commit `c0a673e7858ee31bd67ada731126c0d733c3de78`.
+- Consolidated Rust validation passed: **279 passed, 0 failed**.
+- Device-target Rust static library, XCFramework, generated app icon, Xcode project, package resolution, physical-iPhone Release compilation, bundle verification, IPA packaging, ZIP integrity validation, and artifact upload all passed.
+- Output: `Stride-unsigned.ipa` (3,068,375 bytes), bundle ID `com.strideproject.stride`, executable architecture check included in the workflow.
+- SHA-256: `ca06fd0801db8ab2e30db0ccc0c5a79a921752b059aa8ea9e607502ec636a25f`.
+- Artifact: `Stride-unsigned-IPA-791` (GitHub Actions artifact ID `14125055574`); build report included.
+- Signing was disabled as intended. No signing, release export, or merge to `main` was performed. This confirms a successful unsigned app build, not on-device Hill Climb Racing compatibility.
