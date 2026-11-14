@@ -1052,3 +1052,14 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Tests: not run by design; one consolidated validation only.
 - IPA: not built, signed or exported. main untouched.
 - Phase status: Partial — implementation expanded; validation pending.
+
+
+**Phase 27 reliability follow-up — 2026-11-14:**
+- Fixed a session-finalization gap: launch failures/cancellation could leave an active-session marker when the per-session log handle was unavailable or the view disappeared before an execution result existed.
+- Session finalization is now idempotent across launch error handling, explicit Close and view dismissal; it closes the session once even when opening its individual log file failed.
+- Extra reliability improvement: the next launch no longer treats a failed-to-open log handle as proof that no diagnostic session was active.
+- Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
+- Remaining: one consolidated Rust + iOS compile validation; then review the single-report output from a real device session. Guest stack frames/per-stage timing remain future instrumentation.
+- Tests: deferred to one consolidated pass; no intermediate test runs.
+- IPA: no build/sign/export in this batch. `main` untouched.
+- Phase status: Partial — session lifecycle hardened; validation pending.
