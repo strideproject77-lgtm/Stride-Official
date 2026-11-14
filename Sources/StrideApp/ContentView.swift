@@ -1237,11 +1237,15 @@ private struct APKDetailSheet: View {
                             let runtimeMetrics = executionResult.map {
                                 "classes=\($0.totalClassesLoaded), instructions=\($0.instructionsExecuted), missingAPIs=\($0.missingApisCount), averageFPS=\($0.averageFps), heapBytes=\($0.heapAllocatedBytes)"
                             } ?? "No launch metrics returned"
+                            let liveRuntimeSnapshot = executionResult?.session.diagnosticsSnapshot() ??
+                                "Live Rust runtime snapshot unavailable (runtime was not retained or export failed)"
+                            let completeSessionLog = sessionLogLines.joined(separator: "\n") +
+                                "\n\n--- FINAL LIVE RUST DIAGNOSTICS SNAPSHOT ---\n" + liveRuntimeSnapshot
                             let reportURL = diagnostics.exportSessionReport(
                                 apkName: item.displayName,
                                 apkURL: item.fileURL,
                                 status: runtimeStatus,
-                                rawLog: sessionLogLines.joined(separator: "\n"),
+                                rawLog: completeSessionLog,
                                 inspection: item.inspection,
                                 packageFormat: String(describing: item.packageFormat),
                                 splitCount: item.splitAPKURLs.count,
