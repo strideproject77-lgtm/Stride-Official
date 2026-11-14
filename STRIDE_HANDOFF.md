@@ -907,7 +907,7 @@ These are candidates, not completed work:
 - Back APIs now return explicit `Result<bool, String>` outcomes; AndroidRuntime consumes the result and keeps its active Activity pointers synchronized.
 - Added regression coverage for rejecting external/system package targets without mutating the task and clearing stale Activity/input state when Back is pressed on an empty task.
 - Remaining known limitation: guest DEX calls to `Context.startActivity(Intent)` are not yet routed through a pending-JNI-event queue into `dispatch_activity_intent()`. This must remain clearly reported as pending; do not describe all Android in-app navigation as connected.
-- Validation: one consolidated GitHub Actions run will compile/test the full Rust workspace and, if tests pass, build the unsigned iOS IPA.
+- Validation: first consolidated run #727 found four integration compile errors (Result propagation and metadata borrow lifetime); those exact sites are fixed by commits 9307515 and 1406414. A single consolidated rerun will compile/test the full Rust workspace and, if tests pass, build the unsigned iOS IPA.
 
 ### Phase 26 — In-process Activity dispatch foundation
 
