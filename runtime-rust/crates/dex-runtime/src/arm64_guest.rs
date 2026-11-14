@@ -65,9 +65,9 @@ impl Default for Arm64Cpu {
             instructions_executed: 0,
             halted: false,
             exclusive_monitor: None,
-            exclusive_monitor: None,
             tpidr_el0: 0,
             v: [0; 32],
+        }
     }
 }
 
