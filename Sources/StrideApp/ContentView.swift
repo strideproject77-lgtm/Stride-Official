@@ -495,7 +495,7 @@ struct ContentView: View {
                             .foregroundStyle(muted)
                     }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
-                        ForEach(StrideAccentPalette.colors, id: \\.hex) { option in
+                        ForEach(StrideAccentPalette.colors, id: \.hex) { option in
                             let color = Color(hex: option.hex) ?? accent
                             Button {
                                 accentColorHex = option.hex
@@ -522,7 +522,7 @@ struct ContentView: View {
                                 .contentShape(RoundedRectangle(cornerRadius: 12))
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("\\(option.name) accent color")
+                            .accessibilityLabel("\(option.name) accent color")
                             .accessibilityAddTraits(accentColorHex == option.hex ? .isSelected : [])
                         }
                     }
