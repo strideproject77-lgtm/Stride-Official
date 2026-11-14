@@ -2362,6 +2362,31 @@ mod managed_view_input_tests {
     use super::*;
 
     #[test]
+    fn external_activity_intents_are_rejected_without_mutating_backstack() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let intent = Intent::new(Some(Intent::ACTION_VIEW))
+            .with_component("android.settings", "Settings");
+        let result = runtime.dispatch_activity_intent(intent);
+        assert!(result.is_err());
+        assert_eq!(runtime.activity_manager.activity_count(), 0);
+        assert!(runtime.active_activity_obj.is_none());
+    }
+
+    #[test]
+    fn back_on_empty_task_clears_stale_activity_and_input_state() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        runtime.active_activity_obj = Some(77);
+        runtime.active_activity_class = Some("Ltest/StaleActivity;".to_string());
+        runtime.pressed_view = Some(9);
+        runtime.focused_edit_text = Some(10);
+        assert!(!runtime.handle_activity_back_pressed().unwrap());
+        assert!(runtime.active_activity_obj.is_none());
+        assert!(runtime.active_activity_class.is_none());
+        assert!(runtime.pressed_view.is_none());
+        assert!(runtime.focused_edit_text.is_none());
+    }
+
+    #[test]
     fn hit_testing_finds_topmost_enabled_view_with_click_listener() {
         let mut runtime = AndroidRuntime::new("com.stride.test");
         let root = runtime.heap.allocate_instance("Landroid/widget/LinearLayout;").unwrap();
