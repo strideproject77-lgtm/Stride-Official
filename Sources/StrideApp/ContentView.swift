@@ -354,7 +354,6 @@ struct ContentView: View {
                         Spacer()
                         Text("\(filteredPackages.count) OF \(library.packages.count)")
                             .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .contentTransition(.numericText())
                     }
                     .foregroundStyle(muted)
                     .accessibilityElement(children: .combine)
