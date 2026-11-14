@@ -7,8 +7,8 @@
 use std::collections::{HashMap, VecDeque};
 use crate::jni::JniNativeRegistry;
 use crate::types::Value;
-use crate::graphics::{MotionEvent, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL};
-use crate::gl::OpenGlEsEngine;
+use crate::graphics::{MotionEvent, Surface, ACTION_DOWN, ACTION_UP, ACTION_MOVE, ACTION_CANCEL};
+use crate::gl::{OpenGlEsEngine, EGL_SUCCESS};
 
 /// Lifecycle state of the Cocos2d-x game engine instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,13 +135,20 @@ impl Cocos2dxEngineBridge {
     }
 
     /// Renders a single frame through the OpenGL ES pipeline.
-    pub fn render_frame(&mut self, gl_engine: &mut OpenGlEsEngine) -> Result<u64, String> {
+    pub fn render_frame(
+        &mut self,
+        gl_engine: &mut OpenGlEsEngine,
+        target_surface: &mut Surface,
+    ) -> Result<u64, String> {
         if self.state != Cocos2dxEngineState::Running && self.state != Cocos2dxEngineState::SurfaceCreated {
             return Ok(self.frame_counter);
         }
 
-        // Swap buffers and increment frame counter
-        gl_engine.swap_buffers()?;
+        // Present the guest GLES backbuffer into Stride's Android surface.
+        let result = gl_engine.egl_swap_buffers(target_surface);
+        if result != EGL_SUCCESS {
+            return Err(format!("Cocos2d-x EGL buffer swap failed: {:#x}", result));
+        }
         self.frame_counter = self.frame_counter.saturating_add(1);
         Ok(self.frame_counter)
     }
@@ -340,9 +347,9 @@ mod tests {
         let mut bridge = Cocos2dxEngineBridge::new();
         let mut registry = JniNativeRegistry::new();
         bridge.register_jni_bridges(&mut registry);
-        assert!(registry.lookup("org/cocos2dx/lib/Cocos2dxRenderer", "nativeInit", "(II)V").is_some());
-        assert!(registry.lookup("org/cocos2dx/lib/Cocos2dxRenderer", "nativeRender", "()V").is_some());
-        assert!(registry.lookup("org/cocos2dx/lib/Cocos2dxHelper", "nativeSetApkPath", "(Ljava/lang/String;)V").is_some());
-        assert!(registry.lookup("org/cocos2dx/lib/Cocos2dxHelper", "getIntegerForKey", "(Ljava/lang/String;I)I").is_some());
+        assert!(registry.find("org/cocos2dx/lib/Cocos2dxRenderer", "nativeInit", "(II)V").is_some());
+        assert!(registry.find("org/cocos2dx/lib/Cocos2dxRenderer", "nativeRender", "()V").is_some());
+        assert!(registry.find("org/cocos2dx/lib/Cocos2dxHelper", "nativeSetApkPath", "(Ljava/lang/String;)V").is_some());
+        assert!(registry.find("org/cocos2dx/lib/Cocos2dxHelper", "getIntegerForKey", "(Ljava/lang/String;I)I").is_some());
     }
 }

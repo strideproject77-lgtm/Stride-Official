@@ -89,6 +89,10 @@ pub struct AndroidRuntime {
     pub native_linker: NativeLinker,
     pub gl_engine: OpenGlEsEngine,
     pub activity_manager: ActivityManager,
+    /// Guest Activity launches queued by JNI callbacks until the runtime pump handles them.
+    pub pending_intent_queue: Arc<Mutex<VecDeque<Intent>>>,
+    /// Guest Activity.finish() requests queued for safe processing outside JNI callbacks.
+    pub pending_finish_requested: Arc<Mutex<bool>>,
     pub service_manager: ServiceManager,
     pub telemetry: PerformanceTelemetry,
     pub resources: ResourceCatalog,
@@ -556,6 +560,8 @@ impl AndroidRuntime {
             native_linker: NativeLinker::new(),
             gl_engine: OpenGlEsEngine::new(),
             activity_manager: ActivityManager::new(),
+            pending_intent_queue,
+            pending_finish_requested,
             service_manager: ServiceManager::new(),
             telemetry: PerformanceTelemetry::default(),
             resources: ResourceCatalog::default(),

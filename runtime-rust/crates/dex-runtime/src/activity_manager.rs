@@ -51,6 +51,8 @@ pub struct ActivityManager {
     current_task_index: usize,
     next_record_id: u32,
     next_task_id: u32,
+    pending_launches: VecDeque<Intent>,
+    pending_finish: bool,
 }
 
 impl Default for ActivityManager {
@@ -67,6 +69,8 @@ impl ActivityManager {
             current_task_index: 0,
             next_record_id: 1,
             next_task_id: 2,
+            pending_launches: VecDeque::new(),
+            pending_finish: false,
         }
     }
 
