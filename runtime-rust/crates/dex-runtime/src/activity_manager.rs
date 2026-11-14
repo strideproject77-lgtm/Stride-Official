@@ -4,6 +4,7 @@
 //! intent-based activity transitions, and proper lifecycle callbacks
 //! (onCreate, onStart, onResume, onPause, onStop, onDestroy).
 
+use std::collections::VecDeque;
 use crate::framework::{ActivityLifecycleState, Intent, Bundle};
 use crate::loader::AppClassLoader;
 use crate::interpreter::{ArtVm, ExecutionStopReason};
@@ -72,6 +73,33 @@ impl ActivityManager {
     /// Returns the currently active top activity, if any.
     pub fn current_activity(&self) -> Option<&ActivityRecord> {
         self.tasks.get(self.current_task_index).and_then(|t| t.top())
+    }
+
+    /// Enqueues an activity launch requested by guest code.
+    pub fn queue_activity_launch(&mut self, intent: Intent) {
+        self.pending_launches.push_back(intent);
+    }
+
+    /// Requests the current top activity to be finished.
+    pub fn request_finish(&mut self) {
+        self.pending_finish = true;
+    }
+
+    /// Returns true if there are pending activity launches.
+    pub fn has_pending_launches(&self) -> bool {
+        !self.pending_launches.is_empty()
+    }
+
+    /// Drains all pending activity launch intents.
+    pub fn drain_pending_launches(&mut self) -> Vec<Intent> {
+        self.pending_launches.drain(..).collect()
+    }
+
+    /// Takes the pending finish request flag, resetting it to false.
+    pub fn take_pending_finish(&mut self) -> bool {
+        let finish = self.pending_finish;
+        self.pending_finish = false;
+        finish
     }
 
     /// Returns total active activities in the current task.
@@ -285,5 +313,26 @@ mod tests {
         assert_eq!(am.activity_count(), 1);
         assert_eq!(am.current_activity().unwrap().class_name, "MainActivity");
         assert_eq!(am.current_activity().unwrap().state, ActivityLifecycleState::Resumed);
+    }
+
+    #[test]
+    fn activity_pending_launch_and_finish_queue() {
+        let mut am = ActivityManager::new();
+        assert!(!am.has_pending_launches());
+        assert!(!am.take_pending_finish());
+
+        let mut intent = Intent::new(Some(Intent::ACTION_VIEW));
+        intent = intent.with_component("com.example.test", "DetailActivity");
+        am.queue_activity_launch(intent.clone());
+        assert!(am.has_pending_launches());
+
+        am.request_finish();
+        assert!(am.take_pending_finish());
+        assert!(!am.take_pending_finish());
+
+        let drained = am.drain_pending_launches();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].component_class.as_deref(), Some("DetailActivity"));
+        assert!(!am.has_pending_launches());
     }
 }

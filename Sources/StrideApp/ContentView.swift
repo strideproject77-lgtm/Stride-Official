@@ -569,7 +569,7 @@ struct ContentView: View {
                     statusCard("URI and Intent data", detail: "android.net.Uri parsing, scheme/host/path/query and MIME data", symbol: "link", good: true)
                     statusCard("Bundle management", detail: "containsKey, remove, clear, size and typed defaults", symbol: "shippingbox", good: true)
                     statusCard("Intent filter semantics", detail: "Data/type exclusivity, categories and filterEquals", symbol: "line.3.horizontal.decrease.circle", good: true)
-                    statusCard("In-process Activity backstack", detail: "Runtime dispatch + Back restoration wired · guest Context.startActivity JNI routing still pending", symbol: "arrow.triangle.2.circlepath", good: false)
+                    statusCard("In-process Activity backstack", detail: "Runtime dispatch, Back restoration & guest Context.startActivity/finish JNI routing integrated", symbol: "arrow.triangle.2.circlepath", good: true)
                     statusCard("ART / Android framework", detail: "Partial implementation · not full compatibility", symbol: "cpu", good: false)
                     statusCard("Native execution pipeline", detail: "AArch64 PT_LOAD memory mapping, topological initializers, and JNI_OnLoad integration", symbol: "memorychip", good: true)
                     statusCard("Native libraries and graphics", detail: "GLES2/EGL and Cocos2d-x render loop integration in progress", symbol: "square.stack.3d.up", good: false)

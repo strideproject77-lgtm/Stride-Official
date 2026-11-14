@@ -3,7 +3,7 @@
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use stride_axml::parse_manifest;
 use crate::loader::AppClassLoader;
@@ -439,13 +439,43 @@ impl AndroidRuntime {
             DiagnosticSeverity::Info, "ActivityManager", "ACTIVITY_INTENT_DISPATCHED",
             "Explicit guest Activity Intent entered the in-process task backstack",
             Some(&format!("record_id={} component={}", record_id, descriptor)),
-            Some("Guest Context.startActivity JNI routing remains a separate bridge step"),
+            Some("Guest Context.startActivity JNI routing and ActivityManager task queue integrated"),
         );
         Ok(record_id)
     }
 
     /// Handles Back against the in-process Activity task and restores the runtime's
     /// active object/class pointers to the newly resumed top record.
+    /// Drains and processes all pending activity events (startActivity, finish) requested by guest code.
+    pub fn process_pending_activity_events(&mut self) -> Result<usize, String> {
+        let mut processed = 0usize;
+
+        let should_finish = {
+            let mut guard = self.pending_finish_requested.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?;
+            let val = *guard;
+            *guard = false;
+            val
+        };
+        if should_finish {
+            if self.handle_activity_back_pressed()? {
+                processed += 1;
+            }
+        }
+
+        let pending = {
+            let mut guard = self.pending_intent_queue.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?;
+            guard.drain(..).collect::<Vec<_>>()
+        };
+
+        for intent in pending {
+            self.activity_manager.queue_activity_launch(intent.clone());
+            self.dispatch_activity_intent(intent)?;
+            processed += 1;
+        }
+
+        Ok(processed)
+    }
+
     pub fn handle_activity_back_pressed(&mut self) -> Result<bool, String> {
         let method_map = self.class_loader.export_method_codes();
         let dex_metadata = self.class_loader.dex_inventories.first().cloned();
@@ -492,7 +522,9 @@ impl AndroidRuntime {
         let mut jni = JniNativeRegistry::new();
         let shared_preferences_store = Arc::new(Mutex::new(HashMap::new()));
         let shared_resource_catalog = Arc::new(Mutex::new(ResourceCatalog::default()));
-        Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone());
+                let pending_intent_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let pending_finish_requested = Arc::new(Mutex::new(false));
+        Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone(), pending_intent_queue.clone(), pending_finish_requested.clone());
         Self::register_game_jni(&mut jni);
         UnityPlayerBridge::register_unity_jni(&mut jni);
         let mut cocos2dx_bridge = Cocos2dxEngineBridge::new();
@@ -630,7 +662,120 @@ impl AndroidRuntime {
         let _ = ok_unit; let _ = ok_one; let _ = ok_zero;
     }
 
-    fn register_core_jni(jni: &mut JniNativeRegistry, shared_preferences_store: crate::shared_prefs::PreferenceStore, shared_resource_catalog: crate::resource_jni::SharedResourceCatalog) {
+    fn extract_guest_intent(env: &mut crate::jni::JniEnv, intent_obj: u32) -> Result<Intent, String> {
+        let action = match env.get_object_field(intent_obj, "mAction") {
+            Ok(Value::Object(id)) if id != 0 => env.get_string_utf(id).ok().map(|s| s.to_string()),
+            _ => None,
+        };
+        let package = match env.get_object_field(intent_obj, "mPackage") {
+            Ok(Value::Object(id)) if id != 0 => env.get_string_utf(id).ok().map(|s| s.to_string()),
+            _ => None,
+        };
+        let mut component_class = None;
+        let mut component_package = package.clone();
+        if let Ok(Value::Object(comp_id)) = env.get_object_field(intent_obj, "mComponent") {
+            if comp_id != 0 {
+                if let Ok(Value::Object(cls_id)) = env.get_object_field(comp_id, "mClass") {
+                    if cls_id != 0 {
+                        component_class = env.get_string_utf(cls_id).ok().map(|s| s.to_string());
+                    }
+                }
+                if let Ok(Value::Object(pkg_id)) = env.get_object_field(comp_id, "mPackage") {
+                    if pkg_id != 0 {
+                        component_package = env.get_string_utf(pkg_id).ok().map(|s| s.to_string());
+                    }
+                }
+            }
+        }
+        if component_class.is_none() {
+            if let Ok(Value::Object(cls_id)) = env.get_object_field(intent_obj, "mClass") {
+                if cls_id != 0 {
+                    component_class = env.get_string_utf(cls_id).ok().map(|s| s.to_string());
+                }
+            }
+        }
+        let flags = match env.get_object_field(intent_obj, "mFlags") {
+            Ok(Value::Int(f)) => f as u32,
+            _ => 0,
+        };
+        let mut intent = Intent::new(action.as_deref());
+        intent.flags = flags;
+        if let (Some(pkg), Some(cls)) = (component_package.as_deref(), component_class.as_deref()) {
+            intent = intent.with_component(pkg, cls);
+        } else if let Some(cls) = component_class.as_deref() {
+            intent.component_class = Some(cls.to_string());
+        }
+        Ok(intent)
+    }
+
+    fn register_core_jni(
+        jni: &mut JniNativeRegistry,
+        shared_preferences_store: crate::shared_prefs::PreferenceStore,
+        shared_resource_catalog: crate::resource_jni::SharedResourceCatalog,
+        pending_intent_queue: Arc<Mutex<VecDeque<Intent>>>,
+        pending_finish_requested: Arc<Mutex<bool>>,
+    ) {
+        // Register guest Context.startActivity and Activity.startActivity JNI routing
+        for class_name in [
+            "Landroid/content/Context;",
+            "Landroid/content/ContextWrapper;",
+            "Landroid/app/Activity;",
+        ] {
+            let queue = pending_intent_queue.clone();
+            jni.register(
+                class_name,
+                "startActivity",
+                "(Landroid/content/Intent;)V",
+                move |env, args| {
+                    let intent_obj = args.get(1).and_then(Value::as_object)
+                        .ok_or_else(|| "Context.startActivity intent argument is null".to_string())?;
+                    let intent = Self::extract_guest_intent(env, intent_obj)?;
+                    queue.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?.push_back(intent);
+                    Ok(None)
+                },
+            );
+
+            let queue2 = pending_intent_queue.clone();
+            jni.register(
+                class_name,
+                "startActivity",
+                "(Landroid/content/Intent;Landroid/os/Bundle;)V",
+                move |env, args| {
+                    let intent_obj = args.get(1).and_then(Value::as_object)
+                        .ok_or_else(|| "Context.startActivity intent argument is null".to_string())?;
+                    let intent = Self::extract_guest_intent(env, intent_obj)?;
+                    queue2.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?.push_back(intent);
+                    Ok(None)
+                },
+            );
+        }
+
+        let queue3 = pending_intent_queue.clone();
+        jni.register(
+            "Landroid/app/Activity;",
+            "startActivityForResult",
+            "(Landroid/content/Intent;I)V",
+            move |env, args| {
+                let intent_obj = args.get(1).and_then(Value::as_object)
+                    .ok_or_else(|| "Activity.startActivityForResult intent argument is null".to_string())?;
+                let intent = Self::extract_guest_intent(env, intent_obj)?;
+                queue3.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?.push_back(intent);
+                Ok(None)
+            },
+        );
+
+        let finish_flag = pending_finish_requested.clone();
+        jni.register(
+            "Landroid/app/Activity;",
+            "finish",
+            "()V",
+            move |_env, _args| {
+                if let Ok(mut flag) = finish_flag.lock() {
+                    *flag = true;
+                }
+                Ok(None)
+            },
+        );
         // Activity lifecycle methods are framework-owned and therefore do not
         // have app DEX MethodCode entries. The launcher owns lifecycle state
         // transitions; this bridge safely accepts the Activity's super call.
@@ -2218,6 +2363,7 @@ impl AndroidRuntime {
         let mut latest_event_enqueued_at = None;
 
         while delivered < max_events {
+            let _ = self.process_pending_activity_events();
             let Some(event) = self.input_queue.poll_motion() else { break };
             self.cocos2dx_bridge.dispatch_motion_event(&event);
             latest_event_enqueued_at = Some(event.host_enqueued_at);
