@@ -754,7 +754,7 @@ pub fn run_aarch64(
         }
 
         // MRS TPIDR_EL0 / TPIDRRO_EL0 (Thread ID Register used for Bionic TLS and stack guard)
-        if instruction & 0xFFD0_FFE0 == 0xD530_D040 {
+        if instruction & 0xFFF0_FFE0 == 0xD530_D040 {
             let rt = instruction & 0x1F;
             let op2 = (instruction >> 5) & 0x7;
             let val = match op2 {
