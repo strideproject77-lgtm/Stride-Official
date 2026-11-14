@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-14 (Phase 28 storage and diagnostic-retention implementation added)
+Updated: 2026-11-14 (Phase 31 native-game startup optimization added)
 
 ## Goal
 
@@ -1140,3 +1140,18 @@ Do not mark a phase complete merely because its files or API names exist. A phas
 - Remaining: review the share-sheet flow and clipboard contents on a real iPhone; verify exporting after a failed launch and after a successful launch; then include this batch in the one consolidated Rust + iOS validation pass.
 - Tests: deferred to the single consolidated validation pass; no repeated test runs.
 - IPA: not built, signed or exported for this batch. `main` untouched.
+
+
+### Phase 31 — Native Game Startup: Defer Optional Resource Image Predecode
+Status: Implementation committed · consolidated validation and real-device retest pending.
+
+- HCR 1.73.2 real-device session reached archive/split validation, package identity verification, ART runtime creation, asset registration (2,399 assets / 106,702,031 bytes), and resource-table decode (571,000 bytes).
+- The user ended the session about five seconds after launch while the backend was still in the eager Android resource-image scan. No DEX load, native-library load, launcher Activity dispatch, JNI initialization or graphics startup event was captured; the report contains no runtime error proving a DEX/JNI failure.
+- Optimized Sources/StrideApp/Runtime/ExecutionBackend.swift: native/asset-heavy packages (at least one ARM64 native library and more than 128 bundled assets) now defer optional eager UIKit drawable predecode and proceed directly to DEX initialization. Managed-only packages retain the existing bounded drawable predecode path.
+- Added an explicit session-log event with the reason and native-library/asset counts when this predecode is deferred, so the next one-shot report identifies the transition instead of appearing stalled at resource scanning.
+- Extra improvement: avoids duplicate startup work for native game engines whose primary assets are already registered through Android AssetManager; no resource limits were relaxed and cancellation checks remain in place.
+- Files: Sources/StrideApp/Runtime/ExecutionBackend.swift, STRIDE_HANDOFF.md.
+- Commit: 713f52d — Defer eager resource image scan for native game packages.
+- Remaining: one consolidated Rust + Swift/iOS validation; build the authorized unsigned IPA; retest HCR and confirm DEX loading, native library loading and Activity dispatch appear in the session log. Do not claim HCR compatibility until the game's own UI is visibly running and sustained behavior is checked.
+- Tests: not run in this batch by design; perform only the consolidated validation pass.
+- IPA: unsigned build only is authorized; no signing or release export. main untouched.
