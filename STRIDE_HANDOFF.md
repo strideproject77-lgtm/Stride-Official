@@ -1167,7 +1167,7 @@ Status: UI implementation committed · consolidated validation and visual review
 - Removed the unused full StrideTheme enum so this is explicitly an accent-color selector, not a full theme system.
 - Extra UI improvement: the palette is keyboard/VoiceOver discoverable through accessibility labels and selected traits; no restart required.
 - Files: Sources/StrideApp/ContentView.swift.
-- Commits: 3a92c9c (accent picker); 8522403 (Swift key-path/interpolation correction).
+- Commits: 3a92c9c (accent picker); 8522403 (Swift interpolation correction); 1505f50 (replace tuple key-path iteration with an Identifiable palette model for Swift compatibility).
 - Remaining: consolidated Swift/iOS + Rust validation, unsigned IPA build, and real-device visual check for selected accent persistence and contrast.
 - Tests: deferred to the single consolidated validation workflow; no repeated test runs.
 - IPA: unsigned build only is authorized. No signing, release export or merge to main.
