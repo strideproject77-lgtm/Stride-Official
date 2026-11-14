@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-13 (Phase 16–17 implementation added)
+Updated: 2026-11-14 (Phase 28 storage and diagnostic-retention implementation added)
 
 ## Goal
 
@@ -21,6 +21,19 @@ Build an iOS app that runs a growing, measured set of Android APKs, with a long-
 - Validation state: Phases 11–15 passed the consolidated Rust workspace test job in workflow #701 (run ID `43481239721`, commit `a3727a3707925b1be608a9f85aa5ecc7b298e6ae`). The unsigned iOS IPA build job is queued/in progress; record its final result and artifact only after completion. IPA signing is not part of this workflow.
 - Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched.
 - Do not merge the draft PR yet. Read the latest workflow results and review the diff first.
+
+## Common Compatibility Engine — current implementation checkpoint (2026-11-14)
+
+- Phase 26 — Activity task/backstack dispatch: **Partial**. Runtime-owned explicit Activity dispatch and Back restoration are wired; guest DEX calls through JNI `Context.startActivity(Intent)` still need pending-event routing and end-to-end tests.
+- Phase 27 — One-Shot Diagnostic Report: **Implementation added; consolidated iOS validation pending**. The report contains package/split fingerprints, device environment, runtime metrics, stage evidence, heuristic findings, and raw session evidence. Do not claim a guaranteed root cause or that retesting is never needed.
+- Phase 28 — Storage & Latest-Session Retention: **Implementation added; consolidated validation pending**.
+  - Plain APK import now stores one canonical `base.apk`, rather than both `source.apk` and `base.apk`.
+  - XAPK/APKS/APKM source containers are no longer retained as an extra full-size copy; the base component is extracted directly to the canonical root path rather than extracted and copied again.
+  - Starting a new launch clears previous session logs, reports, archives, and pre-launch global log noise; only the current session and its one-shot report remain.
+  - Oversized rolling logs are truncated rather than moved into timestamped archive files.
+  - Remaining: verify package restoration for APK/XAPK/APKS/APKM, ensure report export remains complete after log reset, and run the single consolidated Rust + iOS compile validation. Existing files from earlier app versions may remain until the next launch cleanup.
+- UI phase requested by user — **Not started in this batch**: replace the current detail sheet with a dedicated app page, add last-played/app-size metadata and a single Diagnostics disclosure button, remove theme selection and image carousel, enforce pure-black surfaces, and add a proper About Stride screen. Do not mark this UI scope complete yet.
+- Branch discipline: all changes remain on `feat/dex-class-method-loader`; `main` remains untouched. No IPA build/sign/export was run.
 
 ## Completed
 
