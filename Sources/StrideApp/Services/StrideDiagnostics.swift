@@ -53,6 +53,7 @@ final class StrideDiagnostics: ObservableObject {
     private var sequence: UInt64 = 0
     private let capacity = 2000
     private var sessionStartedAt = Date()
+    private var sessionIsActive = false
 
     private var documentsURL: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -104,7 +105,8 @@ final class StrideDiagnostics: ObservableObject {
     }
 
     func beginSession(apkName: String) {
-        if sessionHandle != nil { finishSession(status: "replaced by a new launch") }
+        if sessionIsActive { finishSession(status: "replaced by a new launch") }
+        sessionIsActive = true
         currentAPK = apkName
         issueCount = 0
         sequence = 0
@@ -168,6 +170,10 @@ final class StrideDiagnostics: ObservableObject {
     }
 
     func finishSession(status: String) {
+        // Lifecycle callbacks can converge (launch failure, explicit Close, and view dismissal).
+        // Finalize exactly once, even when the per-session file could not be opened.
+        guard sessionIsActive else { return }
+        sessionIsActive = false
         record(.info, stage: "SESSION", code: "END",
                "Session ended: \(status); collected \(issueCount) error(s)")
         flush()
