@@ -897,12 +897,21 @@ These are candidates, not completed work:
 - Extra bug fixes: Back now clears stale pressed/focused view references when the task becomes empty; dispatch logs a stable record ID and target component.
 - UI status now distinguishes runtime-owned dispatch/Back wiring from the still-pending guest JNI `Context.startActivity()` entry point.
 - Remaining: implement guest JNI `Context.startActivity()` routing into this API; add end-to-end DEX/JNI tests; finish UI back-button/input event hookup; run one consolidated validation and then trigger unsigned IPA build.
-- Tests: Not run yet (single consolidated run planned).
-- IPA: Not built yet in this batch; user authorized an unsigned build after implementation and consolidated validation.
+- Tests: New routing/Back regression cases added; single consolidated workflow validation pending.
+- IPA: User authorized an unsigned build after implementation and consolidated validation; no signed/exported IPA is permitted.
+
+
+
+**Implementation update — final validation batch (2026-11-14):**
+- ActivityManager now executes the Activity constructor before lifecycle creation and propagates interpreter errors, uncaught guest exceptions, and lifecycle instruction-budget exhaustion for constructor/onCreate/onStart/onResume and finish/back callbacks.
+- Back APIs now return explicit `Result<bool, String>` outcomes; AndroidRuntime consumes the result and keeps its active Activity pointers synchronized.
+- Added regression coverage for rejecting external/system package targets without mutating the task and clearing stale Activity/input state when Back is pressed on an empty task.
+- Remaining known limitation: guest DEX calls to `Context.startActivity(Intent)` are not yet routed through a pending-JNI-event queue into `dispatch_activity_intent()`. This must remain clearly reported as pending; do not describe all Android in-app navigation as connected.
+- Validation: one consolidated GitHub Actions run will compile/test the full Rust workspace and, if tests pass, build the unsigned iOS IPA.
 
 ### Phase 26 — In-process Activity dispatch foundation
 
-**Status: Partial · approximately 40% (dispatcher foundation hardened; guest bridge and runtime synchronization remain).**
+**Status: Partial · runtime-owned dispatch and Back synchronization implemented; guest JNI entry point and end-to-end validation remain.**
 
 - Consolidated workflow #724 exposed two Rust type errors: the new `dispatch_method` receiver parameter is `Option<u32>`, but the `onStart` and `onResume` call sites passed bare `u32` values. Both call sites now pass `Some(obj_ref)`; rerun the consolidated workflow before treating Phase 26 as validated. The iOS IPA job was skipped because Rust compilation failed.
 
