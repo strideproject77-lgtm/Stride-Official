@@ -11,7 +11,7 @@ use crate::hierarchy::ClassHierarchy;
 use crate::heap::ManagedHeap;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
-use crate::framework::{AndroidEnvironment, ActivityLifecycleState, PackageInfo, ActivityInfo, ServiceInfo};
+use crate::framework::{AndroidEnvironment, ActivityLifecycleState, Intent, PackageInfo, ActivityInfo, ServiceInfo};
 use crate::graphics::{Surface, InputQueue, DisplayMetrics, ACTION_DOWN, ACTION_UP, ACTION_CANCEL};
 use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
@@ -215,6 +215,107 @@ impl AndroidRuntime {
 
     pub fn load_resource_table(&mut self,data:&[u8])->Result<(),String>{let catalog=ResourceCatalog::parse(data)?;self.resources=catalog.clone();*self.shared_resource_catalog.lock().map_err(|_| "Resource catalog lock poisoned")?=catalog;Ok(())}
     pub fn set_resource_image(&mut self,id:u32,width:u32,height:u32,pixels:&[u32])->Result<(),String>{let count=(width as usize).checked_mul(height as usize).ok_or("image dimensions overflow")?;if width==0||height==0||count>16_777_216||pixels.len()!=count{return Err("invalid decoded image dimensions".into());}self.image_assets.insert(id,(width,height,pixels.to_vec()));Ok(())}
+
+    /// Dispatches an explicit in-process Activity Intent through the runtime-owned
+    /// ActivityManager, then synchronizes the visible Activity used by rendering/input.
+    /// External/system package targets are rejected until package routing exists.
+    pub fn dispatch_activity_intent(&mut self, mut intent: Intent) -> Result<u32, String> {
+        let target_package = intent.component_package.as_deref()
+            .ok_or_else(|| "Activity Intent must declare an explicit in-process package".to_string())?;
+        if target_package != self.environment.package_name {
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::Warning, "ActivityManager", "EXTERNAL_ACTIVITY_REJECTED",
+                "Activity dispatch target is outside the current guest package",
+                Some(&format!("target={} current={}", target_package, self.environment.package_name)),
+                Some("External/system Activity resolution is not implemented; keep dispatch within the imported APK"),
+            );
+            return Err(format!("External/system Activity target is not supported: {}", target_package));
+        }
+        let raw_class = intent.component_class.as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| "Activity Intent requires an explicit component class".to_string())?;
+        let descriptor = if raw_class.starts_with('L') && raw_class.ends_with(';') {
+            raw_class.to_owned()
+        } else {
+            format!("L{};", raw_class.replace('.', "/"))
+        };
+        intent.component_class = Some(descriptor.clone());
+
+        self.class_loader.initialize_class(
+            &descriptor, &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+            &mut self.jni, &mut self.static_fields, &[],
+        ).map_err(|error| format!("Activity class initialization failed for {}: {}", descriptor, error))?;
+
+        let method_map = self.class_loader.export_method_codes();
+        let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+        let dex_strings = dex_metadata.as_ref()
+            .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let record_id = {
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &method_map, dex_strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+            if let Some(inventory) = dex_metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            self.activity_manager.start_activity(intent, &mut self.class_loader, &mut vm)?
+        };
+        if let Some(top) = self.activity_manager.current_activity() {
+            self.active_activity_obj = top.heap_object_ref;
+            self.active_activity_class = Some(top.class_name.clone());
+        }
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Info, "ActivityManager", "ACTIVITY_INTENT_DISPATCHED",
+            "Explicit guest Activity Intent entered the in-process task backstack",
+            Some(&format!("record_id={} component={}", record_id, descriptor)),
+            Some("Guest Context.startActivity JNI routing remains a separate bridge step"),
+        );
+        Ok(record_id)
+    }
+
+    /// Handles Back against the in-process Activity task and restores the runtime's
+    /// active object/class pointers to the newly resumed top record.
+    pub fn handle_activity_back_pressed(&mut self) -> Result<bool, String> {
+        let method_map = self.class_loader.export_method_codes();
+        let dex_metadata = self.class_loader.dex_inventories.first().cloned();
+        let dex_strings = dex_metadata.as_ref()
+            .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let handled = {
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &method_map, dex_strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(&self.class_loader.dex_inventories, &self.class_loader.method_dex_indices);
+            if let Some(inventory) = dex_metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            self.activity_manager.handle_back_pressed(&mut self.class_loader, &mut vm)
+        };
+        if let Some(top) = self.activity_manager.current_activity() {
+            self.active_activity_obj = top.heap_object_ref;
+            self.active_activity_class = Some(top.class_name.clone());
+        } else {
+            self.active_activity_obj = None;
+            self.active_activity_class = None;
+            self.rendered_view_bounds.clear();
+            self.pressed_view = None;
+            self.focused_edit_text = None;
+        }
+        self.diagnostics.record_detailed(
+            DiagnosticSeverity::Info, "ActivityManager", "BACK_DISPATCH_COMPLETED",
+            "Back event was applied to the in-process Activity task",
+            Some(&format!("handled={} remaining={}", handled, self.activity_manager.activity_count())),
+            None,
+        );
+        Ok(handled)
+    }
 
     /// Creates a new Android runtime environment.
     pub fn new(package_name: &str) -> Self {
