@@ -1230,6 +1230,10 @@ private struct APKDetailSheet: View {
                         .frame(maxHeight: 180)
                         .padding(10)
                         .background(canvas, in: RoundedRectangle(cornerRadius: 11))
+                        Text("One file includes APK/split fingerprints, iPhone and iOS build details, runtime timeline, missing APIs, launch-stage evidence and the full raw log.")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Button {
                             let runtimeStatus = executionError.map { "Failed: \($0)" } ??
                                 executionResult.map { "Status=\($0.statusCode), lifecycle=\($0.lifecycleState)" } ??
@@ -1249,7 +1253,8 @@ private struct APKDetailSheet: View {
                                 inspection: item.inspection,
                                 packageFormat: String(describing: item.packageFormat),
                                 splitCount: item.splitAPKURLs.count,
-                                runtimeMetrics: runtimeMetrics
+                                runtimeMetrics: runtimeMetrics,
+                                splitAPKURLs: item.splitAPKURLs
                             )
                             if let reportURL {
                                 logExportURL = reportURL
