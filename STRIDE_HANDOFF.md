@@ -1245,3 +1245,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Files: `runtime-rust/crates/dex-runtime/src/activity_manager.rs`, `runtime-rust/crates/dex-runtime/src/launcher.rs`, `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
 - Commits: Phase 36 commit.
 - Tests: deliberately deferred per strict implementation-only instructions; CI/workflow/IPA jobs not run. `main` untouched.
+
+### Consolidated validation repairs — 2026-11-14
+
+- Fixed the malformed `Arm64Cpu::default()` initializer (removed the duplicate exclusive-monitor initializer and closed the struct/function correctly).
+- Completed the guest Activity event queue storage that Phase 36 had referenced but not declared: `ActivityManager.pending_launches/pending_finish` and the corresponding shared queues on `AndroidRuntime` are now present and initialized.
+- Corrected the Cocos2d-x bridge's buffer presentation API to use `OpenGlEsEngine::egl_swap_buffers(&mut Surface)` and report EGL failures rather than calling a nonexistent `swap_buffers()` method.
+- Corrected Cocos2d-x JNI registry tests to use the existing exact-signature `JniNativeRegistry::find()` API.
+- Corrected the AArch64 MRS decoder mask so the documented TPIDR_EL0 instruction encoding is recognized.
+- Consolidated Rust CI validation: workflow #790 passed the complete `cargo test --manifest-path runtime-rust/Cargo.toml` suite. Test summaries: 10 + 6 + 33 + 216 + 1 + 13 = **279 passed, 0 failed**; remaining crates reported zero unit tests.
+- Workflow #790's unsigned IPA job was skipped because its push event did not match the workflow's explicit build trigger. The next authorized run will use the workflow's existing unsigned-build trigger; signing, release export, and changes to `main` remain prohibited.
+- Commits: `d67d8da` (ARM64 initializer repair), `1d91890` (Activity/Cocos/JNI integration fixes), `32f3b64` (TPIDR_EL0 MRS decode fix).
