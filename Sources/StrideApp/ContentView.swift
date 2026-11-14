@@ -1393,9 +1393,9 @@ private struct APKDetailSheet: View {
             liveGuestFPS = nil
             StrideOrientationController.shared.reset()
             executionResult?.session.close()
-            if executionResult != nil {
-                diagnostics.finishSession(status: "runtime released by user")
-            }
+            diagnostics.finishSession(status: isExecuting
+                ? "view dismissed while launch was active"
+                : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user"))
         }
     }
 
