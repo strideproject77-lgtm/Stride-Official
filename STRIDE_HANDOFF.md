@@ -887,6 +887,18 @@ These are candidates, not completed work:
 - Compatibility harness: one exact APK scenario and evidence record at a time.
 
 
+
+
+**Implementation update — 2026-11-14 (runtime connection batch):**
+- Added `AndroidRuntime::dispatch_activity_intent()`: explicit package/class validation, dot-name to DEX descriptor normalization, class initialization, metadata-aware ArtVm construction, ActivityManager dispatch, and synchronization of `active_activity_obj` / `active_activity_class`.
+- Added `AndroidRuntime::handle_activity_back_pressed()`: dispatches Back through ActivityManager, restores the runtime's active Activity pointers, and clears stale input/render hit-test state when the stack empties.
+- Added explicit external/system package rejection with structured diagnostics rather than silently routing outside the imported APK.
+- Extra bug fixes: Back now clears stale pressed/focused view references when the task becomes empty; dispatch logs a stable record ID and target component.
+- UI status now distinguishes runtime-owned dispatch/Back wiring from the still-pending guest JNI `Context.startActivity()` entry point.
+- Remaining: implement guest JNI `Context.startActivity()` routing into this API; propagate lifecycle callback exceptions from ActivityManager (currently callbacks can be swallowed); add end-to-end DEX/JNI tests; finish UI back-button/input event hookup; run one consolidated validation and then trigger unsigned IPA build.
+- Tests: Not run yet (single consolidated run planned).
+- IPA: Not built yet in this batch; user authorized an unsigned build after implementation and consolidated validation.
+
 ### Phase 26 — In-process Activity dispatch foundation
 
 **Status: Partial · approximately 40% (dispatcher foundation hardened; guest bridge and runtime synchronization remain).**
