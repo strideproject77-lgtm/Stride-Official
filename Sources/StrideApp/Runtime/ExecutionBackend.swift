@@ -423,7 +423,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             // Keep this compatibility path bounded; Cocos game assets are loaded via
             // the package asset/native path rather than this UI-resource cache.
             let fileCount = stride_runtime_resource_file_count(runtime)
-            let maxResourceFilesToScan: UInt32 = 1_024
+            let maxResourceFilesToScan = 1_024
             let maxDecodedResourceImages = 128
             let maxTotalResourceImagePixels = 8_388_608
             let scanCount = min(fileCount, maxResourceFilesToScan)
