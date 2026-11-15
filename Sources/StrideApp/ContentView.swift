@@ -1761,8 +1761,10 @@ private struct APKDetailSheet: View {
     }
 
     private func exportCompleteDiagnosticReport() {
-        if let existing = diagnosticReportURL ?? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) {
-            logExportURL = existing
+        let existingReport = diagnosticReportURL ?? (didFinalizeDiagnosticReport
+            ? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) : nil)
+        if let existingReport {
+            logExportURL = existingReport
             showingLogShare = true
             return
         }
@@ -1772,6 +1774,8 @@ private struct APKDetailSheet: View {
                 finishSession: !isExecuting
             )
             if !isExecuting { didFinalizeDiagnosticReport = true }
+        } else {
+            _ = createCompleteDiagnosticReport(status: "diagnostic report regenerated", finishSession: false)
         }
         if let url = diagnosticReportURL {
             logExportURL = url

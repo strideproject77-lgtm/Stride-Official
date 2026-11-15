@@ -1744,3 +1744,11 @@ Status: UI implementation committed · consolidated validation and visual review
 - Limitations remain honest: iOS does not expose a guaranteed jetsam/crash reason or arbitrary register/backtrace data to this app. Such evidence is included only when the runtime/OS actually supplies it. Runtime metrics unavailable at the time of termination remain marked unavailable.
 - Validation status: implementation committed; one consolidated repository validation is required next. No IPA build, signing, export or merge to main is included or authorized in this batch.
 - Phase 51 status: **In Progress — implementation batch prepared; CI validation and device verification pending.** The next 2048 test should require only one launch/session and one exported Complete Diagnostic Report; no compatibility claim is made until the resulting evidence is reviewed.
+
+
+### Phase 51 validation workflow adjustment — compile-only iOS job
+
+- Added a dedicated `ios-compile-validation` job to the existing workflow. It runs after the Rust test job, builds the ARM64 runtime/XCFramework and compiles the iOS app for a generic physical iPhone.
+- This job stops after verifying the built `.app` bundle. It does **not** package an IPA, sign, export or distribute anything.
+- The existing unsigned IPA job remains separately gated behind explicit `workflow_dispatch` authorization or its existing dedicated commit-message condition.
+- This lets UI/diagnostics changes receive Swift/Xcode compile validation without creating an IPA.

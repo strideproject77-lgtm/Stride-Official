@@ -50,6 +50,7 @@ final class StrideDiagnostics: ObservableObject {
     private var pendingSession = Data()
     private var sessionFileURL: URL?
     private var lastSessionFileURL: URL?
+    private var lastSessionAPKName: String?
     private let flushBatchSize = 16
     private var sequence: UInt64 = 0
     private let capacity = 2000
@@ -84,7 +85,7 @@ final class StrideDiagnostics: ObservableObject {
                 let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 return a > b
-            }.first ?? lastSessionFileURL
+            }.first
     }
 
     func latestDiagnosticReportURL(apkName: String) -> URL? {
@@ -124,6 +125,7 @@ final class StrideDiagnostics: ObservableObject {
         resetStoredDiagnosticsForLatestSession()
         sessionIsActive = true
         currentAPK = apkName
+        lastSessionAPKName = apkName
         issueCount = 0
         sequence = 0
         pendingSession.removeAll(keepingCapacity: true)
@@ -199,6 +201,7 @@ final class StrideDiagnostics: ObservableObject {
                "Session ended: \(status); collected \(issueCount) error(s)")
         flush()
         lastSessionFileURL = sessionFileURL ?? lastSessionFileURL
+        lastSessionAPKName = currentAPK ?? lastSessionAPKName
         try? sessionHandle?.close()
         sessionHandle = nil
         sessionFileURL = nil
@@ -257,7 +260,9 @@ final class StrideDiagnostics: ObservableObject {
             // events, while rawLog carries the screen's launch output and final Rust snapshot.
             // Previously, a readable session file caused rawLog to be discarded, silently
             // omitting the guest runtime evidence from otherwise "complete" reports.
-            let persistedSessionLog = (sessionFileURL ?? lastSessionFileURL)
+            let matchingSessionURL = currentAPK == apkName || lastSessionAPKName == apkName
+                ? (sessionFileURL ?? lastSessionFileURL) : nil
+            let persistedSessionLog = matchingSessionURL
                 .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
             let suppliedSessionLog = rawLog.trimmingCharacters(in: .whitespacesAndNewlines)
             let combinedSessionLog: String
@@ -518,6 +523,7 @@ final class StrideDiagnostics: ObservableObject {
             lastSessionFileURL = URL(fileURLWithPath: sessionPath)
         }
         currentAPK = apk
+        lastSessionAPKName = apk
 
         let warning = "Previous session did not write a clean end marker (APK: \(apk), started: \(started)). Cause is unknown; this is not proof of a crash or jetsam."
         record(.warning, stage: "SESSION", code: "POSSIBLE_PREVIOUS_RUN_TERMINATION", warning)
