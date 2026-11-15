@@ -331,8 +331,11 @@ pub fn validate_register_operands(
             0x0b | 0x16 | 0x17 | 0x18 => check_wide(a8)?,
             // aget-wide / aput-wide: A is the wide value register.
             0x45 | 0x4c => check_wide(a8)?,
-            // iget-wide / iput-wide and sget-wide / sput-wide.
-            0x53 | 0x5a | 0x61 | 0x68 => check_wide(a4)?,
+            // iget-wide / iput-wide use 22c (A is a nibble); sget-wide /
+            // sput-wide use 21c (A is a byte). Do not truncate the latter
+            // to four bits: Kotlin-generated methods commonly use v16+.
+            0x53 | 0x5a => check_wide(a4)?,
+            0x61 | 0x68 => check_wide(a8)?,
             // Unary wide operations/conversions (12x).
             0x7d | 0x7e | 0x80 => { check_wide(a4)?; check_wide(b4)?; }
             0x81 | 0x83 | 0x88 | 0x89 => check_wide(a4)?,
@@ -480,6 +483,14 @@ mod decoder_tests {
   // add-long uses wide A/B/C operands.
   assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),3),Err(DecodeError::InvalidRegister));
   assert_eq!(validate_register_operands(&words(&[0x009b,0x0201,0x000e]),4),Ok(()));
+ }
+ #[test] fn validates_wide_static_field_registers_using_21c_byte_operand(){
+  // sget-wide v16, field@0: A is the full byte register index, not a nibble.
+  assert_eq!(validate_register_operands(&words(&[0x1061,0,0x000e]),18),Ok(()));
+  // The wide pair v17/v18 exceeds an 18-register frame.
+  assert_eq!(validate_register_operands(&words(&[0x1161,0,0x000e]),18),Err(DecodeError::InvalidRegister));
+  // sput-wide has the same 21c register layout.
+  assert_eq!(validate_register_operands(&words(&[0x1068,0,0x000e]),18),Ok(()));
  }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
