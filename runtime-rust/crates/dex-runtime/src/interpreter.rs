@@ -1377,6 +1377,29 @@ impl<'a> ArtVm<'a> {
                     if native_handler.is_none() {
                         native_handler = self.jni.find_unique_framework_signature(target_name, target_proto).cloned();
                     }
+                    // java.lang.Object.<init>()V is a VM intrinsic: every Java
+                    // object ultimately invokes it, but it has no DEX body or JNI
+                    // implementation. Resolve this exact boot method as a no-op.
+                    // Keep the signature exact; do not turn arbitrary unresolved
+                    // constructors into successful calls.
+                    if target_method.is_none()
+                        && target_class == "Ljava/lang/Object;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic Object.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     if target_method.is_none() {
                         if let Some(handler) = native_handler {
                             let mut env = crate::jni::JniEnv::new(self.heap);
