@@ -49,23 +49,6 @@ struct ContentView: View {
                 Spacer(minLength: 12)
                 tabBar
             }
-            .overlay(alignment: .bottomTrailing) {
-                if !isImporting {
-                    Button { showingImporter = true } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 21, weight: .bold))
-                            .foregroundStyle(Color.black)
-                            .frame(width: 58, height: 58)
-                            .background(accent, in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 1))
-                            .shadow(color: .black.opacity(0.30), radius: 12, y: 5)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Import Android Package")
-                    .padding(.trailing, 19)
-                    .padding(.bottom, 82)
-                }
-            }
         }
         .confirmationDialog("Delete this app from Stride?", isPresented: Binding(
             get: { pendingDelete != nil },
@@ -200,6 +183,11 @@ struct ContentView: View {
             }
             .padding(.horizontal, 20)
         }
+        .background(LinearGradient(
+                colors: [Color(red: 0.12, green: 0.10, blue: 0.15), Color(red: 0.055, green: 0.055, blue: 0.075), .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea())
     }
 
     private var libraryView: some View {
@@ -257,6 +245,11 @@ struct ContentView: View {
             .padding(.top, 9)
             .padding(.bottom, 24)
         }
+        .background(LinearGradient(
+                colors: [Color(red: 0.12, green: 0.10, blue: 0.15), Color(red: 0.055, green: 0.055, blue: 0.075), .black],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ).ignoresSafeArea())
     }
 
     private var homeEmptyState: some View {
