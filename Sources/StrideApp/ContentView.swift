@@ -17,10 +17,10 @@ struct ContentView: View {
 
     private var background: Color { .black }
     private var panel: Color { .black }
-    private var raised: Color { Color(red: 0.075, green: 0.055, blue: 0.115) }
+    private var raised: Color { Color(red: 0.085, green: 0.085, blue: 0.10) }
     private var accent: Color { Color(hex: accentColorHex) ?? Color(red: 0.68, green: 0.25, blue: 0.98) }
     private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
-    private var line: Color { accent.opacity(0.24) }
+    private var line: Color { Color.white.opacity(0.10) }
 
     var body: some View {
         ZStack {
@@ -82,17 +82,35 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Text("Stride").font(.system(size: 35, weight: .black, design: .rounded)).italic().tracking(-1.5)
-                .foregroundStyle(LinearGradient(colors: [.white, accent], startPoint: .top, endPoint: .bottom))
-                .shadow(color: accent.opacity(0.42), radius: 12, y: 2)
+        HStack(alignment: .center, spacing: 14) {
+            Text("Stride")
+                .font(.system(size: 37, weight: .heavy, design: .default))
+                .italic()
+                .tracking(-2.2)
+                .foregroundStyle(Color.white)
             Spacer()
-            if isImporting { ProgressView().tint(accent).frame(width: 42, height: 42) }
-            else {
+            if isImporting {
+                ProgressView().tint(accent).frame(width: 38, height: 38)
+            } else {
                 headerIcon("magnifyingglass", label: "Search games") { selectedTab = 1 }
-                headerIcon("gearshape.fill", label: "Settings") { selectedTab = 2 }
+                headerIcon("gearshape", label: "Settings") { selectedTab = 2 }
             }
-        }.padding(.horizontal, 22).padding(.top, 12).padding(.bottom, 14)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 10)
+        .padding(.bottom, 12)
+    }
+
+    private func headerIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(.white)
+                .frame(width: 42, height: 42)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     private func headerIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
@@ -129,72 +147,98 @@ struct ContentView: View {
 
     private var featuredCard: some View {
         ZStack(alignment: .leading) {
-            RoundedRectangle(cornerRadius: 24).fill(LinearGradient(colors: [Color(red: 0.20, green: 0.08, blue: 0.34), Color(red: 0.035, green: 0.025, blue: 0.09), .black], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Circle().fill(accent.opacity(0.24)).frame(width: 190, height: 190).blur(radius: 38).offset(x: 145, y: -28)
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Color(red: 0.075, green: 0.075, blue: 0.09))
             if let featured = recentlyPlayedPackages.first ?? library.packages.first {
                 HStack(spacing: 14) {
                     VStack(alignment: .leading, spacing: 9) {
-                        Text("FEATURED GAME").font(.system(size: 9, weight: .heavy)).tracking(1.8).foregroundStyle(accent)
-                        Text(featured.displayName).font(.system(size: 23, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
-                        Text(recentlyPlayedPackages.isEmpty ? "Ready in your library" : "Recently played").font(.system(size: 11)).foregroundStyle(.white.opacity(0.7))
+                        Text("FEATURED GAME")
+                            .font(.system(size: 9, weight: .heavy)).tracking(1.5)
+                            .foregroundStyle(accent)
+                        Text(featured.displayName)
+                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white).lineLimit(2)
+                        Text(recentlyPlayedPackages.isEmpty ? "Ready in your library" : "Recently played")
+                            .font(.system(size: 11)).foregroundStyle(.white.opacity(0.65))
                         Button { selectedPackage = featured } label: {
-                            Text("View Game").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                                .padding(.horizontal, 14).padding(.vertical, 9).background(accent.opacity(0.82), in: Capsule())
+                            Text("View Game").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 9)
+                                .background(accent, in: Capsule())
                         }.buttonStyle(.plain)
                     }
                     Spacer(minLength: 0)
-                    APKIconView(data: featured.iconData, accent: accent, size: 108)
-                        .clipShape(RoundedRectangle(cornerRadius: 22)).shadow(color: accent.opacity(0.32), radius: 18)
+                    APKIconView(data: featured.iconData, accent: accent, size: 104)
                 }.padding(18)
             } else {
                 VStack(alignment: .leading, spacing: 9) {
-                    Text("WELCOME TO STRIDE").font(.system(size: 9, weight: .heavy)).tracking(1.8).foregroundStyle(accent)
-                    Text("Your games.\nOne library.").font(.system(size: 27, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                    Text("Import an Android package to get started.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.72))
+                    Text("WELCOME TO STRIDE")
+                        .font(.system(size: 9, weight: .heavy)).tracking(1.5).foregroundStyle(accent)
+                    Text("Your games.\nOne library.")
+                        .font(.system(size: 27, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Text("Import an Android package to get started.")
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.68))
                     Button { showingImporter = true } label: {
-                        Label("Import your first game", systemImage: "plus").font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.white).padding(.horizontal, 13).padding(.vertical, 9).background(accent.opacity(0.82), in: Capsule())
+                        Label("Import your first game", systemImage: "plus")
+                            .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 13).padding(.vertical, 9).background(accent, in: Capsule())
                     }.buttonStyle(.plain)
                 }.padding(20)
             }
-        }.frame(height: 205).clipShape(RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).stroke(accent.opacity(0.55), lineWidth: 1))
-            .shadow(color: accent.opacity(0.12), radius: 16, y: 5)
+        }
+        .frame(height: 198)
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.white.opacity(0.08), lineWidth: 1))
     }
 
     private var gamingBackdrop: some View {
-        ZStack {
-            Color(red: 0.012, green: 0.008, blue: 0.028)
-            LinearGradient(colors: [Color(red: 0.12, green: 0.035, blue: 0.20).opacity(0.58), .clear, Color(red: 0.08, green: 0.025, blue: 0.17).opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
-        }.ignoresSafeArea()
+        Color(red: 0.018, green: 0.018, blue: 0.026).ignoresSafeArea()
     }
 
     private var libraryView: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 12) {
-                    RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 6, height: 42).shadow(color: accent.opacity(0.8), radius: 8)
-                    Text("Library").font(.system(size: 32, weight: .bold, design: .rounded)).italic().foregroundStyle(.white)
+                    Text("Library")
+                        .font(.system(size: 31, weight: .bold, design: .rounded))
+                        .italic().foregroundStyle(.white)
                     Spacer()
-                }.padding(.top, 12)
+                    Button { showingImporter = true } label: {
+                        Label("Import", systemImage: "plus")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14).padding(.vertical, 10)
+                            .background(accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isImporting)
+                }
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(muted)
-                    TextField("Search your games...", text: $searchText).font(.system(size: 14)).tint(accent).autocorrectionDisabled()
+                    TextField("Search your games...", text: $searchText)
+                        .font(.system(size: 14)).tint(accent).autocorrectionDisabled()
                     if !searchText.isEmpty {
-                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(muted) }.buttonStyle(.plain)
+                        Button { searchText = "" } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
+                        }.buttonStyle(.plain)
                     }
-                }.padding(.horizontal, 15).frame(height: 46).background(Color.white.opacity(0.055), in: Capsule())
-                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 1))
+                }
+                .padding(.horizontal, 15).frame(height: 46)
+                .background(Color.white.opacity(0.055), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.10), lineWidth: 1))
                 HStack {
-                    Text("YOUR GAMES").font(.system(size: 10, weight: .heavy)).tracking(1.5).foregroundStyle(muted)
+                    Text("YOUR GAMES").font(.system(size: 10, weight: .heavy)).tracking(1.4).foregroundStyle(muted)
                     Spacer()
-                    Text("\(filteredPackages.count) GAMES").font(.system(size: 10, weight: .bold)).foregroundStyle(accent)
+                    Text("\(filteredPackages.count) GAMES").font(.system(size: 10, weight: .bold)).foregroundStyle(muted)
                 }
                 if filteredPackages.isEmpty {
                     if library.packages.isEmpty { emptyState } else { homeEmptyState }
                 } else { appIconGrid(filteredPackages) }
-            }.padding(.horizontal, 20).padding(.bottom, 28)
-        }.background(gamingBackdrop)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 28)
+        }
+        .background(gamingBackdrop)
     }
 
     private var moreView: some View {
@@ -222,7 +266,7 @@ struct ContentView: View {
                 Spacer()
                 Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(muted)
             }.padding(13).background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 17))
-                .overlay(RoundedRectangle(cornerRadius: 17).stroke(accent.opacity(0.18), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 17).stroke(Color.white.opacity(0.08), lineWidth: 1))
         }.buttonStyle(.plain)
     }
 
@@ -278,7 +322,7 @@ struct ContentView: View {
     }
 
     private func appIconGrid(_ items: [ImportedAPK]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 3), alignment: .center, spacing: 22) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), alignment: .center, spacing: 20) {
             ForEach(items) { item in packageButton(item) }
         }
     }
@@ -464,11 +508,12 @@ struct ContentView: View {
         HStack(spacing: 0) {
             tab("house.fill", title: "Home", index: 0)
             tab("square.grid.2x2.fill", title: "Library", index: 1)
-            tab("gearshape.fill", title: "Settings", index: 2)
+            tab("gearshape", title: "Settings", index: 2)
             tab("ellipsis", title: "More", index: 3)
-        }.padding(.top, 9).padding(.bottom, 5)
-            .background(Color(red: 0.025, green: 0.012, blue: 0.045))
-            .overlay(alignment: .top) { Rectangle().fill(accent.opacity(0.36)).frame(height: 1) }
+        }
+        .padding(.top, 8).padding(.bottom, 5)
+        .background(Color(red: 0.025, green: 0.025, blue: 0.035))
+        .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1) }
     }
 
     private func tab(_ symbol: String, title: String, index: Int) -> some View {
@@ -662,17 +707,16 @@ private struct APKGridCard: View {
     let accent: Color
 
     var body: some View {
-        VStack(spacing: 7) {
-            APKIconView(data: item.iconData, accent: accent, size: 64)
-                .frame(width: 64, height: 64)
-                .shadow(color: .black.opacity(0.24), radius: 5, y: 3)
+        VStack(spacing: 8) {
+            APKIconView(data: item.iconData, accent: accent, size: 84)
+                .frame(width: 84, height: 84)
             Text(item.displayName)
-                .font(.system(size: 10.5, weight: .medium))
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-                .frame(height: 27, alignment: .top)
+                .frame(minHeight: 30, alignment: .top)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
