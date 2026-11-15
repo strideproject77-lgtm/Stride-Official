@@ -1554,7 +1554,15 @@ impl<'a> ArtVm<'a> {
                                 let value = args.get(2).copied().ok_or_else(|| "Missing HashMap value argument".to_string())?;
                                 let field = field_name.as_deref().ok_or_else(|| "Missing HashMap key field".to_string())?;
                                 let existed = self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
-                                if !existed || target_name == "put" {
+                                // Map.putIfAbsent treats a present null mapping as absent.
+                                // Keep containsKey semantics separate: the key remains present,
+                                // and replacing its null value must not increase the map size.
+                                let should_write = match target_name {
+                                    "put" => true,
+                                    "putIfAbsent" => !existed || previous == Value::Object(0),
+                                    _ => false,
+                                };
+                                if should_write {
                                     self.heap.set_instance_field(receiver, field, value).map_err(|e| format!("{:?}", e))?;
                                 }
                                 if !existed {
@@ -2749,6 +2757,18 @@ mod tests {
         assert_eq!(ignored_insert.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let still_original = vm.execute_method(2, &[Value::Object(map), Value::Object(key)], 32).unwrap();
         assert_eq!(still_original.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+
+        // A key explicitly mapped to null is present, but putIfAbsent must replace it.
+        let null_key = heap.allocate_instance("Ltest/NullValueKey;").unwrap();
+        let put_null = vm.execute_method(1, &[Value::Object(map), Value::Object(null_key), Value::Object(0)], 32).unwrap();
+        assert_eq!(put_null.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
+        let replace_null = vm.execute_method(6, &[Value::Object(map), Value::Object(null_key), Value::Object(value)], 32).unwrap();
+        assert_eq!(replace_null.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
+        let replaced_value = vm.execute_method(2, &[Value::Object(map), Value::Object(null_key)], 32).unwrap();
+        assert_eq!(replaced_value.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let size_with_null_key = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
+        assert_eq!(size_with_null_key.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(2)));
+
         let removed = vm.execute_method(5, &[Value::Object(map), Value::Object(key)], 32).unwrap();
         assert_eq!(removed.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let size_after = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
