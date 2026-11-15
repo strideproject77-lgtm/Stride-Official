@@ -1452,3 +1452,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - No signing, no merge to `main`; changes remain on `feat/dex-class-method-loader`.
 
 - Validation retry trigger: the corrected source and handoff are now committed; the authorized unsigned IPA workflow is being started from this exact branch head after the regression fixture correction.
+
+
+### 2026-11-15 — Phase 43 long-shift validator dispatch fix
+
+- Run #860 still failed in `validates_long_shift_2addr_with_narrow_shift_distance`, despite correcting the test fixture. Inspection of the actual failure showed the underlying production dispatch bug: the generic 12x opcode arm `0xb0..=0xcf` matched `0xc3..=0xc5` first, so the later wide-A/narrow-B long-shift arm was unreachable.
+- Narrowed the generic 12x arm to `0xb0..=0xc2 | 0xc6..=0xcf`, allowing `0xc3..=0xc5` to reach their dedicated wide-A + narrow-int-B validation branch.
+- Kept the corrected regression fixture (`0x30c3`) to prove that B=v3 is rejected in a three-register frame; valid shifts and invalid wide A pairs remain covered.
+- Commit: `e9c31113d7de0ab989e0a88156773d1d0818b85e`; test fixture commit: `f5cd360824b8639ec4c8547a6cd96d0e0ec4993c`.
+- Extra bug fix: this corrects the validator's opcode-dispatch precedence, not merely the test, so valid Kotlin long-shift methods can now reach the intended narrow-distance checks.
+- Remaining: one consolidated Rust test + iOS compile + authorized unsigned IPA run; verify the resulting IPA artifact and then device-test 2048. Phase 43 remains open. No signing and no merge to `main`.
