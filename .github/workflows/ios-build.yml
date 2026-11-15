@@ -95,8 +95,17 @@ jobs:
         run: |
           set -euo pipefail
           swift Scripts/generate-app-icon.swift
-          test -s Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
-          sips -g pixelWidth -g pixelHeight Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png
+          ICON="Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png"
+          CONTENTS="Assets.xcassets/AppIcon.appiconset/Contents.json"
+          test -s "$ICON"
+          test -s "$CONTENTS"
+          plutil -lint -s -r "$CONTENTS" >/dev/null 2>&1 || python3 -m json.tool "$CONTENTS" >/dev/null
+          WIDTH=$(sips -g pixelWidth "$ICON" | awk '/pixelWidth/ {print $2}')
+          HEIGHT=$(sips -g pixelHeight "$ICON" | awk '/pixelHeight/ {print $2}')
+          test "$WIDTH" = "1024"
+          test "$HEIGHT" = "1024"
+          file "$ICON"
+          echo "Verified app icon: ${WIDTH}x${HEIGHT}";
 
       - name: Generate Xcode project
         run: |
