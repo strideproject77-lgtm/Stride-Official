@@ -1147,22 +1147,29 @@ private struct APKDetailSheet: View {
                     if let res = executionResult {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(accent)
-                                Text("Runtime report").font(.system(size: 13, weight: .bold))
+                                Image(systemName: res.statusCode == 0 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(res.statusCode == 0 ? accent : .red)
+                                Text(res.statusCode == 0 ? "Runtime report" : "Startup blocked")
+                                    .font(.system(size: 13, weight: .bold))
                             }
-                            Text("Launch result: \(res.statusCode == 0 ? "Lifecycle reached" : "Finished") · Lifecycle: \(res.lifecycleState)")
+                            Text("Launch result: \(res.statusCode == 0 ? "Lifecycle reached" : "Lifecycle incomplete") · State: \(res.lifecycleState)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)
                             Text("Classes: \(res.totalClassesLoaded) · Instructions: \(res.instructionsExecuted) · Missing APIs: \(res.missingApisCount)")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)
+                            if res.instructionsExecuted == 0 {
+                                Text("No guest bytecode executed. Open Session Logs to inspect the first unresolved framework call.")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(res.statusCode == 0 ? muted : .red.opacity(0.9))
+                            }
                             Text("Performance: \(String(format: "%.1f", res.averageFps)) FPS · RAM: \(res.heapAllocatedBytes / 1024) KB")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)
                         }
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
+                        .background((res.statusCode == 0 ? accent : Color.red).opacity(0.09), in: RoundedRectangle(cornerRadius: 14))
                     } else if let err = executionError {
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {

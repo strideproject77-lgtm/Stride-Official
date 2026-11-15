@@ -1441,6 +1441,32 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // ArrayList's no-argument constructor starts with an empty,
+                    // lazily-grown backing store. Managed indexed fields are used until
+                    // a later runtime phase needs an array-backed implementation.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/ArrayList;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for ArrayList.<init>()V at PC {}: {:?}", pc, error
+                                ))?;
+                                self.heap.set_instance_field(*receiver, "__stride_arraylist_size", Value::Int(0))
+                                    .map_err(|error| format!("ArrayList size initialization failed: {:?}", error))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic ArrayList.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     // java.util.HashMap's no-argument constructor initializes its
                     // default load factor and leaves the backing table lazy. This is
                     // sufficient for construction only; map operations are implemented
@@ -1591,6 +1617,151 @@ impl<'a> ArtVm<'a> {
                                 }
                                 self.heap.set_instance_field(receiver, size_field, Value::Int(0))
                                     .map_err(|e| format!("{:?}", e))?;
+                                pending_result = None;
+                            }
+                            _ => unreachable!(),
+                        }
+                        pc += 3;
+                        continue;
+                    }
+
+                    // Managed ArrayList subset used by AndroidX lifecycle state
+                    // stacks. Entries are indexed by position and shifted/compacted
+                    // on insertion/removal; all signatures are exact and bounds-checked.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/ArrayList;"
+                        && matches!(
+                            (target_name, target_proto),
+                            ("add", "(Ljava/lang/Object;)Z")
+                                | ("add", "(ILjava/lang/Object;)V")
+                                | ("get", "(I)Ljava/lang/Object;")
+                                | ("set", "(ILjava/lang/Object;)Ljava/lang/Object;")
+                                | ("remove", "(I)Ljava/lang/Object;")
+                                | ("remove", "(Ljava/lang/Object;)Z")
+                                | ("contains", "(Ljava/lang/Object;)Z")
+                                | ("size", "()I")
+                                | ("isEmpty", "()Z")
+                                | ("clear", "()V")
+                        )
+                    {
+                        let receiver = match args.first() {
+                            Some(Value::Object(id)) if *id != 0 => *id,
+                            _ => return Err(format!("Invalid null receiver for ArrayList.{}{} at PC {}", target_name, target_proto, pc)),
+                        };
+                        self.heap.get(receiver).map_err(|error| format!(
+                            "Invalid ArrayList receiver for {}{} at PC {}: {:?}", target_name, target_proto, pc, error
+                        ))?;
+                        let prefix = "__stride_arraylist_entry_";
+                        let size_field = "__stride_arraylist_size";
+                        let size = match self.heap.get_instance_field(receiver, size_field)
+                            .map_err(|e| format!("ArrayList size read failed: {:?}", e))? {
+                            Value::Int(n) if n >= 0 => n as usize,
+                            _ => 0,
+                        };
+                        let read_at = |heap: &crate::heap::ManagedHeap, index: usize| -> Result<Value, String> {
+                            heap.get_instance_field(receiver, &format!("{}{}", prefix, index))
+                                .map_err(|e| format!("ArrayList entry read failed: {:?}", e))
+                        };
+                        let write_at = |heap: &mut crate::heap::ManagedHeap, index: usize, value: Value| -> Result<(), String> {
+                            heap.set_instance_field(receiver, &format!("{}{}", prefix, index), value)
+                                .map_err(|e| format!("ArrayList entry write failed: {:?}", e))
+                        };
+                        match (target_name, target_proto) {
+                            ("add", "(Ljava/lang/Object;)Z") => {
+                                let value = *args.get(1).ok_or_else(|| "Missing ArrayList.add value".to_string())?;
+                                write_at(self.heap, size, value)?;
+                                self.heap.set_instance_field(receiver, size_field, Value::Int((size + 1) as i32))
+                                    .map_err(|e| format!("ArrayList size update failed: {:?}", e))?;
+                                pending_result = Some(Value::Int(1));
+                            }
+                            ("add", "(ILjava/lang/Object;)V") => {
+                                let index = match args.get(1) {
+                                    Some(Value::Int(i)) if *i >= 0 && (*i as usize) <= size => *i as usize,
+                                    Some(other) => return Err(format!("Invalid ArrayList insertion index {:?} at PC {}", other, pc)),
+                                    None => return Err("Missing ArrayList insertion index".into()),
+                                };
+                                let value = *args.get(2).ok_or_else(|| "Missing ArrayList insertion value".to_string())?;
+                                for position in (index..size).rev() {
+                                    let existing = read_at(self.heap, position)?;
+                                    write_at(self.heap, position + 1, existing)?;
+                                }
+                                write_at(self.heap, index, value)?;
+                                self.heap.set_instance_field(receiver, size_field, Value::Int((size + 1) as i32))
+                                    .map_err(|e| format!("ArrayList size update failed: {:?}", e))?;
+                                pending_result = None;
+                            }
+                            ("get", "(I)Ljava/lang/Object;") => {
+                                let index = match args.get(1) {
+                                    Some(Value::Int(i)) if *i >= 0 && (*i as usize) < size => *i as usize,
+                                    Some(other) => return Err(format!("ArrayList index out of bounds: {:?}, size={}", other, size)),
+                                    None => return Err("Missing ArrayList index".into()),
+                                };
+                                pending_result = Some(read_at(self.heap, index)?);
+                            }
+                            ("set", "(ILjava/lang/Object;)Ljava/lang/Object;") => {
+                                let index = match args.get(1) {
+                                    Some(Value::Int(i)) if *i >= 0 && (*i as usize) < size => *i as usize,
+                                    Some(other) => return Err(format!("ArrayList index out of bounds: {:?}, size={}", other, size)),
+                                    None => return Err("Missing ArrayList index".into()),
+                                };
+                                let value = *args.get(2).ok_or_else(|| "Missing ArrayList replacement value".to_string())?;
+                                let previous = read_at(self.heap, index)?;
+                                write_at(self.heap, index, value)?;
+                                pending_result = Some(previous);
+                            }
+                            ("remove", "(I)Ljava/lang/Object;") => {
+                                let index = match args.get(1) {
+                                    Some(Value::Int(i)) if *i >= 0 && (*i as usize) < size => *i as usize,
+                                    Some(other) => return Err(format!("ArrayList index out of bounds: {:?}, size={}", other, size)),
+                                    None => return Err("Missing ArrayList removal index".into()),
+                                };
+                                let removed = read_at(self.heap, index)?;
+                                for position in index..(size - 1) {
+                                    let next = read_at(self.heap, position + 1)?;
+                                    write_at(self.heap, position, next)?;
+                                }
+                                self.heap.remove_instance_field(receiver, &format!("{}{}", prefix, size - 1))
+                                    .map_err(|e| format!("ArrayList tail removal failed: {:?}", e))?;
+                                self.heap.set_instance_field(receiver, size_field, Value::Int((size - 1) as i32))
+                                    .map_err(|e| format!("ArrayList size update failed: {:?}", e))?;
+                                pending_result = Some(removed);
+                            }
+                            ("remove", "(Ljava/lang/Object;)Z") | ("contains", "(Ljava/lang/Object;)Z") => {
+                                let needle = *args.get(1).ok_or_else(|| "Missing ArrayList object argument".to_string())?;
+                                let mut found = None;
+                                for index in 0..size {
+                                    if read_at(self.heap, index)? == needle {
+                                        found = Some(index);
+                                        break;
+                                    }
+                                }
+                                if target_name == "contains" {
+                                    pending_result = Some(Value::Int(i32::from(found.is_some())));
+                                } else if let Some(index) = found {
+                                    for position in index..(size - 1) {
+                                        let next = read_at(self.heap, position + 1)?;
+                                        write_at(self.heap, position, next)?;
+                                    }
+                                    self.heap.remove_instance_field(receiver, &format!("{}{}", prefix, size - 1))
+                                        .map_err(|e| format!("ArrayList tail removal failed: {:?}", e))?;
+                                    self.heap.set_instance_field(receiver, size_field, Value::Int((size - 1) as i32))
+                                        .map_err(|e| format!("ArrayList size update failed: {:?}", e))?;
+                                    pending_result = Some(Value::Int(1));
+                                } else {
+                                    pending_result = Some(Value::Int(0));
+                                }
+                            }
+                            ("size", "()I") => pending_result = Some(Value::Int(size as i32)),
+                            ("isEmpty", "()Z") => pending_result = Some(Value::Int(i32::from(size == 0))),
+                            ("clear", "()V") => {
+                                let fields = self.heap.instance_field_names(receiver)
+                                    .map_err(|e| format!("ArrayList field enumeration failed: {:?}", e))?;
+                                for field in fields.into_iter().filter(|name| name.starts_with(prefix)) {
+                                    self.heap.remove_instance_field(receiver, &field)
+                                        .map_err(|e| format!("ArrayList entry clear failed: {:?}", e))?;
+                                }
+                                self.heap.set_instance_field(receiver, size_field, Value::Int(0))
+                                    .map_err(|e| format!("ArrayList size reset failed: {:?}", e))?;
                                 pending_result = None;
                             }
                             _ => unreachable!(),
@@ -2788,6 +2959,79 @@ mod tests {
         assert_eq!(removed_new_key.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let size_after = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
         assert_eq!(size_after.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(0)));
+    }
+
+    #[test]
+    fn array_list_intrinsics_support_lifecycle_state_stack_operations() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let list = heap.allocate_instance("Ljava/util/ArrayList;").unwrap();
+        let first = heap.allocate_instance("Ltest/FirstState;").unwrap();
+        let second = heap.allocate_instance("Ltest/SecondState;").unwrap();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/ArrayListCaller;".into(), name: "construct".into(),
+                prototype: "(Ljava/util/ArrayList;)V".into(),
+                code_units: vec![0x106e, 0x0000, 0x0000, 0x000e],
+                registers_size: 1, ins_size: 1, try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/ArrayListCaller;".into(), name: "add".into(),
+                prototype: "(Ljava/util/ArrayList;Ljava/lang/Object;)Z".into(),
+                code_units: vec![0x206e, 0x0001, 0x0021, 0x000a, 0x000f],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (3u32, MethodCode {
+                class_descriptor: "Ltest/ArrayListCaller;".into(), name: "get".into(),
+                prototype: "(Ljava/util/ArrayList;I)Ljava/lang/Object;".into(),
+                code_units: vec![0x206e, 0x0002, 0x0021, 0x000c, 0x0011],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (4u32, MethodCode {
+                class_descriptor: "Ltest/ArrayListCaller;".into(), name: "remove".into(),
+                prototype: "(Ljava/util/ArrayList;I)Ljava/lang/Object;".into(),
+                code_units: vec![0x206e, 0x0003, 0x0021, 0x000c, 0x0011],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (5u32, MethodCode {
+                class_descriptor: "Ltest/ArrayListCaller;".into(), name: "size".into(),
+                prototype: "(Ljava/util/ArrayList;)I".into(),
+                code_units: vec![0x106e, 0x0004, 0x0001, 0x000a, 0x000f],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+        ]);
+        let references = vec![
+            MethodReference { method_index: 0, class_descriptor: "Ljava/util/ArrayList;".into(), name: "<init>".into(), prototype: "()V".into() },
+            MethodReference { method_index: 1, class_descriptor: "Ljava/util/ArrayList;".into(), name: "add".into(), prototype: "(Ljava/lang/Object;)Z".into() },
+            MethodReference { method_index: 2, class_descriptor: "Ljava/util/ArrayList;".into(), name: "get".into(), prototype: "(I)Ljava/lang/Object;".into() },
+            MethodReference { method_index: 3, class_descriptor: "Ljava/util/ArrayList;".into(), name: "remove".into(), prototype: "(I)Ljava/lang/Object;".into() },
+            MethodReference { method_index: 4, class_descriptor: "Ljava/util/ArrayList;".into(), name: "size".into(), prototype: "()I".into() },
+        ];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let constructed = vm.execute_method(1, &[Value::Object(list)], 16).unwrap();
+        assert_eq!(constructed.stop_reason, ExecutionStopReason::ReturnedVoid);
+        let empty_size = vm.execute_method(5, &[Value::Object(list)], 16).unwrap();
+        assert_eq!(empty_size.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(0)));
+        let added_first = vm.execute_method(2, &[Value::Object(list), Value::Object(first)], 16).unwrap();
+        assert_eq!(added_first.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
+        let added_second = vm.execute_method(2, &[Value::Object(list), Value::Object(second)], 16).unwrap();
+        assert_eq!(added_second.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
+        let fetched_second = vm.execute_method(3, &[Value::Object(list), Value::Int(1)], 16).unwrap();
+        assert_eq!(fetched_second.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(second)));
+        let removed_first = vm.execute_method(4, &[Value::Object(list), Value::Int(0)], 16).unwrap();
+        assert_eq!(removed_first.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(first)));
+        let shifted_second = vm.execute_method(3, &[Value::Object(list), Value::Int(0)], 16).unwrap();
+        assert_eq!(shifted_second.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(second)));
+        let final_size = vm.execute_method(5, &[Value::Object(list)], 16).unwrap();
+        assert_eq!(final_size.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
     }
 
     #[test]

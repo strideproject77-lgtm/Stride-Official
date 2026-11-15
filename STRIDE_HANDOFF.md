@@ -498,6 +498,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 46 | Managed HashMap get/put/remove/contains/size compatibility subset for observer maps | Completed — consolidated CI validated; device retest pending |
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
+| 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — implementation committed; consolidated validation pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1641,3 +1642,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - Artifact: `Stride-unsigned-IPA-906`, artifact ID `14157907858`, SHA-256 of IPA `d5cb793fd699e54291679431358a2bbb54ccc520a8996a6d9e2c8940d756f15c`. The artifact ZIP was downloaded and inspected; the IPA archive passed `unzip -t` and contains `Payload/Stride.app/Info.plist` and `Payload/Stride.app/Stride`.
 - Signing was disabled. No certificate, provisioning profile, or signing step was used. No merge was performed; `main` remains untouched.
 - Phases 45, 46, 47, and 48 are **Completed** for their stated implementation + CI validation scope. Remaining work is real-device verification: install this unsigned build using the user's normal signing/sideload path, rerun 2048 v1.7.0, and inspect the next exact AndroidX/framework blocker. Do not claim 2048 gameplay works until the app reaches a real first frame and interactive play on-device.
+
+
+### 2026-11-15 — Phase 49: AndroidX lifecycle ArrayList compatibility + startup diagnostics UI
+
+- Reviewed the latest 2048 v1.7.0 session log exported at 15:44. The previous `HashMap` blocker is no longer present. Package/split verification, resource decode, and DEX load still succeed; the first unresolved call is exactly `Ljava/util/ArrayList;-><init>()V`, called by `androidx.lifecycle.LifecycleRegistry.<init>(LifecycleOwner, boolean)` at PC 18. Activity construction fails before any guest instruction executes.
+- Added a signature-exact managed `ArrayList.<init>()V` intrinsic with non-null managed receiver validation and initialized empty-list bookkeeping.
+- Added a managed indexed ArrayList compatibility subset for lifecycle state stacks: `add(Object)`, `add(index,Object)`, `get(index)`, `set(index,Object)`, `remove(index)`, `remove(Object)`, `contains(Object)`, `size()`, `isEmpty()`, and `clear()`. Indexed storage is held on the list's managed heap instance, with shifting/compaction on insertion/removal and explicit bounds checks. This is a targeted compatibility subset, not a claim of full Java ArrayList implementation or iterator support.
+- Added an interpreter regression fixture covering construction, append, indexed lookup, indexed removal/compaction, and size accounting.
+- UI extra: runtime result cards now distinguish a completed lifecycle from a blocked startup. A zero-instruction launch explicitly says no guest bytecode executed and directs the user to Session Logs, instead of displaying a green success-style report card for a failed startup.
+- Status: **In Progress — implementation committed; consolidated Rust workspace tests and iOS Release compile validation pending.** Do not mark Phase 49 Completed until the consolidated workflow passes. Device retest is also pending.
+- Next: run one consolidated workflow after this implementation batch; correct any failures; then request a fresh 2048 log and continue from the next exact unresolved framework call. Do not claim 2048 has started or reached gameplay until guest instructions, first rendered frame, and interaction are observed.
+- All changes remain on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge was requested in this phase.
