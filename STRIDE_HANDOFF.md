@@ -1450,3 +1450,5 @@ Status: UI implementation committed · consolidated validation and visual review
 - Commit: `f5cd360824b8639ec4c8547a6cd96d0e0ec4993c`.
 - Remaining: run the next single consolidated Rust + iOS compile validation and authorized unsigned IPA build. Do not claim 2048 compatibility until device retest succeeds; seven earlier method-layout warnings still need exact diagnostic evidence.
 - No signing, no merge to `main`; changes remain on `feat/dex-class-method-loader`.
+
+- Validation retry trigger: the corrected source and handoff are now committed; the authorized unsigned IPA workflow is being started from this exact branch head after the regression fixture correction.
