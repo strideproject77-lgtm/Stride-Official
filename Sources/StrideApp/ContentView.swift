@@ -6,6 +6,7 @@ struct ContentView: View {
     @EnvironmentObject private var library: APKLibraryStore
     @State private var showingImporter = false
     @State private var selectedPackage: ImportedAPK?
+    @State private var quickLaunchPackagePath: String?
     @State private var selectedTab = 0
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
@@ -41,8 +42,8 @@ struct ContentView: View {
                         moreView
                     }
                 }
-                .fullScreenCover(item: $selectedPackage) { item in
-                    APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted)
+                .fullScreenCover(item: $selectedPackage, onDismiss: { quickLaunchPackagePath = nil }) { item in
+                    APKDetailSheet(item: item, accent: accent, canvas: background, panel: panel, raised: raised, muted: muted, autoLaunchOnAppear: quickLaunchPackagePath == item.packageDirectoryURL.standardizedFileURL.path)
                         .interactiveDismissDisabled(true)
                 }
                 .fullScreenCover(isPresented: $showingAbout) {
@@ -601,6 +602,12 @@ struct ContentView: View {
         .accessibilityLabel(item.displayName)
         .accessibilityHint("Opens app details and launch controls")
         .contextMenu {
+            Button {
+                quickLaunchPackagePath = item.packageDirectoryURL.standardizedFileURL.path
+                selectedPackage = item
+            } label: {
+                Label("Launch", systemImage: "play.fill")
+            }
             Button(role: .destructive) {
                 pendingDelete = item
             } label: {
@@ -906,6 +913,7 @@ private struct APKDetailSheet: View {
     let panel: Color
     let raised: Color
     let muted: Color
+    var autoLaunchOnAppear: Bool = false
 
     private var packageSizeLabel: String {
         let manager = FileManager.default
@@ -1015,96 +1023,7 @@ private struct APKDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
 
-                    Button {
-                        showingExecutionScreen = true
-                        launchTask = Task {
-                            isExecuting = true
-                            executionError = nil
-                            frameScheduler?.stop()
-                            frameScheduler = nil
-                            guestTouchActive = false
-                            touchResponseMilliseconds = nil
-                            liveGuestFPS = nil
-                            lastGuestTouchDiagnostic = ""
-                            executionResult = nil
-                            sessionLogLines = []
-                            diagnostics.beginSession(apkName: item.displayName)
-                            logExportURL = diagnostics.currentSessionLogURL
-                            appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
-                            appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
-                            do {
-                                let backend = StrideArtExecutionBackend()
-                                let res = try await backend.launch(packageAt: item.fileURL) { line in
-                                    Task { @MainActor in appendSessionLog(line) }
-                                }
-                                guard !Task.isCancelled else {
-                                    res.session.close()
-                                    return
-                                }
-                                executionResult = res
-                                UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
-                                // Seed the guest surface before accepting the first gesture. The
-                                // touch mapper needs real framebuffer dimensions; waiting for the
-                                // first CADisplayLink tick can silently drop an immediate tap.
-                                if let initialFrame = res.session.copyFramebuffer() {
-                                    guestFramebufferData = initialFrame.data
-                                    guestFramebufferWidth = initialFrame.width
-                                    guestFramebufferHeight = initialFrame.height
-                                    appendSessionLog("[FRAMEBUFFER] Initial guest surface ready (\(initialFrame.width)x\(initialFrame.height))")
-                                } else {
-                                    appendSessionLog("[WARN] Initial guest framebuffer is not ready; input mapping will wait for the first guest surface")
-                                }
-                                appendSessionLog("[SESSION] APK screenOrientation=\(res.screenOrientation) recorded; iOS auto-rotation remains enabled")
-                                lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
-                                let scheduler = GuestFrameScheduler { _ in
-                                    let pump = res.session.pumpGuestEvents()
-                                    let guestFrames = res.session.guestFrameStats()
-                                    if let fps = guestFrames.fps {
-                                        liveGuestFPS = fps
-                                    }
-                                    if pump.status == 0 {
-                                        if pump.delivered > 0 {
-                                            appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
-                                            if let snapshot = res.session.diagnosticsSnapshot() {
-                                                let callbackLines = snapshot.components(separatedBy: .newlines).filter {
-                                                    $0.contains("ACTIVITY_TOUCH_CALLBACK_EXECUTED") ||
-                                                    $0.contains("GUEST_TOUCH_DISPATCH_FAILED")
-                                                }
-                                                if let latest = callbackLines.last, latest != lastGuestTouchDiagnostic {
-                                                    lastGuestTouchDiagnostic = latest
-                                                    appendSessionLog("[GUEST] \(latest)")
-                                                }
-                                            }
-                                        }
-                                        if let frame = res.session.copyFramebuffer() {
-                                            guestFramebufferData = frame.data
-                                            guestFramebufferWidth = frame.width
-                                            guestFramebufferHeight = frame.height
-                                            // Rust timestamps each queued event and reports the
-                                            // actual guest callback plus guest-render processing time.
-                                            if let measured = pump.touchMilliseconds {
-                                                touchResponseMilliseconds = Double(measured)
-                                            }
-                                        }
-                                    } else {
-                                        appendSessionLog("[ERROR] Guest input pump failed with status \(pump.status)")
-                                        frameScheduler?.stop()
-                                    }
-                                }
-                                frameScheduler = scheduler
-                                scheduler.start()
-                                appendSessionLog("[SESSION] Host display-link polls guest input and copies the framebuffer; FPS counts successful guest GL swaps only")
-                                appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
-                            } catch {
-                                guard !Task.isCancelled else { return }
-                                executionError = error.localizedDescription
-                                lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
-                                appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
-                                diagnostics.finishSession(status: "failed: \(error.localizedDescription)")
-                            }
-                            if !Task.isCancelled { isExecuting = false }
-                        }
-                    } label: {
+                    Button { startGame() } label: {
                         HStack(spacing: 9) {
                             if isExecuting {
                                 ProgressView().tint(.black)
@@ -1243,7 +1162,12 @@ private struct APKDetailSheet: View {
             }
             .preferredColorScheme(.dark)
         }
-        .onAppear(perform: loadPreviousSession)
+        .onAppear {
+            loadPreviousSession()
+            if autoLaunchOnAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { startGame() }
+            }
+        }
         .onDisappear {
             launchTask?.cancel()
             launchTask = nil
@@ -1398,7 +1322,98 @@ private struct APKDetailSheet: View {
         StrideOrientationController.shared.reset()
         diagnostics.finishSession(status: "runtime released by user")
         appendSessionLog("[SESSION] Runtime closed safely by user")
-        dismiss()
+        // Close only the execution cover; retain the app detail screen underneath.
+    }
+
+    private func startGame() {
+                        showingExecutionScreen = true
+                        launchTask = Task {
+                            isExecuting = true
+                            executionError = nil
+                            frameScheduler?.stop()
+                            frameScheduler = nil
+                            guestTouchActive = false
+                            touchResponseMilliseconds = nil
+                            liveGuestFPS = nil
+                            lastGuestTouchDiagnostic = ""
+                            executionResult = nil
+                            sessionLogLines = []
+                            diagnostics.beginSession(apkName: item.displayName)
+                            logExportURL = diagnostics.currentSessionLogURL
+                            appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
+                            appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
+                            do {
+                                let backend = StrideArtExecutionBackend()
+                                let res = try await backend.launch(packageAt: item.fileURL) { line in
+                                    Task { @MainActor in appendSessionLog(line) }
+                                }
+                                guard !Task.isCancelled else {
+                                    res.session.close()
+                                    return
+                                }
+                                executionResult = res
+                                UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
+                                // Seed the guest surface before accepting the first gesture. The
+                                // touch mapper needs real framebuffer dimensions; waiting for the
+                                // first CADisplayLink tick can silently drop an immediate tap.
+                                if let initialFrame = res.session.copyFramebuffer() {
+                                    guestFramebufferData = initialFrame.data
+                                    guestFramebufferWidth = initialFrame.width
+                                    guestFramebufferHeight = initialFrame.height
+                                    appendSessionLog("[FRAMEBUFFER] Initial guest surface ready (\(initialFrame.width)x\(initialFrame.height))")
+                                } else {
+                                    appendSessionLog("[WARN] Initial guest framebuffer is not ready; input mapping will wait for the first guest surface")
+                                }
+                                appendSessionLog("[SESSION] APK screenOrientation=\(res.screenOrientation) recorded; iOS auto-rotation remains enabled")
+                                lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                                let scheduler = GuestFrameScheduler { _ in
+                                    let pump = res.session.pumpGuestEvents()
+                                    let guestFrames = res.session.guestFrameStats()
+                                    if let fps = guestFrames.fps {
+                                        liveGuestFPS = fps
+                                    }
+                                    if pump.status == 0 {
+                                        if pump.delivered > 0 {
+                                            appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
+                                            if let snapshot = res.session.diagnosticsSnapshot() {
+                                                let callbackLines = snapshot.components(separatedBy: .newlines).filter {
+                                                    $0.contains("ACTIVITY_TOUCH_CALLBACK_EXECUTED") ||
+                                                    $0.contains("GUEST_TOUCH_DISPATCH_FAILED")
+                                                }
+                                                if let latest = callbackLines.last, latest != lastGuestTouchDiagnostic {
+                                                    lastGuestTouchDiagnostic = latest
+                                                    appendSessionLog("[GUEST] \(latest)")
+                                                }
+                                            }
+                                        }
+                                        if let frame = res.session.copyFramebuffer() {
+                                            guestFramebufferData = frame.data
+                                            guestFramebufferWidth = frame.width
+                                            guestFramebufferHeight = frame.height
+                                            // Rust timestamps each queued event and reports the
+                                            // actual guest callback plus guest-render processing time.
+                                            if let measured = pump.touchMilliseconds {
+                                                touchResponseMilliseconds = Double(measured)
+                                            }
+                                        }
+                                    } else {
+                                        appendSessionLog("[ERROR] Guest input pump failed with status \(pump.status)")
+                                        frameScheduler?.stop()
+                                    }
+                                }
+                                frameScheduler = scheduler
+                                scheduler.start()
+                                appendSessionLog("[SESSION] Host display-link polls guest input and copies the framebuffer; FPS counts successful guest GL swaps only")
+                                appendSessionLog("[SESSION] Tap Close to return to Stride and release runtime resources")
+                            } catch {
+                                guard !Task.isCancelled else { return }
+                                executionError = error.localizedDescription
+                                lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
+                                appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
+                                diagnostics.finishSession(status: "failed: \(error.localizedDescription)")
+                            }
+                            if !Task.isCancelled { isExecuting = false }
+                        }
     }
 
     private var executionStatusText: String {
