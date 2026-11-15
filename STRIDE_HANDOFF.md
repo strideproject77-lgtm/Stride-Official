@@ -1525,3 +1525,11 @@ Status: UI implementation committed · consolidated validation and visual review
 - The iOS build workflow already regenerates the icon from this script and validates the PNG exists, the asset catalog JSON parses, and the output dimensions are exactly 1024×1024 before Xcode compilation. The next workflow is the single consolidated verification pass.
 - 2048 remains a separate runtime task: the current WeakHashMap constructor intrinsic is only a minimal startup accommodation; full map operations and successful interactive gameplay are not yet verified. Do not claim 2048 is fully compatible based on the icon build.
 - All edits remain on `feat/dex-class-method-loader`; `main` is untouched. Build requested by user is unsigned only; no signing or export.
+
+
+### 2026-11-15 — Authorized unsigned build
+
+- User explicitly requested the build after the icon/runtime work discussion. Start the existing iOS workflow on this feature branch using its documented unsigned-IPA trigger.
+- The workflow regenerates the silver-S icon from `Scripts/generate-app-icon.swift`, checks the 1024x1024 asset and JSON, runs the full Rust test suite, compiles the iOS ARM64 app without code signing, verifies the bundle, and packages an unsigned IPA artifact.
+- Signing, distribution export, and changes to `main` remain disabled.
+- Runtime caveat: WeakHashMap constructor initialization is present, but backing-table/map semantics are still incomplete; 2048 compatibility is not established. The build validates compile/package health, not full game compatibility.
