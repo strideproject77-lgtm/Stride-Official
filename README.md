@@ -27,3 +27,16 @@ The Xcode project is generated from `project.yml` using XcodeGen. The GitHub Act
 ## Compatibility policy
 
 A feature is not implemented merely because its UI exists. Each runtime capability needs tests and device-level evidence. Unsupported Android formats, ABIs, bytecode, native libraries, and framework APIs must be reported honestly.
+
+## Copyright and permissions
+
+Stride is proprietary software. The repository is public for viewing, but public
+visibility does not grant a license to use, copy, modify, redistribute, or
+incorporate its code or assets into another project. All rights are reserved.
+Prior express written permission from the authorized Stride Project rights
+holder is required for any such use, except where applicable law provides
+non-waivable rights.
+
+See [LICENSE](LICENSE) for the full terms. Do not assume that forking,
+downloading, or viewing this repository grants permission to reuse its
+contents.
