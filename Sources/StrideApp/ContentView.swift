@@ -979,6 +979,7 @@ private struct APKDetailSheet: View {
     @State private var logExportURL: URL?
     @State private var diagnosticReportURL: URL?
     @State private var didFinalizeDiagnosticReport = false
+    @State private var hasStartedDiagnosticSession = false
     @State private var lastGuestDiagnosticLineCount = 0
     @State private var guestDiagnosticPollTicks = 0
     @State private var lastRunLabel = "No previous launch recorded"
@@ -1246,7 +1247,10 @@ private struct APKDetailSheet: View {
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(accent, in: Capsule())
-                        }.buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!hasStartedDiagnosticSession && diagnosticReportURL == nil)
+                        .opacity(!hasStartedDiagnosticSession && diagnosticReportURL == nil ? 0.45 : 1)
                         HStack(spacing: 12) {
                             Button { copySessionLog() } label: {
                                 Label("Copy Raw Log", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
@@ -1301,7 +1305,9 @@ private struct APKDetailSheet: View {
             let dismissalStatus = isExecuting
                 ? "view dismissed while launch was active"
                 : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user")
-            finalizeDiagnosticReport(status: dismissalStatus)
+            if hasStartedDiagnosticSession {
+                finalizeDiagnosticReport(status: dismissalStatus)
+            }
             touchResponseMilliseconds = nil
             liveGuestFPS = nil
             executionResult?.session.close()
@@ -1466,6 +1472,7 @@ private struct APKDetailSheet: View {
                             sessionLogLines = []
                             diagnosticReportURL = nil
                             didFinalizeDiagnosticReport = false
+                            hasStartedDiagnosticSession = true
                             lastGuestDiagnosticLineCount = 0
                             guestDiagnosticPollTicks = 0
                             diagnostics.beginSession(
@@ -1761,6 +1768,7 @@ private struct APKDetailSheet: View {
     }
 
     private func exportCompleteDiagnosticReport() {
+        guard hasStartedDiagnosticSession || diagnosticReportURL != nil else { return }
         let existingReport = isExecuting ? nil :
             (diagnosticReportURL ?? (didFinalizeDiagnosticReport
                 ? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) : nil))

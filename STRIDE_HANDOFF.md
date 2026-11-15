@@ -1758,3 +1758,9 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - Final metric capture is ordered before the execution view clears FPS, touch latency and framebuffer state. This ensures the report records the last observed values instead of zeroed UI state.
 - Exporting while a guest session is still active now refreshes the report snapshot instead of re-sharing a stale report from an earlier point in that session.
+
+
+### Phase 51 implementation review correction — empty detail views
+
+- Prevented closing an APK detail page without launching it from generating a misleading “runtime released” report.
+- The Complete Diagnostic Report action is available when that APK has a saved report or a session has actually started; a report cannot accidentally attach another APK's last session.
