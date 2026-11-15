@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phase 44 silver-violet-cyan icon build verification)
+Updated: 2026-11-15 (Phase 48 validation fixture correction and unsigned IPA pipeline)
 
 ## Goal
 
@@ -1617,3 +1617,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Status: implementation committed; Phase 48 is **In Progress**, not Completed. Consolidated Rust workspace validation and iOS compile validation have not been run yet.
 - Remaining: one consolidated test/compile pass after this implementation batch; fix any failures found; then request a fresh 2048 session log to discover the next exact missing AndroidX/framework method. Device gameplay remains unverified. The current HashMap backing remains an identity-keyed compatibility subset and does not implement full Java equals/hashCode, iterators/views, resizing, or the full Java Collections contract.
 - No IPA build, signing, export, or merge performed. `main` remains untouched.
+
+
+### 2026-11-15 — Phase 48 validation correction and authorized unsigned IPA attempt
+
+- Inspected failed GitHub Actions run #905 (run ID 43704546948) before starting the IPA job. The complete Rust suite reported 225 passed and one failed: `hashmap_intrinsic_put_get_contains_remove_and_size`.
+- Root cause was the regression fixture's DEX incoming-argument register layout: with `ins_size` set, arguments are placed at the high end of the register file, but the fixture invoked HashMap methods using v0-based operands. The test therefore passed a null receiver. This was a fixture encoding problem, not evidence that the HashMap receiver implementation regressed.
+- Corrected the fixture's 35c invoke register operands and move-result/return registers for put/get/containsKey/size/putIfAbsent/remove so they match DEX incoming-register placement. Runtime implementation behavior is unchanged.
+- One consolidated validation workflow is being triggered from this branch. It must pass the full Rust workspace test suite before the authorized unsigned iOS IPA job can run. The IPA job compiles for generic physical iOS, verifies the app bundle and arm64 executable, packages an unsigned IPA, and uploads the IPA plus build report as a workflow artifact.
+- User explicitly authorized starting IPA building in this conversation. Signing, certificate use, and merge into main remain prohibited/not requested. All work stays on `feat/dex-class-method-loader`.
+- Status: fixture correction committed; consolidated Rust + iOS build result pending. Do not claim an IPA exists until the workflow finishes successfully and its artifact is verified.

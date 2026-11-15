@@ -2692,7 +2692,7 @@ mod tests {
                 name: "put".into(),
                 prototype: "(Ljava/util/HashMap;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
                 // invoke-virtual {v0,v1,v2}, HashMap.put; move-result-object v3; return-object v3.
-                code_units: vec![0x306e, 0x0000, 0x0210, 0x030c, 0x0311],
+                code_units: vec![0x306e, 0x0000, 0x0321, 0x000c, 0x0011],
                 registers_size: 4, ins_size: 3, try_blocks: vec![],
             }),
             (2u32, MethodCode {
@@ -2700,35 +2700,35 @@ mod tests {
                 name: "get".into(),
                 prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Ljava/lang/Object;".into(),
                 // invoke-virtual {v0,v1}, HashMap.get; move-result-object v2; return-object v2.
-                code_units: vec![0x206e, 0x0001, 0x0010, 0x020c, 0x0211],
+                code_units: vec![0x206e, 0x0001, 0x0021, 0x000c, 0x0011],
                 registers_size: 3, ins_size: 2, try_blocks: vec![],
             }),
             (3u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
                 name: "contains".into(),
                 prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Z".into(),
-                code_units: vec![0x206e, 0x0002, 0x0010, 0x020a, 0x020f],
+                code_units: vec![0x206e, 0x0002, 0x0021, 0x000a, 0x000f],
                 registers_size: 3, ins_size: 2, try_blocks: vec![],
             }),
             (4u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
                 name: "size".into(),
                 prototype: "(Ljava/util/HashMap;)I".into(),
-                code_units: vec![0x106e, 0x0003, 0x0000, 0x000a, 0x000f],
+                code_units: vec![0x106e, 0x0003, 0x0001, 0x000a, 0x000f],
                 registers_size: 2, ins_size: 1, try_blocks: vec![],
             }),
             (6u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
                 name: "putIfAbsent".into(),
                 prototype: "(Ljava/util/HashMap;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
-                code_units: vec![0x306e, 0x0005, 0x0210, 0x030c, 0x0311],
+                code_units: vec![0x306e, 0x0005, 0x0321, 0x000c, 0x0011],
                 registers_size: 4, ins_size: 3, try_blocks: vec![],
             }),
             (5u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
                 name: "remove".into(),
                 prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Ljava/lang/Object;".into(),
-                code_units: vec![0x206e, 0x0004, 0x0010, 0x020c, 0x0211],
+                code_units: vec![0x206e, 0x0004, 0x0021, 0x000c, 0x0011],
                 registers_size: 3, ins_size: 2, try_blocks: vec![],
             }),
         ]);
