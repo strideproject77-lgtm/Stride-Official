@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phase 48 validation fixture correction and unsigned IPA pipeline)
+Updated: 2026-11-15 (Phases 45–48 CI validated; unsigned IPA #906 verified)
 
 ## Goal
 
@@ -494,8 +494,10 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 6 | DEX invoke-kind validation: reject static/instance and direct/virtual/interface mismatches against linked access flags | Implemented — focused regressions added; consolidated workflow pending |
 | 7 | Reject dangling managed-object references in fields and reference arrays | Completed — regression coverage and consolidated Rust workflow passed |
 | 8 | Repair stale object edges that bypass checked setters during GC; preserve valid cyclic reachability | Completed — regression added; consolidated Rust workflow #672 passed |
-| 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Implemented — validation pending |
-| 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Implemented — validation pending |
+| 45 | Exact HashMap no-argument constructor compatibility for AndroidX lifecycle startup | Completed — consolidated CI validated; device retest pending |
+| 46 | Managed HashMap get/put/remove/contains/size compatibility subset for observer maps | Completed — consolidated CI validated; device retest pending |
+| 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
+| 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1558,14 +1560,14 @@ Status: UI implementation committed · consolidated validation and visual review
 
 ### 2026-11-15 — Phase 45: HashMap constructor compatibility for 2048 startup
 
-- Status: **Implementation committed; consolidated validation and device retest pending. Phase 45 is not marked Completed yet.**
+- Status: **Completed — implementation committed and validated by the consolidated Rust workspace + iOS Release build workflow. Real-device retest remains pending.**
 
 - Reviewed the fresh 2048 v1.7.0 session log. Package and split verification succeeded for all 19 APK components; the base DEX loaded 6,502 classes; resource decoding completed; the first unresolved call is exactly `Ljava/util/HashMap;-><init>()V` from `androidx.arch.core.internal.FastSafeIterableMap.<init>()V`.
 - Added a signature-exact ART intrinsic for only `java.util.HashMap.<init>()V`. It validates a non-null managed-heap receiver, initializes the default `loadFactor` to 0.75 and `threshold` to zero, and preserves lazy backing-table allocation. Other HashMap constructor signatures and map operations are not implicitly accepted.
 - Added positive regression coverage for default-field initialization and a null-receiver rejection regression.
 - Commit: `d411a84d33ec9284b2c9ee29750eb37fb23c4984`.
 - Extra compatibility hardening: the intrinsic is exact-signature and receiver-checked; it does not mask unresolved HashMap methods or claim full Java Collections support.
-- Remaining: inspect the next 2048 startup blocker after this constructor resolves; implement the exact collection methods actually reached by `FastSafeIterableMap`; complete one consolidated Rust + iOS compile validation, then request a fresh device retest. 2048 is not yet confirmed compatible and has not reached its Activity lifecycle.
+- Remaining: inspect the next 2048 startup blocker after this constructor resolves; implement the exact collection methods actually reached by `FastSafeIterableMap`; request a fresh device retest. 2048 is not yet confirmed compatible and has not reached its Activity lifecycle.
 - UI balance: no UI-only change was mixed into this runtime-focused batch; the separate dedicated app-page/About/pure-black UI scope remains open from Phase 28.
 - All changes remain on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
 
@@ -1577,8 +1579,8 @@ Status: UI implementation committed · consolidated validation and visual review
 - Added a regression exercising HashMap put/get/containsKey/size/remove and size decrement, in addition to Phase 45's constructor initialization/null-receiver tests.
 - Commits: `14151098a96abbf52fe0fb8ad0a778e75c4ccf7e` (runtime operations), `78f0b719a1aeb7c9f8ceea1b6966af9e87c627a0` (regression), `d0864014a3650e5a0c5acd8ba7a7531da93d2f3a` (null-key support).
 - Extra hardening: map receiver and non-null object-key handles are checked against the managed heap; null key is distinct from absent key; updates do not inflate size; removal decrements size only for an existing key; clear removes only internal entry fields.
-- Status: implementation committed; consolidated Rust test + iOS compile validation not yet run. Phase 46 is **In Progress**, not Completed.
-- Remaining: run the one consolidated validation pass after the current implementation batch; inspect its compile/test result and correct any regressions; then obtain a new 2048 device session log. Continue implementing the next exact missing lifecycle/framework API until Activity starts and the game reaches interactive gameplay. A full compatibility claim requires a successful real-device play session, not just archive/DEX loading.
+- Status: **Completed — implementation committed and validated by the consolidated Rust workspace + iOS Release build workflow. Real-device retest remains pending.**
+- Remaining: obtain a new 2048 device session log and continue from the next exact framework blocker. Continue implementing the next exact missing lifecycle/framework API until Activity starts and the game reaches interactive gameplay. A full compatibility claim requires a successful real-device play session, not just archive/DEX loading.
 - UI extra: runtime progress UI should distinguish package analysis, framework startup, Activity lifecycle, first frame, and interactive state; do not present a single misleading “execution %” derived from DEX class count. UI implementation remains a separate scope.
 - All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
 
@@ -1590,8 +1592,8 @@ Status: UI implementation committed · consolidated validation and visual review
 - UI improvement: execution status indicator is now green only when the guest has reported a positive real FPS sample. A created session that has not produced guest frames remains amber; startup failure is red; ready/idle state is neutral. This avoids presenting session creation as proof that the Android app is rendering.
 - Commits: `84a72998f4043b0b3351673efc3e1efb217f88f8` (putIfAbsent runtime + regression), `32fa7e85b657060cba71dfd2549713fb1988cfda` (execution status UI).
 - Extra improvement: the status color is sourced from the same guest FPS signal already used by the execution metrics; host display-link polling is not treated as guest rendering.
-- Status: implementation committed; consolidated Rust + iOS compile validation remains deferred to the final validation pass. Phase 47 is **In Progress**, not Completed.
-- Remaining: validate the expanded interpreter tests; inspect the next fresh 2048 session for the first unresolved call after the HashMap observer-map path; implement subsequent lifecycle and UI framework requirements in small phases. The current HashMap subset still does not implement Java key equality/hashCode, iterators, entrySet/keySet/value views, resizing, or full collection contracts.
+- Status: **Completed — implementation committed and validated by the consolidated Rust workspace + iOS Release build workflow. Real-device retest remains pending.**
+- Remaining: inspect the next fresh 2048 session for the first unresolved call after the HashMap observer-map path; implement subsequent lifecycle and UI framework requirements in small phases. The current HashMap subset still does not implement Java key equality/hashCode, iterators, entrySet/keySet/value views, resizing, or full collection contracts.
 - UI balance: runtime feedback now distinguishes a real guest frame from a merely-created session. Continue prioritizing app UI polish alongside runtime and bug-fix work.
 - All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
 
@@ -1614,8 +1616,8 @@ Status: UI implementation committed · consolidated validation and visual review
   - `ecfc868f85caed6895f63ccea204764dcfe4a63b` — Espresso/Midnight/Graphite surface themes.
   - `f1b0a9933c7583566b1d6360861d0edc198a7593` — accurate pre-first-frame status text.
   - `f8cc4bf7a1b64b50f0118a8f53d67f4727853d29` — complete regression cleanup after adding null/absent-key cases.
-- Status: implementation committed; Phase 48 is **In Progress**, not Completed. Consolidated Rust workspace validation and iOS compile validation have not been run yet.
-- Remaining: one consolidated test/compile pass after this implementation batch; fix any failures found; then request a fresh 2048 session log to discover the next exact missing AndroidX/framework method. Device gameplay remains unverified. The current HashMap backing remains an identity-keyed compatibility subset and does not implement full Java equals/hashCode, iterators/views, resizing, or the full Java Collections contract.
+- Status: **Completed — implementation committed; consolidated Rust workspace tests and iOS Release compile/IPA verification passed. Real-device retest remains pending.**
+- Remaining: request a fresh 2048 session log to discover the next exact missing AndroidX/framework method. Device gameplay remains unverified. The current HashMap backing remains an identity-keyed compatibility subset and does not implement full Java equals/hashCode, iterators/views, resizing, or the full Java Collections contract.
 - No IPA build, signing, export, or merge performed. `main` remains untouched.
 
 
@@ -1627,3 +1629,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - One consolidated validation workflow is being triggered from this branch. It must pass the full Rust workspace test suite before the authorized unsigned iOS IPA job can run. The IPA job compiles for generic physical iOS, verifies the app bundle and arm64 executable, packages an unsigned IPA, and uploads the IPA plus build report as a workflow artifact.
 - User explicitly authorized starting IPA building in this conversation. Signing, certificate use, and merge into main remain prohibited/not requested. All work stays on `feat/dex-class-method-loader`.
 - Status: fixture correction committed; consolidated Rust + iOS build result pending. Do not claim an IPA exists until the workflow finishes successfully and its artifact is verified.
+
+
+### 2026-11-15 — Consolidated validation and unsigned IPA #906: SUCCESS
+
+- Corrected the HashMap regression fixture's DEX incoming-argument register operands. The runtime implementation was unchanged; the previous failing test was passing a null receiver due to incorrect test register placement.
+- Consolidated workflow: [run #906](https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/43704892167), commit `3fb84f0b62c210e6722380589af2105016b50fda`.
+- Rust runtime tests: **passed**. The run that previously reported 225 passed / 1 failed now completes successfully.
+- iOS pipeline: Rust ARM64 target build, XCFramework creation, generated 1024x1024 Home Screen icon verification, XcodeGen project generation, package dependency resolution, Release compile for generic physical iOS, app bundle verification, IPA zip validation, and artifact upload all **passed**.
+- Verified app bundle ID: `com.strideproject.stride`; executable: `Stride`; executable size: 6,564,392 bytes; app bundle: 8,249,344 bytes; unsigned IPA: 3,206,073 bytes.
+- Artifact: `Stride-unsigned-IPA-906`, artifact ID `14157907858`, SHA-256 of IPA `d5cb793fd699e54291679431358a2bbb54ccc520a8996a6d9e2c8940d756f15c`. The artifact ZIP was downloaded and inspected; the IPA archive passed `unzip -t` and contains `Payload/Stride.app/Info.plist` and `Payload/Stride.app/Stride`.
+- Signing was disabled. No certificate, provisioning profile, or signing step was used. No merge was performed; `main` remains untouched.
+- Phases 45, 46, 47, and 48 are **Completed** for their stated implementation + CI validation scope. Remaining work is real-device verification: install this unsigned build using the user's normal signing/sideload path, rerun 2048 v1.7.0, and inspect the next exact AndroidX/framework blocker. Do not claim 2048 gameplay works until the app reaches a real first frame and interactive play on-device.
