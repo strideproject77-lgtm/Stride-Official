@@ -1566,3 +1566,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: inspect the next 2048 startup blocker after this constructor resolves; implement the exact collection methods actually reached by `FastSafeIterableMap`; complete one consolidated Rust + iOS compile validation, then request a fresh device retest. 2048 is not yet confirmed compatible and has not reached its Activity lifecycle.
 - UI balance: no UI-only change was mixed into this runtime-focused batch; the separate dedicated app-page/About/pure-black UI scope remains open from Phase 28.
 - All changes remain on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
+
+### 2026-11-15 — Phase 46: Managed HashMap operations for AndroidX lifecycle
+
+- Continued directly from Phase 45 and the 2048 v1.7.0 startup trace. The previous no-argument HashMap constructor was only enough to get past object creation; AndroidX `FastSafeIterableMap` also needs map lookup/update/removal behavior during lifecycle observer registration.
+- Added exact-signature interpreter intrinsics for `HashMap.get(Object)`, `containsKey(Object)`, `put(Object,Object)`, `remove(Object)`, `size()`, `isEmpty()`, and `clear()`. Values are stored in the managed heap on the map instance, with a maintained size field. Null keys are represented explicitly.
+- The current compatibility subset uses managed-object identity for keys. It rejects non-object key values rather than silently coercing them. It does not claim full Java `equals/hashCode` semantics, iterator/view behavior, capacity/rehashing behavior, or WeakHashMap weak-reference semantics.
+- Added a regression exercising HashMap put/get/containsKey/size/remove and size decrement, in addition to Phase 45's constructor initialization/null-receiver tests.
+- Commits: `14151098a96abbf52fe0fb8ad0a778e75c4ccf7e` (runtime operations), `78f0b719a1aeb7c9f8ceea1b6966af9e87c627a0` (regression), `d0864014a3650e5a0c5acd8ba7a7531da93d2f3a` (null-key support).
+- Extra hardening: map receiver and non-null object-key handles are checked against the managed heap; null key is distinct from absent key; updates do not inflate size; removal decrements size only for an existing key; clear removes only internal entry fields.
+- Status: implementation committed; consolidated Rust test + iOS compile validation not yet run. Phase 46 is **In Progress**, not Completed.
+- Remaining: run the one consolidated validation pass after the current implementation batch; inspect its compile/test result and correct any regressions; then obtain a new 2048 device session log. Continue implementing the next exact missing lifecycle/framework API until Activity starts and the game reaches interactive gameplay. A full compatibility claim requires a successful real-device play session, not just archive/DEX loading.
+- UI extra: runtime progress UI should distinguish package analysis, framework startup, Activity lifecycle, first frame, and interactive state; do not present a single misleading “execution %” derived from DEX class count. UI implementation remains a separate scope.
+- All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
