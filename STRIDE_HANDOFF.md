@@ -1373,6 +1373,26 @@ Status: UI implementation committed · consolidated validation and visual review
 - No signing, no main merge, no runtime changes.
 
 
+
+### Phase 43 — 2048 Launch Blocker: Core Object Constructor
+**Status: First targeted runtime fix committed · Kotlin DEX register warnings and consolidated validation remain open.**
+
+- New target: **2048 v1.7.0**, package `com.tpcstld.twozerogame`, user-provided session exported 2026-11-15 12:03 local time.
+- Evidence from the latest device session:
+  - Archive scan succeeded: manifest present (9,552 bytes), one DEX (7,059,288 bytes), zero native libraries, three assets (272,408 bytes), 19 APK components (base + 18 splits); all listed splits matched the base package identity.
+  - Resource table decoded (130,176 bytes); all 201 resource entries scanned and three image resources decoded.
+  - DEX loaded 6,502 classes.
+  - Nine methods were rejected by the partial register-operand validator with `InvalidRegister`, including Kotlin/AndroidX long/wide-parameter methods. These need exact instruction-level diagnosis; do not relax validation globally.
+  - Launcher failed before executing any guest instructions because `Ljava/lang/Object;-><init>()V` could not resolve. The standard Object class was already bootstrapped in `ClassHierarchy`, but its intrinsic constructor had no DEX body or JNI bridge.
+- Implemented in `interpreter.rs`: resolve only the exact `java.lang.Object.<init>()V` signature as a VM intrinsic no-op, requiring a non-null receiver. Other unresolved methods and constructors remain errors. This is committed as `97122e2fed0e1b1d93a8791f9eb726f44e4a6703`.
+- Remaining:
+  1. Add focused regression coverage for the Object constructor intrinsic (valid receiver succeeds; null receiver fails; similarly named/different-prototype methods remain unresolved).
+  2. Trace each of the nine `DEX_METHOD_REGISTER_LAYOUT_REJECTED` methods to its exact opcode/register operands; correct only proven validator format mistakes and add fixtures.
+  3. Re-run 2048 on the device and inspect the next launch-stage blocker; then continue framework/JNI support based on actual evidence.
+  4. Run one consolidated Rust + iOS compile validation after this implementation batch is complete.
+- Extra quality work: preserve strict unresolved-method behavior and non-null constructor receiver validation instead of adding a broad fallback that could hide genuine runtime defects.
+- No IPA build/sign/export, no merge to `main`. All changes remain on `feat/dex-class-method-loader`.
+
 ### Phase 42 — Separate Overall and Per-App Logs + Floating Import UI
 **Status: Implementation committed · consolidated Swift/iOS + Rust validation pending.**
 
