@@ -309,9 +309,18 @@ struct APKArchiveInspector: Sendable {
             return false
         }
         let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
-        return ["ic_launcher", "ic_launcher_round", "ic_launcher_foreground", "ic_launcher_background", "app_icon", "launcher_icon", "icon"].contains(name)
+        let excludedHints = ["notification", "status", "toolbar", "menu", "button", "cursor", "badge"]
+        guard !excludedHints.contains(where: { name.contains($0) }) else { return false }
+        let knownNames = [
+            "ic_launcher", "ic_launcher_round", "ic_launcher_foreground",
+            "ic_launcher_background", "app_icon", "launcher_icon", "icon",
+            "appicon", "game_icon", "gameicon", "application_icon", "logo"
+        ]
+        return knownNames.contains(name)
             || name.hasPrefix("ic_launcher_")
             || name.contains("launcher")
+            || name.hasSuffix("_icon")
+            || name.hasPrefix("icon_")
     }
 
     private static func iconScore(_ path: String) -> Int {
@@ -319,13 +328,16 @@ struct APKArchiveInspector: Sendable {
         let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
         let nameScore: Int
         switch name {
-        case "ic_launcher": nameScore = 500
-        case "ic_launcher_round": nameScore = 450
-        case "ic_launcher_foreground": nameScore = 430
-        case "ic_launcher_background": nameScore = 420
-        case "app_icon": nameScore = 400
-        case "launcher_icon": nameScore = 350
-        default: nameScore = 300
+        case "ic_launcher": nameScore = 600
+        case "ic_launcher_round": nameScore = 560
+        case "ic_launcher_foreground": nameScore = 540
+        case "ic_launcher_background": nameScore = 530
+        case "app_icon", "appicon", "application_icon": nameScore = 500
+        case "launcher_icon": nameScore = 480
+        case "game_icon", "gameicon": nameScore = 460
+        case "icon": nameScore = 440
+        case "logo": nameScore = 400
+        default: nameScore = 320
         }
         let densityScore: Int
         if lower.contains("xxxhdpi") { densityScore = 80 }
@@ -336,8 +348,9 @@ struct APKArchiveInspector: Sendable {
         else if lower.contains("tvdpi") { densityScore = 35 }
         else if lower.contains("nodpi") { densityScore = 30 }
         else { densityScore = 20 }
+        let folderScore = lower.contains("/mipmap-") ? 35 : (lower.contains("/drawable-") ? 15 : 0)
         let formatScore = lower.hasSuffix(".png") ? 3 : (lower.hasSuffix(".webp") ? 2 : 1)
-        return nameScore + densityScore + formatScore
+        return nameScore + densityScore + folderScore + formatScore
     }
 
     private static func looksLikeSupportedImage(_ data: Data) -> Bool {

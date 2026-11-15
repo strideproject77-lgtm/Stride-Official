@@ -1789,3 +1789,17 @@ Status: UI implementation committed · consolidated validation and visual review
 - Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `STRIDE_HANDOFF.md`.
 - Validation: run one consolidated Rust + physical-iPhone compile workflow after this batch. No IPA build, signing, export or merge to `main` is included.
 - Real-device validation remains pending: use one 2048 launch and export one Complete Diagnostic Report to verify the new chronology and signatures against actual session evidence.
+
+
+### 2026-11-15 — Phase 53: Settings navigation, package analysis layout, launch control and APK icon recovery
+
+- Replaced the four-item bottom bar with Home, Library and Settings only. Removed the separate More destination; Import, Recently Played and About now live inside Settings.
+- Settings is now a compact hub. Appearance & Colors, Overall Logs and Runtime Status each open their own full-screen page; accent colors and surface themes are no longer expanded inline in the main Settings screen.
+- Moved the existing runtime component status inventory and app-wide log tools into their dedicated pages without deleting their content or changing runtime claims.
+- Grouped APK inspection details (archive, manifest, DEX file/class/method counts, skipped DEX, resources, archive entries and native ABIs) inside one collapsed **Package Analysis** disclosure section on each app's detail page.
+- Restyled the app launch control as a wide iOS-style capsule button with a clearer Launch label and progress state. Runtime launch behavior is unchanged.
+- Expanded APK icon discovery to include common game/app icon names in drawable and mipmap resources while filtering notification/status/menu/button glyphs. Added a regression test that prefers a game icon over a notification icon.
+- Icon extraction still relies on actual raster image entries. APKs whose launcher artwork exists only as unresolved adaptive/vector XML or resource-table references may still need a dedicated Android resource-table resolver; do not claim every icon is fixed until 2048 v1.7.0 is re-imported and verified.
+- Files: `ContentView.swift`, `APKArchiveInspector.swift`, `APKInspectionTests.swift`, `STRIDE_HANDOFF.md`.
+- Validation: this commit triggers the consolidated Rust suite, physical-iPhone compile-only validation and the explicitly authorized unsigned IPA job. IPA packaging remains unsigned; no certificate signing or main-branch merge.
+- Device verification remains pending for 2048 icon rendering and the updated settings/detail interactions.

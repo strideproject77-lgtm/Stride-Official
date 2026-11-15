@@ -60,6 +60,34 @@ final class APKInspectionTests: XCTestCase {
         XCTAssertEqual(report.iconData, icon)
     }
 
+    func testInspectorFindsGameIconInDrawableResourcesAndSkipsNotificationIcon() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("apk")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let archive = try XCTUnwrap(Archive(url: url, accessMode: .create))
+        let manifest = Data([0x01])
+        let gameIcon = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVZsAAAAASUVORK5CYII="))
+        let notificationIcon = try XCTUnwrap(Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jVZsAAAAASUVORK5CYII="))
+
+        for (path, data) in [
+            ("AndroidManifest.xml", manifest),
+            ("res/drawable-xxhdpi/game_icon.png", gameIcon),
+            ("res/drawable-xxhdpi/notification_icon.png", notificationIcon)
+        ] {
+            try archive.addEntry(
+                with: path,
+                type: .file,
+                uncompressedSize: UInt32(data.count),
+                provider: { position, size in data.subdata(in: Int(position)..<(Int(position) + size)) }
+            )
+        }
+
+        let report = try APKArchiveInspector().inspect(url)
+        XCTAssertEqual(report.iconData, gameIcon, "The game icon should be selected instead of a notification glyph.")
+    }
+
     func testMultidexSequenceGapIsReported() {
         XCTAssertEqual(
             APKArchiveInspector.multidexSequenceGaps(["classes.dex", "classes3.dex"]),

@@ -14,6 +14,9 @@ struct ContentView: View {
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
     @State private var showingAbout = false
+    @State private var showingAppearancePage = false
+    @State private var showingRuntimeStatusPage = false
+    @State private var showingOverallLogsPage = false
     @State private var showingOverallLogsShare = false
     @State private var overallLogsShareText = ""
     @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
@@ -55,10 +58,8 @@ struct ContentView: View {
                         home
                     } else if selectedTab == 1 {
                         libraryView
-                    } else if selectedTab == 2 {
-                        settingsView
                     } else {
-                        moreView
+                        settingsView
                     }
                 }
                 .fullScreenCover(item: $selectedPackage, onDismiss: { quickLaunchPackagePath = nil }) { item in
@@ -67,6 +68,15 @@ struct ContentView: View {
                 }
                 .fullScreenCover(isPresented: $showingAbout) {
                     AboutStrideView(accent: accent, panel: panel, muted: muted)
+                }
+                .fullScreenCover(isPresented: $showingAppearancePage) {
+                    appearanceSettingsPage
+                }
+                .fullScreenCover(isPresented: $showingRuntimeStatusPage) {
+                    runtimeStatusPage
+                }
+                .fullScreenCover(isPresented: $showingOverallLogsPage) {
+                    overallLogsPage
                 }
                 Spacer(minLength: 12)
                 tabBar
@@ -297,36 +307,7 @@ struct ContentView: View {
         .accessibilityAddTraits(surfaceTheme == value ? .isSelected : [])
     }
 
-    private var moreView: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("More").font(.system(size: 30, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                moreAction("Import Android Game", detail: "Add APK, XAPK, APKS or APKM", symbol: "plus.square.fill") { showingImporter = true }
-                moreAction("Recently Played", detail: "Open your latest game", symbol: "clock.fill") {
-                    if let recent = recentlyPlayedPackages.first { selectedPackage = recent } else { selectedTab = 1 }
-                }
-                moreAction("About Stride", detail: "Creator, version and project information", symbol: "info.circle.fill") { showingAbout = true }
-            }.padding(20)
-        }.background(gamingBackdrop)
-    }
-
-    private func moreAction(_ title: String, detail: String, symbol: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 13) {
-                Image(systemName: symbol).font(.system(size: 19, weight: .semibold)).foregroundStyle(accent)
-                    .frame(width: 44, height: 44).background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                    Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(muted)
-            }.padding(13).background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 17))
-                .overlay(RoundedRectangle(cornerRadius: 17).stroke(Color.white.opacity(0.08), lineWidth: 1))
-        }.buttonStyle(.plain)
-    }
-
-    private var homeEmptyState: some View {
+    private var homeEmptyState: some View {    private var homeEmptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: searchText.isEmpty ? "square.grid.2x2" : "magnifyingglass")
                 .font(.system(size: 27, weight: .medium))
@@ -406,136 +387,180 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("SETTINGS")
-                        .font(.system(size: 23, weight: .bold, design: .rounded))
-                    Text("Manage your Stride experience.")
+                        .font(.system(size: 25, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                    Text("Manage appearance, diagnostics and Stride.")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(muted)
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
+
+                settingsAction("Appearance & Colors", detail: "Accent color and app background", symbol: "paintpalette") {
+                    showingAppearancePage = true
+                }
+                settingsAction("Overall Logs", detail: "\(diagnostics.entries.count) app-wide diagnostic events", symbol: "waveform.path") {
+                    showingOverallLogsPage = true
+                }
+                settingsAction("Runtime Status", detail: "Implemented components and work in progress", symbol: "cpu") {
+                    showingRuntimeStatusPage = true
+                }
+
+                Divider().overlay(line)
+
+                settingsAction("Import Android Game", detail: "Add APK, XAPK, APKS or APKM", symbol: "plus.square") {
+                    showingImporter = true
+                }
+                settingsAction("Recently Played", detail: recentlyPlayedPackages.first?.displayName ?? "No recent games yet", symbol: "clock.arrow.circlepath") {
+                    if let recent = recentlyPlayedPackages.first { selectedPackage = recent }
+                    else { selectedTab = 1 }
+                }
+                settingsAction("About Stride", detail: "Project information and version", symbol: "info.circle") {
+                    showingAbout = true
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 18)
+            .padding(.bottom, 28)
+        }
+        .background(gamingBackdrop)
+    }
+
+    private func settingsAction(_ title: String, detail: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 44, height: 44)
+                    .background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                    Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(muted).lineLimit(2)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(muted)
+            }
+            .padding(13)
+            .background(panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var appearanceSettingsPage: some View {
+        NavigationView {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 5) {
                         Text("ACCENT COLOR")
-                            .font(.system(size: 9, weight: .heavy))
-                            .kerning(1.3)
-                            .foregroundStyle(muted)
-                        Text("Change button, icon and highlight colors")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(muted)
+                            .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(muted)
+                        Text("Choose the color used for buttons, icons and highlights.")
+                            .font(.system(size: 11, weight: .medium)).foregroundStyle(muted)
                     }
                     LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 4), spacing: 12) {
                         ForEach(StrideAccentPalette.colors) { option in
                             let color = Color(hex: option.hex) ?? accent
-                            Button {
-                                accentColorHex = option.hex
-                            } label: {
-                                VStack(spacing: 7) {
+                            Button { accentColorHex = option.hex } label: {
+                                VStack(spacing: 8) {
                                     ZStack {
-                                        Circle().fill(color).frame(width: 31, height: 31)
+                                        Circle().fill(color).frame(width: 34, height: 34)
                                         if accentColorHex == option.hex {
-                                            Circle().stroke(Color.white, lineWidth: 2).frame(width: 38, height: 38)
-                                            Image(systemName: "checkmark")
-                                                .font(.system(size: 12, weight: .black))
+                                            Circle().stroke(Color.white, lineWidth: 2).frame(width: 42, height: 42)
+                                            Image(systemName: "checkmark").font(.system(size: 12, weight: .black))
                                                 .foregroundStyle(Color.black.opacity(0.82))
                                         }
                                     }
-                                    Text(option.name)
-                                        .font(.system(size: 9, weight: .semibold))
-                                        .foregroundStyle(.white.opacity(0.88))
-                                        .lineLimit(1)
+                                    Text(option.name).font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(.white.opacity(0.9)).lineLimit(1)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(raised.opacity(accentColorHex == option.hex ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(accentColorHex == option.hex ? color.opacity(0.75) : line, lineWidth: 1))
-                                .contentShape(RoundedRectangle(cornerRadius: 12))
+                                .frame(maxWidth: .infinity).padding(.vertical, 12)
+                                .background(panel, in: RoundedRectangle(cornerRadius: 13))
+                                .overlay(RoundedRectangle(cornerRadius: 13).stroke(accentColorHex == option.hex ? color : line, lineWidth: 1))
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel("\(option.name) accent color")
                             .accessibilityAddTraits(accentColorHex == option.hex ? .isSelected : [])
                         }
                     }
-                    Text("Your accent color is saved automatically.")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(muted)
-                }
-                .padding(14)
-                .background(panel, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
 
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
+                    Divider().overlay(line)
+
+                    VStack(alignment: .leading, spacing: 5) {
                         Text("APP SURFACE")
-                            .font(.system(size: 9, weight: .heavy))
-                            .kerning(1.3)
-                            .foregroundStyle(muted)
-                        Text("Choose the overall background and panel tone")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(muted)
+                            .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(muted)
+                        Text("Choose the overall background and panel tone.")
+                            .font(.system(size: 11, weight: .medium)).foregroundStyle(muted)
                     }
-                    HStack(spacing: 9) {
+                    VStack(spacing: 10) {
                         surfaceThemeOption("Espresso", value: "espresso", swatch: Color(red: 0.20, green: 0.12, blue: 0.08))
                         surfaceThemeOption("Midnight", value: "midnight", swatch: Color(red: 0.08, green: 0.10, blue: 0.18))
                         surfaceThemeOption("Graphite", value: "graphite", swatch: Color(red: 0.14, green: 0.15, blue: 0.17))
                     }
                 }
-                .padding(14)
-                .background(panel, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+                .padding(20)
+            }
+            .background(background.ignoresSafeArea())
+            .navigationTitle("Appearance")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(trailing: Button("Done") { showingAppearancePage = false }.foregroundColor(accent))
+        }
+        .preferredColorScheme(.dark)
+    }
 
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Label("Overall Logs", systemImage: "waveform.path").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                        Spacer()
-                        Text(String(diagnostics.entries.count) + " events").font(.system(size: 10, weight: .semibold)).foregroundStyle(muted)
+    private var overallLogsPage: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("\(diagnostics.entries.count) events")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(muted)
+                    Spacer()
+                    Button {
+                        UIPasteboard.general.string = diagnostics.entries.map(\\.line).joined(separator: "\\n")
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold))
                     }
-                    Text("App-wide diagnostics from imports, startup and runtime. Individual game session logs are inside each app's details.")
-                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: 10) {
-                        Button { UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n") } label: {
-                            Label("Copy Logs", systemImage: "doc.on.doc").font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 9).background(raised, in: Capsule())
-                        }.buttonStyle(.plain)
-                        Button {
-                            overallLogsShareText = diagnostics.entries.map(\.line).joined(separator: "\n")
-                            showingOverallLogsShare = true
-                        } label: {
-                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(Color.black).padding(.horizontal, 12).padding(.vertical, 9).background(accent, in: Capsule())
-                        }.buttonStyle(.plain)
+                    .foregroundColor(accent)
+                    Button {
+                        overallLogsShareText = diagnostics.entries.map(\\.line).joined(separator: "\\n")
+                        showingOverallLogsShare = true
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 11, weight: .semibold))
                     }
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 5) {
-                            ForEach(Array(diagnostics.entries.suffix(12))) { entry in
-                                Text(entry.line).font(.system(size: 9, design: .monospaced))
-                                    .foregroundStyle(entry.severity == .error || entry.severity == .fatal ? Color.red : muted)
-                                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                            }
-                        }
-                    }.frame(maxHeight: 145).padding(9).background(raised, in: RoundedRectangle(cornerRadius: 10))
-                }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
-
-                Button { showingAbout = true } label: {
-                    HStack(spacing: 13) {
-                        Image(systemName: "info.circle.fill").font(.system(size: 19, weight: .semibold)).foregroundStyle(accent)
-                            .frame(width: 44, height: 44).background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("About Stride").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
-                            Text("Project details, runtime scope and build information").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(muted)
-                    }
-                    .padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+                    .foregroundColor(accent)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("About Stride")
+                Text("App-wide diagnostics from imports, startup and runtime. Individual game session logs are inside each app's details.")
+                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 7) {
+                        ForEach(diagnostics.entries) { entry in
+                            Text(entry.line)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(entry.severity == .error || entry.severity == .fatal ? Color.red : muted)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                .padding(12)
+                .background(panel, in: RoundedRectangle(cornerRadius: 14))
+            }
+            .padding(16)
+            .background(background.ignoresSafeArea())
+            .navigationTitle("Overall Logs")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(trailing: Button("Done") { showingOverallLogsPage = false }.foregroundColor(accent))
+        }
+        .preferredColorScheme(.dark)
+    }
 
-                VStack(alignment: .leading, spacing: 11) {
+    private var runtimeStatusPage: some View {
+        NavigationView {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("RUNTIME STATUS")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.3)
-                        .foregroundStyle(muted)
+                        .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(muted)
                     statusCard("APK archive inspection", detail: "Available", symbol: "checkmark.circle.fill", good: true)
                     statusCard("DEX parsing and method loading", detail: "Integrated foundations", symbol: "curlybraces", good: true)
                     statusCard("Manifest → Context bootstrap", detail: "Parsed package identity initializes JNI Context", symbol: "app.badge", good: true)
@@ -554,17 +579,14 @@ struct ContentView: View {
                     statusCard("Native execution pipeline", detail: "AArch64 PT_LOAD memory mapping, topological initializers, and JNI_OnLoad integration", symbol: "memorychip", good: true)
                     statusCard("Native libraries and graphics", detail: "GLES2/EGL and Cocos2d-x render loop integration in progress", symbol: "square.stack.3d.up", good: false)
                 }
-                Text("STRIDE · EXPERIMENTAL BUILD")
-                    .font(.system(size: 8, weight: .heavy))
-                    .kerning(1.2)
-                    .foregroundStyle(muted.opacity(0.75))
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 2)
+                .padding(18)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 24)
+            .background(background.ignoresSafeArea())
+            .navigationTitle("Runtime Status")
+            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarItems(trailing: Button("Done") { showingRuntimeStatusPage = false }.foregroundColor(accent))
         }
+        .preferredColorScheme(.dark)
     }
 
     private var emptyState: some View {
@@ -607,7 +629,6 @@ struct ContentView: View {
             tab("house.fill", title: "Home", index: 0)
             tab("square.grid.2x2.fill", title: "Library", index: 1)
             tab("gearshape", title: "Settings", index: 2)
-            tab("ellipsis", title: "More", index: 3)
         }
         .padding(.top, 8).padding(.bottom, 5)
         .background(Color(red: 0.025, green: 0.025, blue: 0.035))
@@ -954,6 +975,7 @@ private struct AboutStrideView: View {
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingSessionLogs = false
+    @State private var showingPackageAnalysis = false
     @State private var showingExecutionScreen = false
     @State private var didAutoLaunch = false
     @State private var isExecutionChromeHidden = false
@@ -1059,63 +1081,85 @@ private struct APKDetailSheet: View {
                         }
                         Spacer(minLength: 0)
                     }
-                    VStack(spacing: 0) {
-                        detailRow("Archive", value: item.inspection.isValidPackage ? "Valid APK" : "Invalid", symbol: "archivebox")
-                        Divider().overlay(Color.primary.opacity(0.06))
-                        detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
-                        Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "curlybraces")
-                        Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("DEX classes", value: "\(item.inspection.dexClassCount)", symbol: "square.stack.3d.up")
-                        Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("DEX methods", value: "\(item.inspection.dexMethodCount)", symbol: "function")
-                        if item.inspection.skippedDexFileCount > 0 {
+                    DisclosureGroup(isExpanded: $showingPackageAnalysis) {
+                        VStack(spacing: 0) {
+                            detailRow("Archive", value: item.inspection.isValidPackage ? "Valid APK" : "Invalid", symbol: "archivebox")
                             Divider().overlay(Color.white.opacity(0.05))
-                            detailRow("DEX files skipped", value: "\(item.inspection.skippedDexFileCount)", symbol: "exclamationmark.triangle")
+                            detailRow("Manifest", value: item.inspection.hasAndroidManifest ? "Found" : "Missing", symbol: "doc.text")
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("DEX files", value: item.inspection.hasDEX ? "\(item.inspection.analyzedDexFileCount)/\(item.inspection.dexFileCount) analyzed" : "None found", symbol: "curlybraces")
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("DEX classes", value: "\(item.inspection.dexClassCount)", symbol: "square.stack.3d.up")
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("DEX methods", value: "\(item.inspection.dexMethodCount)", symbol: "function")
+                            if item.inspection.skippedDexFileCount > 0 {
+                                Divider().overlay(Color.white.opacity(0.05))
+                                detailRow("DEX files skipped", value: "\(item.inspection.skippedDexFileCount)", symbol: "exclamationmark.triangle")
+                            }
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("Resource table", value: item.inspection.hasResourceTable ? "Found" : "Not found", symbol: "square.grid.3x3")
+                            Divider().overlay(Color.white.opacity(0.05))
+                            detailRow("Archive entries", value: "\(item.inspection.archiveEntryCount)", symbol: "list.number")
+                            Divider().overlay(Color.white.opacity(0.05))
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("NATIVE ARCHITECTURES")
+                                    .font(.system(size: 9, weight: .heavy)).kerning(1.2).foregroundStyle(muted)
+                                if item.inspection.nativeABIs.isEmpty {
+                                    Text("No native libraries detected")
+                                        .font(.system(size: 12, weight: .medium)).foregroundStyle(muted)
+                                } else {
+                                    FlowABIList(values: item.inspection.nativeABIs, accent: accent, raised: raised)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 13)
                         }
-                        Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("Resource table", value: item.inspection.hasResourceTable ? "Found" : "Not found", symbol: "square.grid.3x3")
-                        Divider().overlay(Color.white.opacity(0.05))
-                        detailRow("Archive entries", value: "\(item.inspection.archiveEntryCount)", symbol: "list.number")
-                    }
-                    .padding(.horizontal, 15)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 18))
-
-                    VStack(alignment: .leading, spacing: 11) {
-                        Text("NATIVE ARCHITECTURES")
-                            .font(.system(size: 9, weight: .heavy))
-                            .kerning(1.2)
-                            .foregroundStyle(muted)
-                        if item.inspection.nativeABIs.isEmpty {
-                            Text("No native libraries detected")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(muted)
-                        } else {
-                            FlowABIList(values: item.inspection.nativeABIs, accent: accent, raised: raised)
+                        .padding(.horizontal, 15)
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "doc.text.magnifyingglass")
+                                .font(.system(size: 16, weight: .semibold)).foregroundStyle(accent)
+                                .frame(width: 38, height: 38)
+                                .background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Package Analysis").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                Text("DEX, manifest, resources and native architecture")
+                                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                            }
+                            Spacer(minLength: 6)
                         }
+                        .contentShape(Rectangle())
                     }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tint(accent)
+                    .padding(14)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.075), lineWidth: 1))
 
-                    Button { startGame() } label: {
+                    Button { startGame() } label: {                    Button { startGame() } label: {
                         HStack(spacing: 9) {
                             if isExecuting {
                                 ProgressView().tint(.black)
-                                Text("Starting runtime…")
+                                Text("Preparing app…")
                             } else {
                                 Image(systemName: "play.fill")
-                                Text("Force Execute in ART Runtime")
+                                Text("Launch")
                             }
                         }
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(.black)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.black)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 15)
-                        .background(accent, in: RoundedRectangle(cornerRadius: 14))
+                        .frame(height: 56)
+                        .background(
+                            LinearGradient(colors: [accent, accent.opacity(0.82)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: Capsule()
+                        )
+                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
+                        .shadow(color: accent.opacity(0.24), radius: 12, y: 5)
                     }
                     .buttonStyle(.plain)
                     .disabled(isExecuting)
+                    .accessibilityLabel(isExecuting ? "Launching app" : "Launch app")
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
