@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-14 (Phase 32 accent color picker and HCR follow-up evidence)
+Updated: 2026-11-15 (Phase 42 log placement and floating import UI)
 
 ## Goal
 
@@ -1371,3 +1371,18 @@ Status: UI implementation committed · consolidated validation and visual review
 - Fix committed: removed the obsolete duplicate helper, preserving the newer clean unframed icon implementation. Commit: `206d49d92718131c17ac1727152de3f2522b8bc8`.
 - Rust tests were already green in build #812; next step is a fresh consolidated workflow run to verify Swift compilation, IPA packaging and artifact upload.
 - No signing, no main merge, no runtime changes.
+
+
+### Phase 42 — Separate Overall and Per-App Logs + Floating Import UI
+**Status: Implementation committed · consolidated Swift/iOS + Rust validation pending.**
+
+- Moved the app-wide diagnostics view into Settings as **Overall Logs**, with event count, recent event preview, Copy and Export actions.
+- Removed the duplicate Unified Diagnostics panel from the app detail page. Per-app **Session Logs** now appear behind one dedicated expandable Logs control in that app's details, with separate Copy and Export actions.
+- Kept the per-app session timeline distinct from app-wide diagnostics; the two sources are no longer presented as duplicate log panels on the same screen.
+- Replaced the Home screen's duplicate empty-state and bottom Import Game calls-to-action with one bottom-right floating `+` import button. The welcome card's first-import action remains available.
+- Extra UI improvements: the floating action has a larger touch target, accessible label and restrained accent shadow; the empty-library message is cleaner and no longer repeats import buttons; the log panels explain where each log category belongs.
+- Files: `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
+- Commits: `1a05494` (floating import action and duplicate CTA removal); `7db02fa` (per-app Session Logs disclosure); `b6d85a8` (Overall Logs in Settings).
+- Remaining: verify global log retention semantics across multiple launches, inspect the new Settings and app-details flows on a real iPhone, and run one consolidated Rust + Swift/iOS validation workflow. The current Overall Logs panel exposes the in-memory app-wide diagnostic entries retained by the diagnostics service; persistence/retention across launches remains a separate verification item.
+- Tests: not run between edits, per the one-pass rule; consolidated validation pending.
+- IPA: not built, signed or exported. `main` remains untouched.
