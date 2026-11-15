@@ -494,6 +494,8 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 6 | DEX invoke-kind validation: reject static/instance and direct/virtual/interface mismatches against linked access flags | Implemented — focused regressions added; consolidated workflow pending |
 | 7 | Reject dangling managed-object references in fields and reference arrays | Completed — regression coverage and consolidated Rust workflow passed |
 | 8 | Repair stale object edges that bypass checked setters during GC; preserve valid cyclic reachability | Completed — regression added; consolidated Rust workflow #672 passed |
+| 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Implemented — validation pending |
+| 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Implemented — validation pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1592,3 +1594,25 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: validate the expanded interpreter tests; inspect the next fresh 2048 session for the first unresolved call after the HashMap observer-map path; implement subsequent lifecycle and UI framework requirements in small phases. The current HashMap subset still does not implement Java key equality/hashCode, iterators, entrySet/keySet/value views, resizing, or full collection contracts.
 - UI balance: runtime feedback now distinguishes a real guest frame from a merely-created session. Continue prioritizing app UI polish alongside runtime and bug-fix work.
 - All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
+
+### 2026-11-15 — Phase 48: HashMap null-value semantics + selectable app surfaces
+
+- Reviewed the Common Compatibility Engine handoff first and continued only on `feat/dex-class-method-loader`.
+- Runtime correctness fix: Java `Map.putIfAbsent` must replace a key whose current mapped value is null, even though `containsKey` still returns true for that key. The earlier implementation treated every existing field as a non-replaceable mapping; corrected it so:
+  - A non-null existing value is preserved and returned.
+  - A null-valued existing mapping is replaced, while map size stays unchanged.
+  - A truly absent key is inserted and increments size exactly once.
+  - `containsKey` continues to report true for a key mapped to null.
+- Expanded the HashMap interpreter regression fixture to cover existing non-null, existing-null, and absent-key putIfAbsent paths, including returned values, subsequent get/contains behavior, and size accounting.
+- UI improvement: added persisted app surface theme selection in Settings: Espresso (warm brown), Midnight (blue-black), and Graphite. Theme selection updates shared app background/panel/surface colors and remains independent from the existing accent-color palette.
+- UI clarity improvement: the execution status now says “Runtime session ready · waiting for first guest frame” until actual guest FPS is reported; it no longer implies that an Activity has resumed merely because a session object exists. Green remains gated on a positive guest FPS sample.
+- Extra improvements: theme choice persists through `@AppStorage`; selected theme options expose accessibility labels and selected traits; all theme changes are native SwiftUI and do not affect the immersive guest framebuffer.
+- Commits:
+  - `b0ac9bcd6772c3b5a27a66c52f23ba01382273c5` — null-valued putIfAbsent semantics.
+  - `2a44d20d371eef275876c6a0ddff10e45c5ad98a` — regression fixture allocation ordering.
+  - `afe767edeb2fdb13a758f3517f7670fd976e0695` — expanded null/absent mapping regression cases.
+  - `ecfc868f85caed6895f63ccea204764dcfe4a63b` — Espresso/Midnight/Graphite surface themes.
+  - `f1b0a9933c7583566b1d6360861d0edc198a7593` — accurate pre-first-frame status text.
+- Status: implementation committed; Phase 48 is **In Progress**, not Completed. Consolidated Rust workspace validation and iOS compile validation have not been run yet.
+- Remaining: one consolidated test/compile pass after this implementation batch; fix any failures found; then request a fresh 2048 session log to discover the next exact missing AndroidX/framework method. Device gameplay remains unverified. The current HashMap backing remains an identity-keyed compatibility subset and does not implement full Java equals/hashCode, iterators/views, resizing, or the full Java Collections contract.
+- No IPA build, signing, export, or merge performed. `main` remains untouched.
