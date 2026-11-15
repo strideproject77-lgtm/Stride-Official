@@ -1305,3 +1305,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - Extra improvement: aligned the repository landing page and canonical license so the public attribution is consistent.
 - Remaining: confirm that AhmiiDev is the intended legal rights-holder identity and review the notice under applicable local law if formal enforcement is required.
 - Validation: documentation-only update; no tests or workflows run. No IPA build, signing, export, or merge to `main`. All changes remain on `feat/dex-class-method-loader`.
+
+
+### Phase 40 — AhmiiDev In-App & GitHub Attribution
+**Status: Implementation committed · consolidated validation and device visual review pending.**
+
+- Expanded the existing Settings → About Stride screen with a dedicated creator attribution panel: **Created by AhmiiDev**, “Original project creator & developer”, and a 2026 copyright attribution.
+- Added the installed app version/build display and a direct link to the official Stride GitHub repository.
+- Updated the GitHub README opening section so the creator attribution is visible immediately on the repository landing page.
+- UI extra improvements: replaced the sparse About layout with a scrollable, grouped information screen; improved hierarchy, spacing, accent treatment, and repository navigation.
+- Files: `Sources/StrideApp/ContentView.swift`, `README.md`, `STRIDE_HANDOFF.md`.
+- Remaining: verify the About screen layout and GitHub link on an iPhone; set the GitHub repository's separate short Description/About metadata manually because the connected GitHub actions available in this session do not expose repository-metadata editing. Confirm the final redistribution license separately; this phase does not change LICENSE.
+- Tests/workflows: deferred to the single consolidated validation pass. No IPA build, signing, export, or merge to `main`. All changes remain on `feat/dex-class-method-loader`.
