@@ -1533,3 +1533,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - The workflow regenerates the silver-S icon from `Scripts/generate-app-icon.swift`, checks the 1024x1024 asset and JSON, runs the full Rust test suite, compiles the iOS ARM64 app without code signing, verifies the bundle, and packages an unsigned IPA artifact.
 - Signing, distribution export, and changes to `main` remain disabled.
 - Runtime caveat: WeakHashMap constructor initialization is present, but backing-table/map semantics are still incomplete; 2048 compatibility is not established. The build validates compile/package health, not full game compatibility.
+
+
+### 2026-11-15 — 2048 v1.7.0 HashMap constructor diagnosis and icon build request
+
+- Reviewed the user's 14:55 local session log for `com.tpcstld.twozerogame` (2048 v1.7.0). All 19 APK components were discovered and split identities verified; base DEX loaded 6,502 classes; 201 resource entries scanned; 3 images decoded; no native libraries; no missing classes or missing methods.
+- The app still fails before Activity lifecycle startup. Exact first unresolved framework reference: `Ljava/util/HashMap;-><init>()V`, method index 34655, called from `androidx.arch.core.internal.FastSafeIterableMap.<init>()V` at PC 5, through `LifecycleRegistry` and the Activity constructor. Runtime summary: 1 missing API, 2 errors, 0 fatal events, 0 executed instructions.
+- Important distinction: Phase 44's `WeakHashMap.<init>()V` intrinsic does not implement `HashMap.<init>()V`. Do not treat the two as interchangeable and do not suppress the unresolved call. Next runtime task is to trace the DEX method resolver / Java collection intrinsic dispatch and implement the exact no-arg HashMap constructor with managed-heap receiver validation and regression coverage; then continue with map operations required by FastSafeIterableMap.
+- Icon source: the silver metallic S / midnight navy / violet-cyan artwork is already authored in `Scripts/generate-app-icon.swift`; the build workflow regenerates `Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png` from that source and checks 1024x1024 dimensions. The PNG is a generated build asset, not yet a separately committed raster source file.
+- This commit records the fresh diagnostic and keeps Phase 44 open. HashMap runtime implementation and 2048 device retest remain incomplete. Do not claim game compatibility.
+- User requested a fresh unsigned icon build. Run the existing workflow on this feature branch after this handoff commit; it is not a newly created workflow. No signing, export, or main-branch changes.
