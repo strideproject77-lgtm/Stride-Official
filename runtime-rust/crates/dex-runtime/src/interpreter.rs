@@ -1493,6 +1493,103 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // Minimal managed HashMap operations used by AndroidX's
+                    // FastSafeIterableMap. Keys are managed object identities; this
+                    // intentionally does not pretend to implement arbitrary Java
+                    // equals/hashCode semantics or WeakHashMap collection behavior.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/HashMap;"
+                        && matches!(
+                            (target_name, target_proto),
+                            ("get", "(Ljava/lang/Object;)Ljava/lang/Object;")
+                                | ("containsKey", "(Ljava/lang/Object;)Z")
+                                | ("put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+                                | ("remove", "(Ljava/lang/Object;)Ljava/lang/Object;")
+                                | ("size", "()I")
+                                | ("isEmpty", "()Z")
+                                | ("clear", "()V")
+                        )
+                    {
+                        let receiver = match args.first() {
+                            Some(Value::Object(id)) if *id != 0 => *id,
+                            _ => return Err(format!("Invalid null receiver for HashMap.{}{} at PC {}", target_name, target_proto, pc)),
+                        };
+                        self.heap.get(receiver).map_err(|error| format!(
+                            "Invalid HashMap receiver for {}{} at PC {}: {:?}", target_name, target_proto, pc, error
+                        ))?;
+                        let entry_prefix = "__stride_hashmap_entry_";
+                        let key_id = if matches!(target_name, "get" | "containsKey" | "put" | "remove") {
+                            match args.get(1) {
+                                Some(Value::Object(id)) if *id != 0 => {
+                                    self.heap.get(*id).map_err(|error| format!(
+                                        "Invalid HashMap object key at PC {}: {:?}", pc, error
+                                    ))?;
+                                    Some(*id)
+                                }
+                                Some(Value::Object(0)) => None,
+                                Some(other) => return Err(format!(
+                                    "Unsupported non-object HashMap key {:?} at PC {}", other, pc
+                                )),
+                                None => return Err(format!("Missing HashMap key argument at PC {}", pc)),
+                            }
+                        } else { None };
+                        let field_name = key_id.map(|id| format!("{}{}", entry_prefix, id));
+                        let previous = if let Some(field) = field_name.as_deref() {
+                            if self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))? {
+                                self.heap.get_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?
+                            } else { Value::Object(0) }
+                        } else { Value::Object(0) };
+                        let size_field = "__stride_hashmap_size";
+                        let current_size = match self.heap.get_instance_field(receiver, size_field)
+                            .map_err(|e| format!("{:?}", e))? {
+                            Value::Int(n) if n >= 0 => n,
+                            _ => 0,
+                        };
+                        match target_name {
+                            "get" => pending_result = Some(previous),
+                            "containsKey" => pending_result = Some(Value::Int(i32::from(
+                                field_name.as_deref().is_some_and(|field|
+                                    self.heap.has_instance_field(receiver, field).unwrap_or(false))
+                            ))),
+                            "put" => {
+                                let value = args.get(2).copied().ok_or_else(|| "Missing HashMap value argument".to_string())?;
+                                let field = field_name.as_deref().ok_or_else(|| "HashMap does not accept a null key in this compatibility path".to_string())?;
+                                let existed = self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
+                                self.heap.set_instance_field(receiver, field, value).map_err(|e| format!("{:?}", e))?;
+                                if !existed {
+                                    self.heap.set_instance_field(receiver, size_field, Value::Int(current_size.saturating_add(1)))
+                                        .map_err(|e| format!("{:?}", e))?;
+                                }
+                                pending_result = Some(if existed { previous } else { Value::Object(0) });
+                            }
+                            "remove" => {
+                                if let Some(field) = field_name.as_deref() {
+                                    let existed = self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
+                                    if existed {
+                                        self.heap.remove_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
+                                        self.heap.set_instance_field(receiver, size_field, Value::Int(current_size.saturating_sub(1)))
+                                            .map_err(|e| format!("{:?}", e))?;
+                                    }
+                                }
+                                pending_result = Some(previous);
+                            }
+                            "size" => pending_result = Some(Value::Int(current_size)),
+                            "isEmpty" => pending_result = Some(Value::Int(i32::from(current_size == 0))),
+                            "clear" => {
+                                let fields = self.heap.instance_field_names(receiver).map_err(|e| format!("{:?}", e))?;
+                                for field in fields.into_iter().filter(|name| name.starts_with(entry_prefix)) {
+                                    self.heap.remove_instance_field(receiver, &field).map_err(|e| format!("{:?}", e))?;
+                                }
+                                self.heap.set_instance_field(receiver, size_field, Value::Int(0))
+                                    .map_err(|e| format!("{:?}", e))?;
+                                pending_result = None;
+                            }
+                            _ => unreachable!(),
+                        }
+                        pc += 3;
+                        continue;
+                    }
+
                     if target_method.is_none() {
                         if let Some(handler) = native_handler {
                             let mut env = crate::jni::JniEnv::new(self.heap);
