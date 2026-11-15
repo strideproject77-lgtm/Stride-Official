@@ -2684,6 +2684,7 @@ mod tests {
         let map = heap.allocate_instance("Ljava/util/HashMap;").unwrap();
         let key = heap.allocate_instance("Ltest/Key;").unwrap();
         let value = heap.allocate_instance("Ltest/Value;").unwrap();
+        let null_key = heap.allocate_instance("Ltest/NullValueKey;").unwrap();
         let methods = HashMap::from([
             (1u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
@@ -2759,7 +2760,6 @@ mod tests {
         assert_eq!(still_original.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
 
         // A key explicitly mapped to null is present, but putIfAbsent must replace it.
-        let null_key = heap.allocate_instance("Ltest/NullValueKey;").unwrap();
         let put_null = vm.execute_method(1, &[Value::Object(map), Value::Object(null_key), Value::Object(0)], 32).unwrap();
         assert_eq!(put_null.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
         let replace_null = vm.execute_method(6, &[Value::Object(map), Value::Object(null_key), Value::Object(value)], 32).unwrap();
