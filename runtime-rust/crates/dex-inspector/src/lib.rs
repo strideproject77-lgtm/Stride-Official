@@ -361,10 +361,18 @@ pub fn validate_register_operands(
                 check_wide(usize::from(second & 0xff))?;
                 check_wide(usize::from(second >> 8))?;
             }
-            // 2addr long operations and double operations.
-            0xbb..=0xc5 | 0xcb..=0xcf => {
+            // 2addr long arithmetic/bitwise operations and double operations:
+            // both A and B are wide for add..xor-long and all double operations.
+            0xbb..=0xc2 | 0xcb..=0xcf => {
                 check_wide(a4)?;
                 check_wide(b4)?;
+            }
+            // Long shifts use a wide destination/source A but a narrow int
+            // shift-distance B. Treating B as wide rejects valid Kotlin
+            // ULong.shl/shr bytecode (J,I -> J).
+            0xc3..=0xc5 => {
+                check_wide(a4)?;
+                check(b4)?;
             }
             _ => {}
         }
@@ -517,6 +525,18 @@ mod decoder_tests {
   // sput-wide has the same 21c register layout.
   assert_eq!(validate_register_operands(&words(&[0x1068,0,0x000e]),18),Ok(()));
  }
+
+ #[test] fn validates_long_shift_2addr_with_narrow_shift_distance(){
+  // shl-long/2addr v0, v1: v0 is a wide pair; v1 is an int count.
+  assert_eq!(validate_register_operands(&words(&[0x10c3,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x10c4,0x000e]),3),Ok(()));
+  assert_eq!(validate_register_operands(&words(&[0x10c5,0x000e]),3),Ok(()));
+  // The wide destination/source pair must still fit.
+  assert_eq!(validate_register_operands(&words(&[0x10c3,0x000e]),2),Err(DecodeError::InvalidRegister));
+  // The shift distance is a single register and must be inside the frame.
+  assert_eq!(validate_register_operands(&words(&[0x20c3,0x000e]),3),Err(DecodeError::InvalidRegister));
+ }
+
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
 
