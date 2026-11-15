@@ -1473,3 +1473,12 @@ Status: UI implementation committed · consolidated validation and visual review
 - Workflow validation commit: `15a768c536c50d31877389c7eb559f88af0fa848`.
 - Extra improvements: icon integrity is now checked in CI, and the DEX test now checks the actual out-of-bounds wide register pair rather than an incorrectly assumed invalid encoding.
 - Remaining: run one consolidated Rust suite + iOS device compile + unsigned IPA package and verify artifact. Phase 43 remains open pending 2048 device retest and remaining rejected method evidence. No signing, no merge to `main`.
+
+
+### 2026-11-15 — Phase 43 interpreter regression fixture correction
+
+- Follow-up run #864 reached the full Rust suite and exposed a second test-fixture issue: `long_shift_2addr_reads_narrow_int_shift_distance` claimed to load v2=1, but its `const/4` word `0x2112` actually writes v1=2. The shift then read uninitialized v2, producing an unrelated large value.
+- Corrected the fixture to `0x1212` (v2=1), leaving production interpreter logic unchanged.
+- Commit: `d50c9aae2df20d15337d89bdd1ad3ee74632a025`.
+- Run #864 result: 218 passed, 1 failed (the fixture issue above); iOS build was not eligible to run.
+- Next: consolidated Rust + iOS compile + unsigned IPA workflow is triggered by the follow-up handoff commit. Continue only from its results. No signing and no merge to `main`.
