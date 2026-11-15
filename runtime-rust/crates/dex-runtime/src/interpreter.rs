@@ -1547,10 +1547,9 @@ impl<'a> ArtVm<'a> {
                         };
                         match target_name {
                             "get" => pending_result = Some(previous),
-                            "containsKey" => pending_result = Some(Value::Int(i32::from(
-                                field_name.as_deref().is_some_and(|field|
-                                    self.heap.has_instance_field(receiver, field).unwrap_or(false))
-                            ))),
+                            "containsKey" => pending_result = Some(Value::Int(if field_name.as_deref().is_some_and(|field|
+                                self.heap.has_instance_field(receiver, field).unwrap_or(false)
+                            ) { 1 } else { 0 })),
                             "put" => {
                                 let value = args.get(2).copied().ok_or_else(|| "Missing HashMap value argument".to_string())?;
                                 let field = field_name.as_deref().ok_or_else(|| "HashMap does not accept a null key in this compatibility path".to_string())?;
@@ -2664,6 +2663,82 @@ mod tests {
 
         let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
         assert!(error.contains("Invalid null receiver for intrinsic HashMap.<init>()V"));
+    }
+
+    #[test]
+    fn hashmap_intrinsic_put_get_contains_remove_and_size() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let map = heap.allocate_instance("Ljava/util/HashMap;").unwrap();
+        let key = heap.allocate_instance("Ltest/Key;").unwrap();
+        let value = heap.allocate_instance("Ltest/Value;").unwrap();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "put".into(),
+                prototype: "(Ljava/util/HashMap;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
+                // invoke-virtual {v0,v1,v2}, HashMap.put; move-result-object v3; return-object v3.
+                code_units: vec![0x306e, 0x0000, 0x0210, 0x030c, 0x0311],
+                registers_size: 4, ins_size: 3, try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "get".into(),
+                prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Ljava/lang/Object;".into(),
+                // invoke-virtual {v0,v1}, HashMap.get; move-result-object v2; return-object v2.
+                code_units: vec![0x206e, 0x0001, 0x0010, 0x020c, 0x0211],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (3u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "contains".into(),
+                prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Z".into(),
+                code_units: vec![0x206e, 0x0002, 0x0010, 0x020a, 0x020f],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (4u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "size".into(),
+                prototype: "(Ljava/util/HashMap;)I".into(),
+                code_units: vec![0x106e, 0x0003, 0x0000, 0x000a, 0x000f],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+            (5u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "remove".into(),
+                prototype: "(Ljava/util/HashMap;Ljava/lang/Object;)Ljava/lang/Object;".into(),
+                code_units: vec![0x206e, 0x0004, 0x0010, 0x020c, 0x0211],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+        ]);
+        let references = vec![
+            MethodReference { method_index: 0, class_descriptor: "Ljava/util/HashMap;".into(), name: "put".into(), prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into() },
+            MethodReference { method_index: 1, class_descriptor: "Ljava/util/HashMap;".into(), name: "get".into(), prototype: "(Ljava/lang/Object;)Ljava/lang/Object;".into() },
+            MethodReference { method_index: 2, class_descriptor: "Ljava/util/HashMap;".into(), name: "containsKey".into(), prototype: "(Ljava/lang/Object;)Z".into() },
+            MethodReference { method_index: 3, class_descriptor: "Ljava/util/HashMap;".into(), name: "size".into(), prototype: "()I".into() },
+            MethodReference { method_index: 4, class_descriptor: "Ljava/util/HashMap;".into(), name: "remove".into(), prototype: "(Ljava/lang/Object;)Ljava/lang/Object;".into() },
+        ];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let inserted = vm.execute_method(1, &[Value::Object(map), Value::Object(key), Value::Object(value)], 32).unwrap();
+        assert_eq!(inserted.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
+        let fetched = vm.execute_method(2, &[Value::Object(map), Value::Object(key)], 32).unwrap();
+        assert_eq!(fetched.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let contains = vm.execute_method(3, &[Value::Object(map), Value::Object(key)], 32).unwrap();
+        assert_eq!(contains.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
+        let size = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
+        assert_eq!(size.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
+        let removed = vm.execute_method(5, &[Value::Object(map), Value::Object(key)], 32).unwrap();
+        assert_eq!(removed.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let size_after = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
+        assert_eq!(size_after.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(0)));
     }
 
     #[test]
