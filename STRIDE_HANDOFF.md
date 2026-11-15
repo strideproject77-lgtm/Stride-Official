@@ -1482,3 +1482,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Commit: `d50c9aae2df20d15337d89bdd1ad3ee74632a025`.
 - Run #864 result: 218 passed, 1 failed (the fixture issue above); iOS build was not eligible to run.
 - Next: consolidated Rust + iOS compile + unsigned IPA workflow is triggered by the follow-up handoff commit. Continue only from its results. No signing and no merge to `main`.
+### 2026-11-15 — Phase 43 2048 retest: AtomicReference constructor blocker
+
+- Reviewed the fresh 2048 v1.7.0 device session (13:42 local). Package/split verification succeeded for all 19 APK components; the base DEX loaded 6,502 classes; resource decoding completed; no missing classes were reported.
+- The previous `java.lang.Object.<init>()V` failure is no longer present. The new first unresolved framework call is `Ljava/util/concurrent/atomic/AtomicReference;-><init>()V`, invoked from `androidx.lifecycle.LifecycleRegistry.<init>(LifecycleOwner, boolean)` while constructing the Activity. This aborts startup before the Activity lifecycle begins.
+- Added a narrowly scoped ART intrinsic for exactly `AtomicReference.<init>()V`. This no-argument constructor initializes the backing reference to null, which matches the runtime's zero-initialized object allocation; the intrinsic validates a non-null receiver and confirms that the receiver exists in the managed heap. Other AtomicReference constructor signatures remain unresolved unless backed by a real implementation.
+- Added positive and null-receiver regression tests for this exact constructor path.
+- Commit: `6d802137577bcd7aa31305917fba3bc188e91723`.
+- Latest prior consolidated validation: workflow #868 passed Rust tests, ARM64 runtime, XCFramework, iOS compile, app verification, and unsigned IPA packaging. This new constructor change has not yet been validated by a subsequent consolidated run.
+- Remaining: perform the one consolidated Rust + iOS compile validation for this batch; rebuild the authorized unsigned 2048 test IPA only after it passes; then use the next session log to identify the next startup/API blocker. 2048 is not yet confirmed compatible.
+- Extra quality: keep the constructor fallback signature-exact and receiver-checked rather than broadly accepting unresolved framework constructors.
+- All work remains on `feat/dex-class-method-loader`; `main` remains untouched; no signing or export.
