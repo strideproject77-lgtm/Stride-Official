@@ -29,40 +29,59 @@ rim.lineWidth = 3
 NSColor(calibratedRed: 0.36, green: 0.62, blue: 1, alpha: 0.24).setStroke()
 rim.stroke()
 
-// Broad, continuous S-shaped ribbon.
+// A single closed, smooth S ribbon. A filled contour avoids the clipped,
+ // flat-looking joins produced by the former open stroked path.
 let mark = NSBezierPath()
-mark.move(to: NSPoint(x: 770, y: 720))
-mark.line(to: NSPoint(x: 430, y: 720))
-mark.curve(to: NSPoint(x: 330, y: 590),
-           controlPoint1: NSPoint(x: 350, y: 720),
-           controlPoint2: NSPoint(x: 285, y: 655))
-mark.line(to: NSPoint(x: 665, y: 445))
-mark.curve(to: NSPoint(x: 585, y: 295),
-           controlPoint1: NSPoint(x: 755, y: 365),
-           controlPoint2: NSPoint(x: 685, y: 295))
-mark.line(to: NSPoint(x: 275, y: 295))
-mark.lineCapStyle = .round
-mark.lineJoinStyle = .round
-mark.lineWidth = 118
+mark.move(to: NSPoint(x: 790, y: 790))
+mark.line(to: NSPoint(x: 390, y: 790))
+mark.curve(to: NSPoint(x: 300, y: 535),
+           controlPoint1: NSPoint(x: 175, y: 790),
+           controlPoint2: NSPoint(x: 185, y: 610))
+mark.line(to: NSPoint(x: 655, y: 335))
+mark.curve(to: NSPoint(x: 610, y: 245),
+           controlPoint1: NSPoint(x: 735, y: 300),
+           controlPoint2: NSPoint(x: 690, y: 245))
+mark.line(to: NSPoint(x: 250, y: 245))
+mark.line(to: NSPoint(x: 250, y: 115))
+mark.line(to: NSPoint(x: 640, y: 115))
+mark.curve(to: NSPoint(x: 735, y: 475),
+           controlPoint1: NSPoint(x: 900, y: 115),
+           controlPoint2: NSPoint(x: 920, y: 350))
+mark.line(to: NSPoint(x: 385, y: 675))
+mark.curve(to: NSPoint(x: 435, y: 660),
+           controlPoint1: NSPoint(x: 330, y: 715),
+           controlPoint2: NSPoint(x: 375, y: 660))
+mark.line(to: NSPoint(x: 790, y: 660))
+mark.close()
 
-// Layered violet/cyan aura around the metallic mark.
+// Soft aura follows the complete silhouette.
 let outerGlow = mark.copy() as! NSBezierPath
-outerGlow.lineWidth = 205
-NSColor(calibratedRed: 0.25, green: 0.22, blue: 1, alpha: 0.22).setStroke()
-outerGlow.stroke()
-let cyanGlow = mark.copy() as! NSBezierPath
-cyanGlow.lineWidth = 158
-NSColor(calibratedRed: 0.02, green: 0.72, blue: 1, alpha: 0.20).setStroke()
-cyanGlow.stroke()
+outerGlow.transform(using: AffineTransform(scaleBy: 1.035))
+NSColor(calibratedRed: 0.30, green: 0.20, blue: 1, alpha: 0.30).setFill()
+outerGlow.fill()
+let innerGlow = mark.copy() as! NSBezierPath
+NSColor(calibratedRed: 0.02, green: 0.72, blue: 1, alpha: 0.18).setFill()
+innerGlow.fill()
 
+// Silver metal face with a bright upper edge and cool shaded lower edge.
 NSGraphicsContext.saveGraphicsState()
 mark.addClip()
 NSGradient(colors: [
-    NSColor(calibratedRed: 0.98, green: 0.99, blue: 1, alpha: 1),
-    NSColor(calibratedRed: 0.66, green: 0.78, blue: 1, alpha: 1),
-    NSColor(calibratedRed: 0.42, green: 0.55, blue: 0.98, alpha: 1)
+    NSColor(calibratedRed: 1.0, green: 1.0, blue: 1.0, alpha: 1),
+    NSColor(calibratedRed: 0.82, green: 0.88, blue: 0.98, alpha: 1),
+    NSColor(calibratedRed: 0.56, green: 0.68, blue: 0.86, alpha: 1),
+    NSColor(calibratedRed: 0.90, green: 0.95, blue: 1.0, alpha: 1)
 ])!.draw(in: bounds, angle: 90)
 NSGraphicsContext.restoreGraphicsState()
+
+// Fine metallic highlight along the upper contour.
+let highlight = NSBezierPath()
+highlight.move(to: NSPoint(x: 390, y: 765))
+highlight.line(to: NSPoint(x: 770, y: 765))
+highlight.lineCapStyle = .round
+highlight.lineWidth = 9
+NSColor(calibratedWhite: 1, alpha: 0.82).setStroke()
+highlight.stroke()
 
 func drawStroke(_ from: NSPoint, _ to: NSPoint, width: CGFloat, color: NSColor) {
     let path = NSBezierPath()
