@@ -1146,6 +1146,7 @@ private struct APKDetailSheet: View {
                         .buttonStyle(.plain)
                         .background(panel, in: RoundedRectangle(cornerRadius: 16))
                         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
+                    }
                     if let res = executionResult {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
