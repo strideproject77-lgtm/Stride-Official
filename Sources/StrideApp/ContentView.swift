@@ -1297,13 +1297,13 @@ private struct APKDetailSheet: View {
             launchTask = nil
             frameScheduler?.stop()
             frameScheduler = nil
-            touchResponseMilliseconds = nil
-            liveGuestFPS = nil
             StrideOrientationController.shared.reset()
             let dismissalStatus = isExecuting
                 ? "view dismissed while launch was active"
                 : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user")
             finalizeDiagnosticReport(status: dismissalStatus)
+            touchResponseMilliseconds = nil
+            liveGuestFPS = nil
             executionResult?.session.close()
             executionResult = nil
         }
@@ -1433,6 +1433,8 @@ private struct APKDetailSheet: View {
         launchTask = nil
         frameScheduler?.stop()
         frameScheduler = nil
+        appendSessionLog("[SESSION] Runtime closed safely by user")
+        finalizeDiagnosticReport(status: "runtime released safely by user")
         guestTouchActive = false
         touchResponseMilliseconds = nil
         liveGuestFPS = nil
@@ -1443,8 +1445,6 @@ private struct APKDetailSheet: View {
         guestFramebufferHeight = 0
         showingExecutionScreen = false
         isExecutionChromeHidden = false
-        appendSessionLog("[SESSION] Runtime closed safely by user")
-        finalizeDiagnosticReport(status: "runtime released safely by user")
         executionResult?.session.close()
         executionResult = nil
         StrideOrientationController.shared.reset()
@@ -1761,8 +1761,9 @@ private struct APKDetailSheet: View {
     }
 
     private func exportCompleteDiagnosticReport() {
-        let existingReport = diagnosticReportURL ?? (didFinalizeDiagnosticReport
-            ? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) : nil)
+        let existingReport = isExecuting ? nil :
+            (diagnosticReportURL ?? (didFinalizeDiagnosticReport
+                ? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) : nil))
         if let existingReport {
             logExportURL = existingReport
             showingLogShare = true

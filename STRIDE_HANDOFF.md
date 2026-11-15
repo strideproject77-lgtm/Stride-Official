@@ -1752,3 +1752,9 @@ Status: UI implementation committed · consolidated validation and visual review
 - This job stops after verifying the built `.app` bundle. It does **not** package an IPA, sign, export or distribute anything.
 - The existing unsigned IPA job remains separately gated behind explicit `workflow_dispatch` authorization or its existing dedicated commit-message condition.
 - This lets UI/diagnostics changes receive Swift/Xcode compile validation without creating an IPA.
+
+
+### Phase 51 implementation review correction
+
+- Final metric capture is ordered before the execution view clears FPS, touch latency and framebuffer state. This ensures the report records the last observed values instead of zeroed UI state.
+- Exporting while a guest session is still active now refreshes the report snapshot instead of re-sharing a stale report from an earlier point in that session.
