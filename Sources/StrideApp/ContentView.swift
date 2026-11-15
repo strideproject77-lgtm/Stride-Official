@@ -1501,8 +1501,12 @@ private struct APKDetailSheet: View {
 
     private var executionStatusColor: Color {
         if executionError != nil { return .red }
-        if isExecuting || executionResult != nil { return .orange }
-        return .green
+        if isExecuting { return .orange }
+        // Green means the guest has produced real rendered frames, not merely
+        // that the host session object was created successfully.
+        if let fps = liveGuestFPS, fps > 0 { return .green }
+        if executionResult != nil { return .orange }
+        return .secondary
     }
 
     // FPS is sourced only from successful guest OpenGL buffer swaps.
