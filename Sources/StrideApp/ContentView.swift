@@ -26,10 +26,7 @@ struct ContentView: View {
         ZStack {
             background.ignoresSafeArea()
             VStack(spacing: 0) {
-                header
-                    .sheet(isPresented: $showingImporter) {
-                        APKDocumentPicker { result in handleImport(result) }
-                    }
+                if selectedTab == 0 { header }
                 Group {
                     if selectedTab == 0 {
                         home
@@ -51,6 +48,9 @@ struct ContentView: View {
                 Spacer(minLength: 12)
                 tabBar
             }
+        }
+        .sheet(isPresented: $showingImporter) {
+            APKDocumentPicker { result in handleImport(result) }
         }
         .confirmationDialog("Delete this app from Stride?", isPresented: Binding(
             get: { pendingDelete != nil },
@@ -176,7 +176,6 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 6, height: 42).shadow(color: accent.opacity(0.8), radius: 8)
                     Text("Library").font(.system(size: 32, weight: .bold, design: .rounded)).italic().foregroundStyle(.white)
                     Spacer()
-                    headerIcon("magnifyingglass", label: "Search library") { searchText = searchText.isEmpty ? " " : "" }
                 }.padding(.top, 12)
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(muted)
@@ -584,7 +583,7 @@ private enum StrideAccentPalette {
     static let colors: [StrideAccentOption] = [
         .init(name: "Amber", hex: "E8AB64"),
         .init(name: "Lime", hex: "C5F477"),
-        .init(name: "Violet", hex: "B9A2FF"),
+        .init(name: "Violet", hex: "A855F7"),
         .init(name: "Blue", hex: "668CFF"),
         .init(name: "Cyan", hex: "63D9E8"),
         .init(name: "Rose", hex: "F28EAD"),
