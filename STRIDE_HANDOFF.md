@@ -1408,3 +1408,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: verify global log retention semantics across multiple launches, inspect the new Settings and app-details flows on a real iPhone, and run one consolidated Rust + Swift/iOS validation workflow. The current Overall Logs panel exposes the in-memory app-wide diagnostic entries retained by the diagnostics service; persistence/retention across launches remains a separate verification item.
 - Tests: Rust runtime test suite passed in run #827. iOS compile exposed sheet scope, a missing VStack closure, and iOS 16-only ShareLink/NavigationStack APIs against the project's older deployment target; fixes are committed in `cff7da1`, `59079cd`, and `09f42aa`. Consolidated validation re-run pending.
 - IPA: not built, signed or exported. `main` remains untouched.
+
+### 2026-11-15 — Phase 43 diagnostic precision improvement
+
+- Added register_operand_failure_context to the DEX inspector. When the existing strict method-level validator rejects an instruction for an invalid register, the diagnostic helper reports the exact code-unit PC, opcode, encoded instruction words, and frame register count.
+- Updated the class loader's DEX_METHOD_REGISTER_LAYOUT_REJECTED event to include that instruction context alongside the class/method signature and code-item offset. This makes the next 2048 session log useful even when the original XAPK cannot be uploaded.
+- Added a regression test asserting the reported PC, opcode, encoded words, and register-frame size for an invalid 12x register operand.
+- Commits: 9e6b9f5 (inspector diagnostic context), 8c7463e (loader event integration), 015af9d (diagnostic regression test).
+- Important limitation: this improves fault localization; it does not claim the nine previously rejected 2048 methods are all valid or executable. Their exact instruction bytes are still needed to make safe, targeted compatibility changes.
+- Remaining: inspect and fix any specific rejected opcodes revealed by the richer report; complete one consolidated Rust + iOS compile validation; then request a fresh device session log for the next startup-stage blocker. Phase 43 remains open.
+- No IPA build/sign/export and no merge to main; all changes remain on feat/dex-class-method-loader.
