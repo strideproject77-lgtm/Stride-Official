@@ -1418,3 +1418,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - Important limitation: this improves fault localization; it does not claim the nine previously rejected 2048 methods are all valid or executable. Their exact instruction bytes are still needed to make safe, targeted compatibility changes.
 - Remaining: inspect and fix any specific rejected opcodes revealed by the richer report; complete one consolidated Rust + iOS compile validation; then request a fresh device session log for the next startup-stage blocker. Phase 43 remains open.
 - No IPA build/sign/export and no merge to main; all changes remain on feat/dex-class-method-loader.
+
+
+### 2026-11-15 — Phase 43 targeted Kotlin ULong shift fix
+
+- Traced the rejected signatures `kotlin/ULong.shl-s-VKNKU(JI)J` and `shr-s-VKNKU(JI)J` to a concrete DEX format/operand-width bug: `shl-long/2addr`, `shr-long/2addr`, and `ushr-long/2addr` take a wide A value but a **single-word int** B shift distance. The validator incorrectly required B to be a wide pair, rejecting valid Kotlin-generated methods.
+- Fixed register validation: `0xbb..=0xc2` remain wide/wide; `0xc3..=0xc5` now validate wide A + narrow B. Added regression coverage for all three shift opcodes, invalid wide destinations, and out-of-frame shift registers.
+- Fixed interpreter execution to read B with `read_int` for long 2addr shifts instead of `read_long`, preserving the DEX semantics at runtime.
+- Added an interpreter regression test that loads 8L, shifts it left by the int value 1 using `shl-long/2addr`, and expects 16L.
+- Commits: `0e49a0a` (DEX validator), `e096aab` (interpreter operand semantics), `a114bdc` (interpreter regression test).
+- This directly addresses two of the nine rejected 2048 methods by signature. The other seven still require exact opcode evidence from the new diagnostic report; do not mark all nine fixed.
+- Remaining: inspect next specific rejected opcodes when a fresh 2048 session log is available; complete one consolidated Rust + iOS compile validation; request device retest after the validated app build is available. Phase 43 remains open.
+- No IPA build/sign/export and no merge to `main`; all changes remain on `feat/dex-class-method-loader`.
