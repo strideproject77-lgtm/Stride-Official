@@ -185,10 +185,14 @@ impl AppClassLoader {
                                     diagnostics.record_detailed(
                                         DiagnosticSeverity::Warning, "DexLoader", "DEX_METHOD_REGISTER_LAYOUT_REJECTED",
                                         "Method metadata was retained but its code has invalid register usage",
-                                        Some(&format!("{}->{}{} code_offset={} error={} {}",
-                                            descriptor, m.name, m.prototype, m.code_offset, error,
+                                        Some(&format!(
+                                            "{}->{}{} code_offset={} registers_size={} ins_size={} outs_size={} access_flags=0x{:04x} error={} {}",
+                                            descriptor, m.name, m.prototype, m.code_offset,
+                                            item.registers_size, item.ins_size, item.outs_size,
+                                            m.access_flags, error,
                                             register_operand_failure_context(item.instructions, item.registers_size)
-                                                .unwrap_or_else(|| "instruction_context=unavailable".to_owned()))),
+                                                .unwrap_or_else(|| "instruction_context=unavailable (failure may be incoming-layout validation)".to_owned())
+                                        )),
                                         Some("Check incoming argument word counts and every encoded register operand; this method will not execute"),
                                     );
                                 }
