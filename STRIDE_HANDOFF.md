@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phases 45–48 CI validated; unsigned IPA #906 verified)
+Updated: 2026-11-15 (Phase 49 Rust tests passed; authorized unsigned IPA build queued)
 
 ## Goal
 
@@ -498,7 +498,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 46 | Managed HashMap get/put/remove/contains/size compatibility subset for observer maps | Completed — consolidated CI validated; device retest pending |
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
-| 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust workspace tests passed (227/227 in dex-runtime); iOS compile validation pending |
+| 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust runtime suite passed (227/227 in dex-runtime); authorized consolidated iOS compile + unsigned IPA build triggered; device retest pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1663,3 +1663,11 @@ Status: UI implementation committed · consolidated validation and visual review
 - The dex-runtime test suite reports **227 passed, 0 failed**, including `array_list_intrinsics_support_lifecycle_state_stack_operations`.
 - The iOS/IPA job was skipped by workflow conditions. No new IPA was built, signed, or exported in this phase. This preserves the prior explicit IPA authorization as a one-time build request rather than treating it as blanket permission for every later batch.
 - Phase 49 remains **In Progress** until iOS compile validation and subsequent real-device retest. All changes remain on `feat/dex-class-method-loader`; `main` untouched.
+
+
+### 2026-11-15 — Phase 49 authorized unsigned iOS build checkpoint
+
+- User explicitly authorized a new Stride build in this conversation.
+- Triggered the repository's existing consolidated workflow from `feat/dex-class-method-loader`; it runs the complete Rust workspace test suite first, then builds the ARM64 iOS runtime, generates the XCFramework, compiles the iOS app, verifies the app bundle, packages and validates an **unsigned** IPA, and uploads the IPA plus build report as a workflow artifact.
+- This authorization covers only the unsigned build. No signing, App Store export, merge to `main`, or device compatibility claim is authorized or implied.
+- Phase 49 remains **In Progress** until the consolidated workflow result and real-device retest are reviewed.
