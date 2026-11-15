@@ -2782,6 +2782,10 @@ mod tests {
 
         let removed = vm.execute_method(5, &[Value::Object(map), Value::Object(key)], 32).unwrap();
         assert_eq!(removed.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let removed_null_key = vm.execute_method(5, &[Value::Object(map), Value::Object(null_key)], 32).unwrap();
+        assert_eq!(removed_null_key.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let removed_new_key = vm.execute_method(5, &[Value::Object(map), Value::Object(new_key)], 32).unwrap();
+        assert_eq!(removed_new_key.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let size_after = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
         assert_eq!(size_after.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(0)));
     }
