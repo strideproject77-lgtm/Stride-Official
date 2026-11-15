@@ -1462,3 +1462,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Commit: `e9c31113d7de0ab989e0a88156773d1d0818b85e`; test fixture commit: `f5cd360824b8639ec4c8547a6cd96d0e0ec4993c`.
 - Extra bug fix: this corrects the validator's opcode-dispatch precedence, not merely the test, so valid Kotlin long-shift methods can now reach the intended narrow-distance checks.
 - Remaining: one consolidated Rust test + iOS compile + authorized unsigned IPA run; verify the resulting IPA artifact and then device-test 2048. Phase 43 remains open. No signing and no merge to `main`.
+
+
+### 2026-11-15 — Phase 43 regression correction + icon build hardening
+
+- Inspected failed workflow #863 (run ID `43694481945`). Rust suite: 35 passed, 1 failed; IPA job was skipped because Rust tests failed.
+- Exact failure was the wide-pair boundary assertion at `validates_long_shift_2addr_with_narrow_shift_distance`: the test encoded A=v0 in a two-register frame, which is a valid wide pair (v0/v1). Corrected the invalid boundary fixture to A=v1 (`0x11c3`) so the wide pair v1/v2 correctly exceeds that frame. This was a test-fixture error; production long-shift validator remains as fixed in the preceding commit.
+- Commit: `9211815850ddb787a59e2e9486b33e8bd5935fe4`.
+- App icon: kept the project-owned deterministic Swift artwork generator as the single source of truth (midnight blue gradient, luminous S mark); added build-time guards for the generated PNG, asset catalog JSON, and exact 1024x1024 dimensions. This prevents missing/truncated/wrong-sized icon assets from silently entering an IPA.
+- Workflow validation commit: `15a768c536c50d31877389c7eb559f88af0fa848`.
+- Extra improvements: icon integrity is now checked in CI, and the DEX test now checks the actual out-of-bounds wide register pair rather than an incorrectly assumed invalid encoding.
+- Remaining: run one consolidated Rust suite + iOS device compile + unsigned IPA package and verify artifact. Phase 43 remains open pending 2048 device retest and remaining rejected method evidence. No signing, no merge to `main`.
