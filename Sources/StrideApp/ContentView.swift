@@ -1487,8 +1487,9 @@ private struct APKDetailSheet: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func logFileURL() -> URL {
-        diagnostics.latestSessionLogURL(apkName: item.displayName) ?? diagnostics.logFileURL
+    private func logFileURL() -> URL? {
+        // Never fall back to the app-wide diagnostics file: that would display overall events as this game's session.
+        diagnostics.latestSessionLogURL(apkName: item.displayName)
     }
 
     private func sessionLogExportText() -> String {
@@ -1592,8 +1593,8 @@ private struct APKDetailSheet: View {
 
     private func loadPreviousSession() {
         diagnostics.flush()
-        let url = logFileURL()
-        guard let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
+        guard let url = logFileURL(),
+              let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
         sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         logExportURL = url
         if let last = sessionLogLines.last { lastRunLabel = "Saved session · \(last)" }
