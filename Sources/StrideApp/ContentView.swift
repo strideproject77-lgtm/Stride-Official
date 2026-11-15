@@ -17,11 +17,30 @@ struct ContentView: View {
     @State private var showingOverallLogsShare = false
     @State private var overallLogsShareText = ""
     @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
+    @AppStorage("stride.surfaceTheme") private var surfaceTheme = "espresso"
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
 
-    private var background: Color { .black }
-    private var panel: Color { .black }
-    private var raised: Color { Color(red: 0.085, green: 0.085, blue: 0.10) }
+    private var background: Color {
+        switch surfaceTheme {
+        case "midnight": return Color(red: 0.018, green: 0.022, blue: 0.038)
+        case "graphite": return Color(red: 0.035, green: 0.038, blue: 0.045)
+        default: return Color(red: 0.045, green: 0.027, blue: 0.020)
+        }
+    }
+    private var panel: Color {
+        switch surfaceTheme {
+        case "midnight": return Color(red: 0.055, green: 0.064, blue: 0.095)
+        case "graphite": return Color(red: 0.075, green: 0.080, blue: 0.092)
+        default: return Color(red: 0.090, green: 0.055, blue: 0.038)
+        }
+    }
+    private var raised: Color {
+        switch surfaceTheme {
+        case "midnight": return Color(red: 0.090, green: 0.105, blue: 0.150)
+        case "graphite": return Color(red: 0.115, green: 0.122, blue: 0.138)
+        default: return Color(red: 0.135, green: 0.082, blue: 0.055)
+        }
+    }
     private var accent: Color { Color(hex: accentColorHex) ?? Color(red: 0.68, green: 0.25, blue: 0.98) }
     private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
     private var line: Color { Color.white.opacity(0.10) }
@@ -198,7 +217,7 @@ struct ContentView: View {
     }
 
     private var gamingBackdrop: some View {
-        Color(red: 0.018, green: 0.018, blue: 0.026).ignoresSafeArea()
+        background.ignoresSafeArea()
     }
 
     private var libraryView: some View {
@@ -246,6 +265,36 @@ struct ContentView: View {
             .padding(.bottom, 28)
         }
         .background(gamingBackdrop)
+    }
+
+    private func surfaceThemeOption(_ title: String, value: String, swatch: Color) -> some View {
+        Button {
+            surfaceTheme = value
+        } label: {
+            VStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(swatch)
+                    .frame(height: 34)
+                    .overlay(alignment: .topTrailing) {
+                        if surfaceTheme == value {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(5)
+                        }
+                    }
+                Text(title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(9)
+            .background(raised.opacity(surfaceTheme == value ? 1 : 0.55), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(surfaceTheme == value ? accent.opacity(0.8) : line, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title) app surface theme")
+        .accessibilityAddTraits(surfaceTheme == value ? .isSelected : [])
     }
 
     private var moreView: some View {
@@ -404,9 +453,29 @@ struct ContentView: View {
                             .accessibilityAddTraits(accentColorHex == option.hex ? .isSelected : [])
                         }
                     }
-                    Text("Your choice is saved automatically. App backgrounds stay black.")
+                    Text("Your accent color is saved automatically.")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(muted)
+                }
+                .padding(14)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("APP SURFACE")
+                            .font(.system(size: 9, weight: .heavy))
+                            .kerning(1.3)
+                            .foregroundStyle(muted)
+                        Text("Choose the overall background and panel tone")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(muted)
+                    }
+                    HStack(spacing: 9) {
+                        surfaceThemeOption("Espresso", value: "espresso", swatch: Color(red: 0.20, green: 0.12, blue: 0.08))
+                        surfaceThemeOption("Midnight", value: "midnight", swatch: Color(red: 0.08, green: 0.10, blue: 0.18))
+                        surfaceThemeOption("Graphite", value: "graphite", swatch: Color(red: 0.14, green: 0.15, blue: 0.17))
+                    }
                 }
                 .padding(14)
                 .background(panel, in: RoundedRectangle(cornerRadius: 16))
