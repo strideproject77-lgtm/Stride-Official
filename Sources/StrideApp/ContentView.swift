@@ -838,7 +838,7 @@ private struct AboutStrideView: View {
 }
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
-    @State private var showingDiagnostics = false
+    @State private var showingSessionLogs = false
     @State private var showingExecutionScreen = false
     @State private var isExecutionChromeHidden = false
     @State private var launchTask: Task<Void, Never>?
@@ -976,50 +976,6 @@ private struct APKDetailSheet: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
 
-                    DisclosureGroup(isExpanded: $showingDiagnostics) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            metricRow("Captured events", value: "\(diagnostics.entries.count)")
-                            metricRow("Errors", value: "\(diagnostics.issueCount)")
-                            metricRow("Warnings", value: "\(diagnostics.entries.filter { $0.severity == .warning }.count)")
-                            HStack(spacing: 10) {
-                                Button {
-                                    UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n")
-                                } label: {
-                                    Label("Copy Log", systemImage: "doc.on.doc")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(raised, in: RoundedRectangle(cornerRadius: 10))
-                                }
-                                .buttonStyle(.plain)
-
-                                Button {
-                                    exportSessionLog()
-                                } label: {
-                                    Label("Export Report", systemImage: "square.and.arrow.up")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundStyle(Color.black)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(accent, in: RoundedRectangle(cornerRadius: 10))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.top, 4)
-                            Text("Export the Complete Diagnostic Report for package fingerprints, environment metrics, and Rust runtime diagnostics.")
-                                .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .padding(.top, 8)
-                    } label: {
-                        Label("Diagnostics", systemImage: "waveform.path.ecg")
-                            .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                    }
-                    .tint(accent).padding(15)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
-
                     Button {
                         showingExecutionScreen = true
                         launchTask = Task {
@@ -1141,152 +1097,39 @@ private struct APKDetailSheet: View {
                             Spacer()
                             Image(systemName: "clock.arrow.circlepath").foregroundStyle(accent)
                         }
-                        HStack {
-                            Text("Session Logs").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                            Spacer()
-                            Button { copySessionLog() } label: {
-                                Label("COPY LOG", systemImage: "doc.on.doc")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Copy complete session log")
-                            Button { exportSessionLog() } label: {
-                                Label("EXPORT", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Export complete session log as text")
-                        }
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 5) {
-                                if sessionLogLines.isEmpty {
-                                    Text("No launch logs yet. Force Execute to record the next attempt.")
-                                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                                } else {
-                                    ForEach(Array(sessionLogLines.suffix(80).enumerated()), id: \.offset) { _, line in
-                                        Text(line)
-                                            .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                            .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red.opacity(0.95) : muted)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                            .textSelection(.enabled)
+                        DisclosureGroup(isExpanded: $showingSessionLogs) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Text("SESSION EVENTS").font(.system(size: 9, weight: .heavy)).tracking(1).foregroundStyle(muted)
+                                    Spacer()
+                                    Button { copySessionLog() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 10, weight: .bold)).foregroundStyle(accent) }.buttonStyle(.plain)
+                                    Button { exportSessionLog() } label: { Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 10, weight: .bold)).foregroundStyle(accent) }.buttonStyle(.plain)
+                                }
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        if sessionLogLines.isEmpty {
+                                            Text("No session logs saved for this app yet.").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                                        } else {
+                                            ForEach(Array(sessionLogLines.suffix(100).enumerated()), id: \.offset) { _, line in
+                                                Text(line).font(.system(size: 9, weight: .regular, design: .monospaced))
+                                                    .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red.opacity(0.95) : muted)
+                                                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                                            }
+                                        }
                                     }
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 180)
-                        .padding(10)
-                        .background(canvas, in: RoundedRectangle(cornerRadius: 11))
-                        Text("One file includes APK/split fingerprints, iPhone and iOS build details, runtime timeline, missing APIs, launch-stage evidence and the full raw log.")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button {
-                            let runtimeStatus = executionError.map { "Failed: \($0)" } ??
-                                executionResult.map { "Status=\($0.statusCode), lifecycle=\($0.lifecycleState)" } ??
-                                "Session captured; final runtime state unavailable"
-                            let runtimeMetrics = executionResult.map {
-                                "classes=\($0.totalClassesLoaded), instructions=\($0.instructionsExecuted), missingAPIs=\($0.missingApisCount), averageFPS=\($0.averageFps), heapBytes=\($0.heapAllocatedBytes)"
-                            } ?? "No launch metrics returned"
-                            let liveRuntimeSnapshot = executionResult?.session.diagnosticsSnapshot() ??
-                                "Live Rust runtime snapshot unavailable (runtime was not retained or export failed)"
-                            let completeSessionLog = sessionLogLines.joined(separator: "\n") +
-                                "\n\n--- FINAL LIVE RUST DIAGNOSTICS SNAPSHOT ---\n" + liveRuntimeSnapshot
-                            let reportURL = diagnostics.exportSessionReport(
-                                apkName: item.displayName,
-                                apkURL: item.fileURL,
-                                status: runtimeStatus,
-                                rawLog: completeSessionLog,
-                                inspection: item.inspection,
-                                packageFormat: String(describing: item.packageFormat),
-                                splitCount: item.splitAPKURLs.count,
-                                runtimeMetrics: runtimeMetrics,
-                                splitAPKURLs: item.splitAPKURLs
-                            )
-                            if let reportURL {
-                                logExportURL = reportURL
-                                showingLogShare = true
-                            } else {
-                                appendSessionLog("[ERROR] One-shot diagnostic report could not be generated")
-                            }
+                                }.frame(maxHeight: 210).padding(10).background(canvas, in: RoundedRectangle(cornerRadius: 11))
+                                Text("Copy or export this app's session timeline. Overall diagnostics are available in Settings.")
+                                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+                            }.padding(.top, 8)
                         } label: {
-                            Label("Export Complete Diagnostic Report (.txt)", systemImage: "doc.text.magnifyingglass")
-                                .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Unified Diagnostics").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                Text("\(diagnostics.entries.count) retained events · \(diagnostics.issueCount) errors")
-                                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                                HStack(spacing: 9) {
-                                    Label("\(diagnostics.entries.filter { $0.severity == .fatal }.count) fatal", systemImage: "exclamationmark.octagon.fill")
-                                        .foregroundStyle(.red)
-                                    Label("\(diagnostics.entries.filter { $0.severity == .warning }.count) warnings", systemImage: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                }
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            HStack {
+                                Label("Session Logs", systemImage: "doc.text.magnifyingglass").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                Spacer()
+                                Text(String(sessionLogLines.count) + " lines").font(.system(size: 9, weight: .medium)).foregroundStyle(muted)
                             }
-                            Spacer()
-                            Button {
-                                UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n")
-                            } label: {
-                                Label("COPY", systemImage: "doc.on.doc")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                            Button {
-                                let fatalCount = diagnostics.entries.filter { $0.severity == .fatal }.count
-                                let errorCount = diagnostics.entries.filter { $0.severity == .error }.count
-                                let warningCount = diagnostics.entries.filter { $0.severity == .warning }.count
-                                let recent = diagnostics.entries.suffix(12).map(\.line).joined(separator: "\n")
-                                let summary = [
-                                    "STRIDE DIAGNOSTICS SUMMARY",
-                                    "Events: \(diagnostics.entries.count)",
-                                    "Fatal: \(fatalCount) · Errors: \(errorCount) · Warnings: \(warningCount)",
-                                    "",
-                                    "RECENT EVENTS",
-                                    recent
-                                ].joined(separator: "\n")
-                                UIPasteboard.general.string = summary
-                            } label: {
-                                Label("SUMMARY", systemImage: "doc.text.magnifyingglass")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                            Button {
-                                exportSessionLog()
-                            } label: {
-                                Label("EXPORT", systemImage: "square.and.arrow.up")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(accent)
-                            }
-                        }
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 6) {
-                                ForEach(Array(diagnostics.entries.suffix(35))) { entry in
-                                    Text(entry.line)
-                                        .font(.system(size: 9, weight: .regular, design: .monospaced))
-                                        .foregroundStyle(entry.severity == .fatal || entry.severity == .error ? Color.red : (entry.severity == .warning ? Color.orange : muted))
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .textSelection(.enabled)
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 210)
-                        .padding(10)
-                        .background(canvas, in: RoundedRectangle(cornerRadius: 11))
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 16))
-
+                        }.tint(accent).padding(14)
+                            .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
                     if let res = executionResult {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
