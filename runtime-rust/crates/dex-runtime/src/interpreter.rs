@@ -2270,7 +2270,7 @@ mod tests {
                 name: "shift".into(),
                 prototype: "()J".into(),
                 // v0/v1 = 8L; v2 = 1; shl-long/2addr v0, v2; return-wide v0.
-                code_units: vec![0x0016, 8, 0x2112, 0x20c3, 0x0010],
+                code_units: vec![0x0016, 8, 0x1212, 0x20c3, 0x0010],
                 registers_size: 3,
                 ins_size: 0,
                 try_blocks: vec![],
