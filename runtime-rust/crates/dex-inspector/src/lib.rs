@@ -372,6 +372,31 @@ pub fn validate_register_operands(
     Ok(())
 }
 
+/// Returns the first instruction-level register validation failure with its exact
+/// DEX code-unit offset, opcode and encoded instruction words. This is diagnostic-only:
+/// the authoritative whole-method validator remains unchanged.
+pub fn register_operand_failure_context(bytes: &[u8], registers_size: u16) -> Option<String> {
+    let decoded = decode_instructions(bytes).ok()?;
+    for instruction in decoded {
+        if instruction.kind != InstructionKind::Opcode { continue; }
+        let start = instruction.code_unit_offset.checked_mul(2)?;
+        let end = start.checked_add(instruction.width.checked_mul(2)?)?;
+        let encoded = bytes.get(start..end)?;
+        if validate_register_operands(encoded, registers_size) == Err(DecodeError::InvalidRegister) {
+            let words = encoded.chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .map(|word| format!("{:04x}", word))
+                .collect::<Vec<_>>()
+                .join(" ");
+            return Some(format!(
+                "instruction_pc={} opcode=0x{:02x} instruction_words=[{}] registers_size={}",
+                instruction.code_unit_offset, instruction.opcode, words, registers_size
+            ));
+        }
+    }
+    None
+}
+
 /// Decodes every code unit in a DEX instruction stream, validating instruction widths,
 /// switch/array payload extents, and relative branch destinations.
 pub fn decode_instructions(bytes:&[u8])->Result<Vec<DecodedInstruction>,DecodeError>{
