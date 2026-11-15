@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{ClassInventory, inspect_classes_for_loading};
 use stride_dex_inspector::read_code_item;
 use stride_dex_inspector::classes::validate_method_register_layout;
-use stride_dex_inspector::validate_register_operands;
+use stride_dex_inspector::{validate_register_operands, register_operand_failure_context};
 use crate::hierarchy::{ClassHierarchy, RuntimeClass};
 use crate::interpreter::{MethodCode, ArtVm, ExecutionStopReason};
 use crate::heap::ManagedHeap;
@@ -185,8 +185,10 @@ impl AppClassLoader {
                                     diagnostics.record_detailed(
                                         DiagnosticSeverity::Warning, "DexLoader", "DEX_METHOD_REGISTER_LAYOUT_REJECTED",
                                         "Method metadata was retained but its code has invalid register usage",
-                                        Some(&format!("{}->{}{} code_offset={} error={}",
-                                            descriptor, m.name, m.prototype, m.code_offset, error)),
+                                        Some(&format!("{}->{}{} code_offset={} error={} {}",
+                                            descriptor, m.name, m.prototype, m.code_offset, error,
+                                            register_operand_failure_context(item.instructions, item.registers_size)
+                                                .unwrap_or_else(|| "instruction_context=unavailable".to_owned()))),
                                         Some("Check incoming argument word counts and every encoded register operand; this method will not execute"),
                                     );
                                 }
