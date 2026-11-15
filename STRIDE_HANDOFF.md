@@ -1317,3 +1317,11 @@ Status: UI implementation committed · consolidated validation and visual review
 - Files: `Sources/StrideApp/ContentView.swift`, `README.md`, `STRIDE_HANDOFF.md`.
 - Remaining: verify the About screen layout and GitHub link on an iPhone; set the GitHub repository's separate short Description/About metadata manually because the connected GitHub actions available in this session do not expose repository-metadata editing. Confirm the final redistribution license separately; this phase does not change LICENSE.
 - Tests/workflows: deferred to the single consolidated validation pass. No IPA build, signing, export, or merge to `main`. All changes remain on `feat/dex-class-method-loader`.
+
+
+### 2026-11-15 — Authorized unsigned UI-review IPA build
+
+- User explicitly authorized an unsigned IPA build to inspect the current iPhone UI.
+- Build source: `feat/dex-class-method-loader`; no signing, release publication, or merge to `main` is authorized.
+- The existing workflow's build job runs only after the complete Rust test job passes; it then compiles the physical-iPhone Release app, packages `Stride-unsigned.ipa`, validates the archive, and uploads the IPA plus build report as a workflow artifact.
+- UI review targets: Phase 37 Home/Library launcher and Phase 40 About/creator attribution. Device-side visual verification remains pending until the user installs and inspects the IPA.
