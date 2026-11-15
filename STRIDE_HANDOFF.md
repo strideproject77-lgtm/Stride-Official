@@ -498,7 +498,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 46 | Managed HashMap get/put/remove/contains/size compatibility subset for observer maps | Completed — consolidated CI validated; device retest pending |
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
-| 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — implementation committed; consolidated validation pending |
+| 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust workspace tests passed (227/227 in dex-runtime); iOS compile validation pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1651,6 +1651,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - Added a managed indexed ArrayList compatibility subset for lifecycle state stacks: `add(Object)`, `add(index,Object)`, `get(index)`, `set(index,Object)`, `remove(index)`, `remove(Object)`, `contains(Object)`, `size()`, `isEmpty()`, and `clear()`. Indexed storage is held on the list's managed heap instance, with shifting/compaction on insertion/removal and explicit bounds checks. This is a targeted compatibility subset, not a claim of full Java ArrayList implementation or iterator support.
 - Added an interpreter regression fixture covering construction, append, indexed lookup, indexed removal/compaction, and size accounting.
 - UI extra: runtime result cards now distinguish a completed lifecycle from a blocked startup. A zero-instruction launch explicitly says no guest bytecode executed and directs the user to Session Logs, instead of displaying a green success-style report card for a failed startup.
-- Status: **In Progress — implementation committed; consolidated Rust workspace tests and iOS Release compile validation pending.** Do not mark Phase 49 Completed until the consolidated workflow passes. Device retest is also pending.
+- Validation: GitHub Actions workflow [run #907](https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/43706088495) passed the Rust runtime test job; the dex-runtime suite reports **227 passed, 0 failed**, including the new ArrayList lifecycle regression. The unsigned IPA build job was skipped because this phase did not request a new IPA build.
+- Status: **In Progress — implementation committed; Rust validation passed, iOS compile validation pending.** Do not mark Phase 49 Completed until the iOS compile validation is authorized/run and passes. Device retest is also pending.
 - Next: run one consolidated workflow after this implementation batch; correct any failures; then request a fresh 2048 log and continue from the next exact unresolved framework call. Do not claim 2048 has started or reached gameplay until guest instructions, first rendered frame, and interaction are observed.
 - All changes remain on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge was requested in this phase.
+
+
+### 2026-11-15 — Phase 49 Rust validation checkpoint
+
+- Workflow #907 / run ID `43706088495` completed successfully for the Rust runtime test job.
+- The dex-runtime test suite reports **227 passed, 0 failed**, including `array_list_intrinsics_support_lifecycle_state_stack_operations`.
+- The iOS/IPA job was skipped by workflow conditions. No new IPA was built, signed, or exported in this phase. This preserves the prior explicit IPA authorization as a one-time build request rather than treating it as blanket permission for every later batch.
+- Phase 49 remains **In Progress** until iOS compile validation and subsequent real-device retest. All changes remain on `feat/dex-class-method-loader`; `main` untouched.
