@@ -2685,6 +2685,7 @@ mod tests {
         let key = heap.allocate_instance("Ltest/Key;").unwrap();
         let value = heap.allocate_instance("Ltest/Value;").unwrap();
         let null_key = heap.allocate_instance("Ltest/NullValueKey;").unwrap();
+        let new_key = heap.allocate_instance("Ltest/NewKey;").unwrap();
         let methods = HashMap::from([
             (1u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
@@ -2762,12 +2763,22 @@ mod tests {
         // A key explicitly mapped to null is present, but putIfAbsent must replace it.
         let put_null = vm.execute_method(1, &[Value::Object(map), Value::Object(null_key), Value::Object(0)], 32).unwrap();
         assert_eq!(put_null.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
+        let contains_null_mapping = vm.execute_method(3, &[Value::Object(map), Value::Object(null_key)], 32).unwrap();
+        assert_eq!(contains_null_mapping.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
         let replace_null = vm.execute_method(6, &[Value::Object(map), Value::Object(null_key), Value::Object(value)], 32).unwrap();
         assert_eq!(replace_null.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
         let replaced_value = vm.execute_method(2, &[Value::Object(map), Value::Object(null_key)], 32).unwrap();
         assert_eq!(replaced_value.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let size_with_null_key = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
         assert_eq!(size_with_null_key.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(2)));
+
+        // A genuinely absent key is inserted by putIfAbsent and increments size once.
+        let inserted_absent = vm.execute_method(6, &[Value::Object(map), Value::Object(new_key), Value::Object(value)], 32).unwrap();
+        assert_eq!(inserted_absent.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(0)));
+        let fetched_absent = vm.execute_method(2, &[Value::Object(map), Value::Object(new_key)], 32).unwrap();
+        assert_eq!(fetched_absent.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let size_after_absent = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
+        assert_eq!(size_after_absent.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(3)));
 
         let removed = vm.execute_method(5, &[Value::Object(map), Value::Object(key)], 32).unwrap();
         assert_eq!(removed.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
