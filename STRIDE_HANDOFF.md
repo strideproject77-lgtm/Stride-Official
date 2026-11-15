@@ -1325,3 +1325,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Build source: `feat/dex-class-method-loader`; no signing, release publication, or merge to `main` is authorized.
 - The existing workflow's build job runs only after the complete Rust test job passes; it then compiles the physical-iPhone Release app, packages `Stride-unsigned.ipa`, validates the archive, and uploads the IPA plus build report as a workflow artifact.
 - UI review targets: Phase 37 Home/Library launcher and Phase 40 About/creator attribution. Device-side visual verification remains pending until the user installs and inspects the IPA.
+
+
+### Phase 41 — Neon Gaming Dashboard UI
+**Status: UI implementation committed · consolidated iOS build and device visual review pending.**
+
+- Replaced the previous iPhone-style launcher layout with a dark navy/black gaming dashboard inspired by the user's supplied reference.
+- Home now has Stride branding, purple accent glow, search/settings controls, a featured-game panel using an actually imported app icon, All Games section, three-column game grid, and a clear Import Game action.
+- Library now uses a dedicated Library heading, search field, game count, and three-column app grid.
+- Bottom navigation is Home, Library, Settings, More. The large circular center Play button is not present.
+- Added a More page with Import, Recently Played, and About Stride shortcuts; retained existing Settings, accent-color customization, APK detail/launch, import, delete, and About flows.
+- Extra UI improvements: consistent purple default accent, neon border treatment, larger game tiles, stronger hierarchy, and search accessibility labels.
+- Remaining: run the single consolidated workflow/build, inspect the resulting UI on an iPhone, and tune spacing/icon sizing from real-device feedback. The featured banner intentionally uses the user's imported game icon rather than fabricated game artwork.
+- No runtime execution behavior changed. No signing, release export, or merge to `main`.
