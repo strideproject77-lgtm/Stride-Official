@@ -1440,3 +1440,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - This directly addresses two of the nine rejected 2048 methods by signature. The other seven still require exact opcode evidence from the new diagnostic report; do not mark all nine fixed.
 - Remaining: inspect next specific rejected opcodes when a fresh 2048 session log is available; complete one consolidated Rust + iOS compile validation; request device retest after the validated app build is available. Phase 43 remains open.
 - No IPA build/sign/export and no merge to `main`; all changes remain on `feat/dex-class-method-loader`.
+
+
+### 2026-11-15 — Phase 43 regression-test correction after failed validation
+
+- Consolidated workflow run #857 failed before the iOS compile/IPA stage: the DEX inspector test `validates_long_shift_2addr_with_narrow_shift_distance` had an incorrectly encoded invalid-register case.
+- Corrected the 12x instruction word from `0x20c3` (A=v0, B=v2; valid in a three-register frame) to `0x30c3` (A=v0, B=v3; correctly outside the v0..v2 frame). Updated the test comment to document the A/B nibble encoding.
+- This is a test-fixture correction only; the production long-shift validator/interpreter implementation is unchanged.
+- Commit: `f5cd360824b8639ec4c8547a6cd96d0e0ec4993c`.
+- Remaining: run the next single consolidated Rust + iOS compile validation and authorized unsigned IPA build. Do not claim 2048 compatibility until device retest succeeds; seven earlier method-layout warnings still need exact diagnostic evidence.
+- No signing, no merge to `main`; changes remain on `feat/dex-class-method-loader`.
