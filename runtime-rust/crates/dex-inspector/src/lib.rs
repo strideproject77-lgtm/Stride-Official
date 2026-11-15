@@ -519,3 +519,19 @@ mod decoder_tests {
  }
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
 }
+
+#[cfg(test)]
+mod register_failure_context_tests {
+    use super::*;
+
+    #[test]
+    fn reports_pc_opcode_and_encoded_words_for_invalid_register() {
+        // move v0, v1 in a frame containing only v0.
+        let bytes = 0x1001u16.to_le_bytes();
+        let context = register_operand_failure_context(&bytes, 1).unwrap();
+        assert!(context.contains("instruction_pc=0"));
+        assert!(context.contains("opcode=0x01"));
+        assert!(context.contains("instruction_words=[1001]"));
+        assert!(context.contains("registers_size=1"));
+    }
+}
