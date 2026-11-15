@@ -1338,3 +1338,12 @@ Status: UI implementation committed · consolidated validation and visual review
 - Extra UI improvements: consistent purple default accent, neon border treatment, larger game tiles, stronger hierarchy, and search accessibility labels.
 - Remaining: run the single consolidated workflow/build, inspect the resulting UI on an iPhone, and tune spacing/icon sizing from real-device feedback. The featured banner intentionally uses the user's imported game icon rather than fabricated game artwork.
 - No runtime execution behavior changed. No signing, release export, or merge to `main`.
+
+
+### 2026-11-15 — User-authorized Phase 41 unsigned IPA build
+
+- User explicitly requested an IPA build to review the new gaming-dashboard UI.
+- Build target: current `feat/dex-class-method-loader` HEAD, including Phase 41 dashboard changes.
+- Build must remain unsigned; do not sign, export through a signing service, publish a release, or merge to `main`.
+- Rust test suite is the prerequisite; the macOS iOS packaging job must run only after it passes.
+- Device-side visual review remains pending installation by the user.
