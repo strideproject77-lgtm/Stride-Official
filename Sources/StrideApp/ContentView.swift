@@ -517,13 +517,13 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .semibold)).foregroundStyle(muted)
                     Spacer()
                     Button {
-                        UIPasteboard.general.string = diagnostics.entries.map(\\.line).joined(separator: "\\n")
+                        UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n")
                     } label: {
                         Label("Copy", systemImage: "doc.on.doc").font(.system(size: 11, weight: .semibold))
                     }
                     .foregroundColor(accent)
                     Button {
-                        overallLogsShareText = diagnostics.entries.map(\\.line).joined(separator: "\\n")
+                        overallLogsShareText = diagnostics.entries.map(\.line).joined(separator: "\n")
                         showingOverallLogsShare = true
                     } label: {
                         Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 11, weight: .semibold))
