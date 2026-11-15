@@ -533,8 +533,9 @@ mod decoder_tests {
   assert_eq!(validate_register_operands(&words(&[0x10c5,0x000e]),3),Ok(()));
   // The wide destination/source pair must still fit.
   assert_eq!(validate_register_operands(&words(&[0x10c3,0x000e]),2),Err(DecodeError::InvalidRegister));
-  // The shift distance is a single register and must be inside the frame.
-  assert_eq!(validate_register_operands(&words(&[0x20c3,0x000e]),3),Err(DecodeError::InvalidRegister));
+  // 12x encodes A in bits 8..11 and B in bits 12..15.
+  // Here B=v3 is outside a three-register frame (v0..v2).
+  assert_eq!(validate_register_operands(&words(&[0x30c3,0x000e]),3),Err(DecodeError::InvalidRegister));
  }
 
  #[test] fn validates_packed_switch_payload(){let d=decode_instructions(&words(&[0x002b,3,0,0x0100,1,0,0,0,0])).unwrap();assert_eq!(d[1].kind,InstructionKind::PackedSwitchPayload);}
