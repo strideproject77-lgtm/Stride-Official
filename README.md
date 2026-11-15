@@ -33,8 +33,7 @@ A feature is not implemented merely because its UI exists. Each runtime capabili
 Stride is proprietary software. The repository is public for viewing, but public
 visibility does not grant a license to use, copy, modify, redistribute, or
 incorporate its code or assets into another project. All rights are reserved.
-Prior express written permission from the authorized Stride Project rights
-holder is required for any such use, except where applicable law provides
+Prior express written permission from AhmiiDev is required for any such use, except where applicable law provides
 non-waivable rights.
 
 See [LICENSE](LICENSE) for the full terms. Do not assume that forking,
