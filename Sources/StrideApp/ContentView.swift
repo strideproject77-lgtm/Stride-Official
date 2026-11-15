@@ -310,7 +310,13 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func appIconGrid(_ items: [ImportedAPK]) -> some View {\n        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 4), alignment: .center, spacing: 22) {\n            ForEach(items) { item in packageButton(item) }\n        }\n    }\n\n    private var filteredPackages: [ImportedAPK] {
+    private func appIconGrid(_ items: [ImportedAPK]) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 4), alignment: .center, spacing: 22) {
+            ForEach(items) { item in packageButton(item) }
+        }
+    }
+
+    private var filteredPackages: [ImportedAPK] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return library.packages
         }
