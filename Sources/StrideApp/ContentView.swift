@@ -1169,11 +1169,26 @@ private struct APKDetailSheet: View {
                                         .font(.system(size: 8, weight: .heavy))
                                         .tracking(0.8)
                                         .foregroundStyle(.red.opacity(0.9))
-                                    Text(blocker.replacingOccurrences(of: "[RUNTIME] ", with: ""))
-                                        .font(.system(size: 9, weight: .medium, design: .monospaced))
-                                        .foregroundStyle(muted)
-                                        .lineLimit(3)
-                                        .textSelection(.enabled)
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Text(blocker.replacingOccurrences(of: "[RUNTIME] ", with: ""))
+                                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(muted)
+                                            .lineLimit(4)
+                                            .textSelection(.enabled)
+                                        Spacer(minLength: 0)
+                                        Button {
+                                            UIPasteboard.general.string = blocker.replacingOccurrences(of: "[RUNTIME] ", with: "")
+                                        } label: {
+                                            Label("Copy", systemImage: "doc.on.doc")
+                                                .font(.system(size: 9, weight: .bold))
+                                                .foregroundStyle(.white)
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 6)
+                                                .background(Color.red.opacity(0.18), in: Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Copy first startup blocker")
+                                    }
                                 }
                                 .padding(9)
                                 .frame(maxWidth: .infinity, alignment: .leading)

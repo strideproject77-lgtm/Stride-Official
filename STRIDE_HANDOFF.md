@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phase 49 Rust tests passed; authorized unsigned IPA build queued)
+Updated: 2026-11-15 (Phase 50 Rust tests passed; pre-build audit completed; unsigned IPA build authorized)
 
 ## Goal
 
@@ -1683,6 +1683,7 @@ Status: UI implementation committed · consolidated validation and visual review
 - UI extra: the runtime result card now surfaces the first `[MISSING_API]` event directly as a compact, selectable “First startup blocker” panel, so users can see the exact failing API without manually scanning the full log.
 - Validation: pending one consolidated Rust + iOS compile workflow after this implementation batch. No repeated test runs.
 - Phase 50 remains **In Progress** until the consolidated workflow passes and a fresh device session log confirms the next startup stage. Do not claim 2048 compatibility or gameplay until guest instructions, a rendered frame, and interaction are observed.
+- UI extra: the FIRST STARTUP BLOCKER card now has a one-tap Copy action and a slightly taller selectable diagnostic line, so the exact unresolved API can be shared without manually selecting monospaced text.
 - All changes remain on `feat/dex-class-method-loader`; `main` remains untouched. No IPA build/sign/export is included in this phase.
 
 
@@ -1706,3 +1707,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - The earlier #911 compile failure and #912 null-representation assertion failure were corrected before this passing run. The final workflow is green.
 - The iOS/unsigned IPA job was skipped for Phase 50; no new IPA was built, signed, or exported. Phase 50 remains **In Progress** pending iOS compile validation and a fresh device session log.
 - All implementation commits remain on `feat/dex-class-method-loader`; `main` is untouched.
+
+
+### 2026-11-15 — Phase 50 pre-build audit + authorized unsigned IPA checkpoint
+
+- Audited the active branch head `478444a4e311e0e41d2f3a1d1f4599b226f46be7`, the Phase 50 runtime changes, the blocker-focused SwiftUI card, and `.github/workflows/ios-build.yml`.
+- Confirmed the previous 2048 session log predates the WeakReference fix and the earlier IPA #910 was built from Phase 49; neither can validate Phase 50 runtime behaviour.
+- Confirmed the exact WeakReference constructor and inherited Reference.get/clear intrinsics are present. GC-driven weak reachability/clearing is explicitly unsupported and must not be represented as complete.
+- Confirmed the Phase 50 Rust workspace validation passed in workflow #913 (228 tests passed). The iOS/IPA job was skipped in #913, so Swift/Xcode linkage for Phase 50 remains unverified.
+- Workflow audit: Rust tests are a required dependency of the iOS job; the job targets generic physical iOS/ARM64, disables code signing, validates the app bundle and IPA ZIP contents, and uploads the unsigned IPA plus build report. No signing or distribution step exists.
+- Added a Copy action to the FIRST STARTUP BLOCKER UI card as a small diagnostics usability improvement.
+- This checkpoint authorizes one unsigned IPA build only after the Rust test job passes. Do not sign, merge to main, or claim real-device APK execution. Phase 50 remains In Progress until the iOS compile passes and a fresh iPhone session log is reviewed.
