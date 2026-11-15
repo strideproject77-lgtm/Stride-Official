@@ -13,6 +13,8 @@ struct ContentView: View {
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
     @State private var showingAbout = false
+    @State private var showingOverallLogsShare = false
+    @State private var overallLogsShareText = ""
     @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
 
@@ -52,6 +54,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showingImporter) {
             APKDocumentPicker { result in handleImport(result) }
+        }
+        .sheet(isPresented: $showingOverallLogsShare) {
+            ActivityViewController(activityItems: [overallLogsShareText])
         }
         .confirmationDialog("Delete this app from Stride?", isPresented: Binding(
             get: { pendingDelete != nil },
@@ -419,10 +424,13 @@ struct ContentView: View {
                             Label("Copy Logs", systemImage: "doc.on.doc").font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 9).background(raised, in: Capsule())
                         }.buttonStyle(.plain)
-                        ShareLink(item: diagnostics.entries.map(\.line).joined(separator: "\n")) {
+                        Button {
+                            overallLogsShareText = diagnostics.entries.map(\.line).joined(separator: "\n")
+                            showingOverallLogsShare = true
+                        } label: {
                             Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(Color.black).padding(.horizontal, 12).padding(.vertical, 9).background(accent, in: Capsule())
-                        }
+                        }.buttonStyle(.plain)
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 5) {
@@ -1192,7 +1200,7 @@ private struct APKDetailSheet: View {
                 .interactiveDismissDisabled(true)
         }
         .sheet(isPresented: $showingSessionLogs) {
-            NavigationStack {
+            NavigationView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack {
                         Text(item.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(muted)
@@ -1231,7 +1239,7 @@ private struct APKDetailSheet: View {
                 .padding(16).background(canvas.ignoresSafeArea())
                 .navigationTitle("Session Logs")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
+                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
             }
             .preferredColorScheme(.dark)
         }
