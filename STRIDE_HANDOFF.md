@@ -1690,3 +1690,10 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - The first consolidated Rust workflow (#911) exposed a test-only Rust borrow-check error: the new fixture inspected the heap while the interpreter still held its mutable borrow. Runtime implementation itself compiled; the test assertion was moved until after the VM is dropped. The test will now verify the stored referent through the guest-visible `Reference.get()` path before clearing, then inspect the cleared slot after dropping the VM.
 - Workflow #911 failed at compile time, so no Phase 50 tests are counted as passing yet. Run one consolidated validation after this correction; do not build an IPA unless separately authorized.
+
+
+### Phase 50 regression semantics correction
+
+- Workflow #912 compiled successfully and ran the full Rust suite; the new WeakReference fixture was the only failing test (227 passed, 1 failed). The runtime returned `Value::Object(0)` for DEX `return-object` null, which is a valid null representation in this VM (`Value::is_null()` treats it as null).
+- Updated the fixture to assert semantic null rather than requiring one internal enum representation. No runtime behavior change was needed for this correction.
+- One final consolidated Rust validation is running after this test correction. iOS compile/IPA was skipped; no IPA build is authorized in Phase 50.

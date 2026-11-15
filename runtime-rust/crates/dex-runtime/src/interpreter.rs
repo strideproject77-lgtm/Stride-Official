@@ -2841,14 +2841,14 @@ mod tests {
         let cleared = vm.execute_method(3, &[Value::Object(reference)], 16).unwrap();
         assert_eq!(cleared.stop_reason, ExecutionStopReason::ReturnedVoid);
         let fetched_after_clear = vm.execute_method(2, &[Value::Object(reference)], 16).unwrap();
-        assert_eq!(fetched_after_clear.stop_reason, ExecutionStopReason::ReturnedValue(Value::Null));
+        assert!(matches!(fetched_after_clear.stop_reason, ExecutionStopReason::ReturnedValue(value) if value.is_null()));
 
         let null_constructed = vm.execute_method(
             1, &[Value::Object(null_reference), Value::Null], 16
         ).unwrap();
         assert_eq!(null_constructed.stop_reason, ExecutionStopReason::ReturnedVoid);
         let null_fetched = vm.execute_method(2, &[Value::Object(null_reference)], 16).unwrap();
-        assert_eq!(null_fetched.stop_reason, ExecutionStopReason::ReturnedValue(Value::Null));
+        assert!(matches!(null_fetched.stop_reason, ExecutionStopReason::ReturnedValue(value) if value.is_null()));
 
         let invalid_receiver = vm.execute_method(
             1, &[Value::Object(0), Value::Object(referent)], 16
