@@ -712,44 +712,124 @@ private struct AboutStrideView: View {
     let panel: Color
     let muted: Color
 
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
+    }
+
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    Text("ABOUT STRIDE").font(.system(size: 11, weight: .heavy)).tracking(1.4).foregroundStyle(muted)
-                    Spacer()
-                    Button("Done") { dismiss() }.font(.system(size: 13, weight: .bold)).foregroundStyle(accent)
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack {
+                        Text("ABOUT STRIDE")
+                            .font(.system(size: 11, weight: .heavy))
+                            .tracking(1.4)
+                            .foregroundStyle(muted)
+                        Spacer()
+                        Button("Done") { dismiss() }
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(accent)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        StrideCoreMark(size: 76, accent: accent)
+                        Text("Stride")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("An experimental Android compatibility layer for iOS, focused on inspecting and executing Android app packages through native runtime components.")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, 12)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().fill(accent.opacity(0.14))
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.system(size: 25, weight: .medium))
+                                    .foregroundStyle(accent)
+                            }
+                            .frame(width: 48, height: 48)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("CREATED BY")
+                                    .font(.system(size: 8, weight: .heavy))
+                                    .tracking(1.2)
+                                    .foregroundStyle(muted)
+                                Text("AhmiiDev")
+                                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                                    .foregroundStyle(accent)
+                                Text("Original project creator & developer")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundStyle(muted)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        Divider().overlay(Color.white.opacity(0.07))
+                        Text("© 2026 AhmiiDev. Stride project attribution.")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(muted)
+                    }
+                    .padding(16)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(accent.opacity(0.22), lineWidth: 1))
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        aboutRow("Execution model", "Native iOS runtime components")
+                        aboutRow("Package formats", "APK · XAPK · APKS · APKM")
+                        aboutRow("Compatibility", "Experimental; app support requires real-device verification")
+                        aboutRow("App version", appVersion)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(panel, in: RoundedRectangle(cornerRadius: 18))
+
+                    Link(destination: URL(string: "https://github.com/strideproject77-lgtm/Stride-Official")!) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 15, weight: .bold))
+                            Text("View Stride on GitHub")
+                                .font(.system(size: 12, weight: .bold))
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.system(size: 10, weight: .bold))
+                        }
+                        .foregroundStyle(accent)
+                        .padding(15)
+                        .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(accent.opacity(0.2), lineWidth: 1))
+                    }
+
+                    Text("STRIDE · EXPERIMENTAL BUILD")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(1.1)
+                        .foregroundStyle(muted.opacity(0.75))
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
                 }
-                Spacer()
-                StrideCoreMark(size: 82, accent: accent)
-                Text("Stride").font(.system(size: 34, weight: .black, design: .rounded)).foregroundStyle(.white)
-                Text("An experimental Android compatibility layer for iOS, focused on inspecting and executing Android app packages through native runtime components.")
-                    .font(.system(size: 14, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 12) {
-                    aboutRow("Execution model", "Native iOS runtime components")
-                    aboutRow("Package formats", "APK · XAPK · APKS · APKM")
-                    aboutRow("Compatibility", "Experimental; app support requires real-device verification")
-                }
-                .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                .background(panel, in: RoundedRectangle(cornerRadius: 18))
-                Spacer()
-                Text("STRIDE · EXPERIMENTAL BUILD").font(.system(size: 9, weight: .bold)).tracking(1.1)
-                    .foregroundStyle(muted.opacity(0.75)).frame(maxWidth: .infinity)
+                .padding(22)
             }
-            .padding(24)
         }
         .preferredColorScheme(.dark)
     }
 
     private func aboutRow(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(title.uppercased()).font(.system(size: 8, weight: .heavy)).tracking(1).foregroundStyle(muted)
-            Text(value).font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .heavy))
+                .tracking(1)
+                .foregroundStyle(muted)
+            Text(value)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
         }
     }
 }
-
 private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingDiagnostics = false
