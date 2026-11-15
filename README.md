@@ -1,5 +1,8 @@
 # Stride
 
+**Created and developed by AhmiiDev.**  
+Independent iOS project: [Stride on GitHub](https://github.com/strideproject77-lgtm/Stride-Official).
+
 Stride is an independent native iOS project exploring a practical Android application compatibility runtime.
 
 ## Project direction
