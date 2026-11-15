@@ -284,6 +284,18 @@ final class StrideDiagnostics: ObservableObject {
                 $0.localizedCaseInsensitiveContains("unresolved method") ||
                 $0.localizedCaseInsensitiveContains("unlinked class")
             }
+            // Fast triage extract: preserve chronology and cap only this convenience
+            // section. The complete raw session log remains untouched below.
+            let faultTimeline = lines.filter { line in
+                let upper = line.uppercased()
+                let markers = [
+                    "[ERROR]", "[FATAL]", "[CRASH]", "MISSING_API", "UNRESOLVED",
+                    "REJECTED", "FAILED", "UNSUPPORTED OPCODE", "EXCEPTION",
+                    "PANIC", "ANR", "WATCHDOG", "SIGSEGV", "SIGABRT", "SIGBUS",
+                    "REGISTER_LAYOUT", "INVOKE_KIND_MISMATCH"
+                ]
+                return markers.contains { upper.contains($0) }
+            }
             let stamp = ISO8601DateFormatter().string(from: sessionStartedAt)
             let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
             let url = reportsFolder.appendingPathComponent("\(safeName)-\(sessionID.prefix(8))-Diagnostic-Report.txt")
@@ -339,7 +351,14 @@ final class StrideDiagnostics: ObservableObject {
                     report += "\n[\(item.category)] \(item.count)x — \(item.example)"
                 }
             }
-            report += "\n\nRUNTIME DIAGNOSTIC EXTRACT (all matching lines; raw log remains authoritative)\n========================================\n"
+            report += "\n\nFIRST FAILURE / DEGRADATION EVENTS (chronological; first 40 matches)\n========================================\n"
+            report += faultTimeline.isEmpty
+                ? "(No recognized error/degradation markers were captured.)\n"
+                : faultTimeline.prefix(40).joined(separator: "\n") + "\n"
+            if faultTimeline.count > 40 {
+                report += "... \(faultTimeline.count - 40) additional matching lines remain in the full raw log.\n"
+            }
+            report += "\nRUNTIME DIAGNOSTIC EXTRACT (all matching lines; raw log remains authoritative)\n========================================\n"
             report += runtimeTimeline.isEmpty ? "(No runtime diagnostic markers were captured.)\n" : runtimeTimeline.joined(separator: "\n") + "\n"
             report += "\nIMPORTANT INTERPRETATION NOTES\n"
             report += "- A missing end marker on next launch means possible previous-run termination only; it does not prove a crash or jetsam.\n"
@@ -404,10 +423,14 @@ final class StrideDiagnostics: ObservableObject {
 
     private func primaryAssessment(_ findings: [(category: String, count: Int, example: String)]) -> String {
         let priority = [
-            "NATIVE_CRASH", "OUT_OF_MEMORY_EVIDENCE", "JAVA_UNCAUGHT_EXCEPTION",
+            "NATIVE_CRASH", "OUT_OF_MEMORY_EVIDENCE", "GUEST_HANG_OR_ANR_EVIDENCE",
+            "JAVA_UNCAUGHT_EXCEPTION", "DEX_REGISTER_LAYOUT_FAILURE",
+            "DEX_INVOKE_COMPATIBILITY_FAILURE", "CLASS_LINKAGE_FAILURE",
             "JNI_BRIDGE_FAILURE", "RUNTIME_INTERPRETER_FAILURE", "DEX_OR_INTERPRETER_FAILURE",
             "RELOCATION_FAILURE", "UNRESOLVED_NATIVE_IMPORT", "NATIVE_DEPENDENCY_FAILURE",
+            "PACKAGE_COMPONENT_FAILURE", "RESOURCE_OR_ASSET_FAILURE",
             "MISSING_ANDROID_API_OR_CLASS", "GRAPHICS_OR_RENDERING",
+            "GRAPHICS_STARTUP_NOT_READY", "INPUT_DISPATCH_FAILURE",
             "INPUT_OR_LIFECYCLE_FAILURE", "UNSUPPORTED_SYSCALL", "NETWORK_TELEMETRY_FAILURE"
         ]
         guard let leading = priority.compactMap({ category in findings.first { $0.category == category } }).first else {
@@ -421,6 +444,22 @@ final class StrideDiagnostics: ObservableObject {
             action = "Compare heap trend, allocation failures and OS termination evidence. Do not infer jetsam from a low guest-heap reading alone."
         case "JAVA_UNCAUGHT_EXCEPTION":
             action = "Trace the first uncaught guest exception to its DEX method and missing framework dependency."
+        case "DEX_REGISTER_LAYOUT_FAILURE":
+            action = "Compare registers_size, ins_size, outs_size, access flags and method prototype; validate the DEX register encoding before changing interpreter behavior."
+        case "DEX_INVOKE_COMPATIBILITY_FAILURE":
+            action = "Check invoke opcode kind against the resolved method's static/instance, direct/virtual and class/interface declaration."
+        case "CLASS_LINKAGE_FAILURE":
+            action = "Trace the exact class descriptor, defining DEX, superclass/interface chain and loader resolution result."
+        case "GUEST_HANG_OR_ANR_EVIDENCE":
+            action = "Inspect the last progress event, instruction-budget/watchdog evidence and main-thread dispatch duration; distinguish a guest hang from iOS process termination."
+        case "PACKAGE_COMPONENT_FAILURE":
+            action = "Verify base/split APK inventory, package identity, ABI/density split selection and each component's archive integrity."
+        case "RESOURCE_OR_ASSET_FAILURE":
+            action = "Trace the exact resource or asset path, resource-table lookup and split/resource configuration; do not treat optional assets as fatal without evidence."
+        case "GRAPHICS_STARTUP_NOT_READY":
+            action = "Check whether the guest produced a framebuffer, its dimensions, EGL/GLES initialization and first successful presentation."
+        case "INPUT_DISPATCH_FAILURE":
+            action = "Compare host touch receipt, coordinate mapping, queued guest event count and the Activity callback result."
         case "JNI_BRIDGE_FAILURE":
             action = "Trace the JNI call signature, argument types, pending exception and native-to-managed transition."
         case "RUNTIME_INTERPRETER_FAILURE", "DEX_OR_INTERPRETER_FAILURE":
@@ -453,11 +492,13 @@ final class StrideDiagnostics: ObservableObject {
             ("Input", ["TOUCH", "INPUT", "KEY EVENT"])
         ]
         return stages.map { label, tokens in
-            let found = lines.contains { line in
+            let matchingLines = lines.filter { line in
                 let upper = line.uppercased()
                 return tokens.contains { upper.contains($0) }
             }
-            return "\(found ? "[OBSERVED]" : "[NOT CAPTURED]") \(label)"
+            return matchingLines.isEmpty
+                ? "[NO MATCHING LOG EVIDENCE] \(label)"
+                : "[\(matchingLines.count) MATCHING LINE(S)] \(label)"
         }.joined(separator: "\n")
     }
 
@@ -487,10 +528,18 @@ final class StrideDiagnostics: ObservableObject {
             ("UNRESOLVED_NATIVE_IMPORT", { $0.localizedCaseInsensitiveContains("unresolved import") }),
             ("RELOCATION_FAILURE", { $0.localizedCaseInsensitiveContains("relocation") && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("unresolved")) }),
             ("NETWORK_TELEMETRY_FAILURE", { $0.localizedCaseInsensitiveContains("firebaselogging") || ($0.localizedCaseInsensitiveContains("connectexception") && $0.localizedCaseInsensitiveContains("443")) }),
+            ("DEX_REGISTER_LAYOUT_FAILURE", { $0.localizedCaseInsensitiveContains("DEX_METHOD_REGISTER_LAYOUT_REJECTED") || ($0.localizedCaseInsensitiveContains("register layout") && ($0.localizedCaseInsensitiveContains("rejected") || $0.localizedCaseInsensitiveContains("invalid"))) }),
+            ("DEX_INVOKE_COMPATIBILITY_FAILURE", { $0.localizedCaseInsensitiveContains("INVOKE_KIND_MISMATCH") || $0.localizedCaseInsensitiveContains("invoke-kind mismatch") || $0.localizedCaseInsensitiveContains("static/instance mismatch") }),
+            ("CLASS_LINKAGE_FAILURE", { $0.localizedCaseInsensitiveContains("class not found") || $0.localizedCaseInsensitiveContains("class resolution failed") || $0.localizedCaseInsensitiveContains("unlinked class") }),
             ("RUNTIME_INTERPRETER_FAILURE", { $0.localizedCaseInsensitiveContains("unsupported opcode") || $0.localizedCaseInsensitiveContains("interpreter fault") }),
-            ("OUT_OF_MEMORY_EVIDENCE", { $0.localizedCaseInsensitiveContains("out of memory") || $0.localizedCaseInsensitiveContains("jetsam") }),
-            ("MISSING_ANDROID_API_OR_CLASS", { $0.localizedCaseInsensitiveContains("missing_api") || $0.localizedCaseInsensitiveContains("unresolved method") || $0.localizedCaseInsensitiveContains("unlinked class") }),
-            ("DEX_OR_INTERPRETER_FAILURE", { $0.localizedCaseInsensitiveContains("unsupported opcode") || $0.localizedCaseInsensitiveContains("instruction budget") || $0.localizedCaseInsensitiveContains("verifier") }),
+            ("OUT_OF_MEMORY_EVIDENCE", { $0.localizedCaseInsensitiveContains("out of memory") || $0.localizedCaseInsensitiveContains("jetsam") || $0.localizedCaseInsensitiveContains("allocation failed") }),
+            ("GUEST_HANG_OR_ANR_EVIDENCE", { ($0.localizedCaseInsensitiveContains("anr") || $0.localizedCaseInsensitiveContains("watchdog")) && ($0.localizedCaseInsensitiveContains("timeout") || $0.localizedCaseInsensitiveContains("blocked") || $0.localizedCaseInsensitiveContains("hang") || $0.localizedCaseInsensitiveContains("dispatch")) }),
+            ("MISSING_ANDROID_API_OR_CLASS", { $0.localizedCaseInsensitiveContains("missing_api") || $0.localizedCaseInsensitiveContains("unresolved method") }),
+            ("DEX_OR_INTERPRETER_FAILURE", { $0.localizedCaseInsensitiveContains("instruction budget") || $0.localizedCaseInsensitiveContains("verifier") }),
+            ("PACKAGE_COMPONENT_FAILURE", { $0.localizedCaseInsensitiveContains("split apk") && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("missing") || $0.localizedCaseInsensitiveContains("mismatch") || $0.localizedCaseInsensitiveContains("could not open")) }),
+            ("RESOURCE_OR_ASSET_FAILURE", { ($0.localizedCaseInsensitiveContains("resource") || $0.localizedCaseInsensitiveContains("asset")) && ($0.localizedCaseInsensitiveContains("not found") || $0.localizedCaseInsensitiveContains("lookup failed") || $0.localizedCaseInsensitiveContains("load failed")) }),
+            ("GRAPHICS_STARTUP_NOT_READY", { $0.localizedCaseInsensitiveContains("framebuffer") && ($0.localizedCaseInsensitiveContains("not ready") || $0.localizedCaseInsensitiveContains("unavailable")) }),
+            ("INPUT_DISPATCH_FAILURE", { ($0.localizedCaseInsensitiveContains("touch") || $0.localizedCaseInsensitiveContains("input")) && ($0.localizedCaseInsensitiveContains("dispatch failed") || $0.localizedCaseInsensitiveContains("pump failed") || $0.localizedCaseInsensitiveContains("not delivered")) }),
             ("JNI_BRIDGE_FAILURE", { $0.localizedCaseInsensitiveContains("jni") && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("exception") || $0.localizedCaseInsensitiveContains("unresolved")) }),
             ("NATIVE_DEPENDENCY_FAILURE", { $0.localizedCaseInsensitiveContains("dt_needed") || $0.localizedCaseInsensitiveContains("unresolved dependency") || $0.localizedCaseInsensitiveContains("native library load failed") }),
             ("GRAPHICS_OR_RENDERING", { ($0.localizedCaseInsensitiveContains("egl") || $0.localizedCaseInsensitiveContains("gles") || $0.localizedCaseInsensitiveContains("surface")) && ($0.localizedCaseInsensitiveContains("failed") || $0.localizedCaseInsensitiveContains("unsupported")) }),

@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phase 50 Rust + physical iOS compile passed in workflow #914; device retest pending)
+Updated: 2026-11-15 (Phase 51 Rust suite + physical iOS app compile passed in workflow #918; no IPA packaging; device retest pending)
 
 ## Goal
 
@@ -1777,3 +1777,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - The report remains explicit about unavailable evidence: an unclean marker is not proof of a crash/jetsam, and iOS does not guarantee access to termination reason, registers or native backtrace.
 - Phase 51 status: **Implementation + CI validation Completed; real-device verification Pending.** The next device test should use one 2048 v1.7.0 launch, close the session normally (or let Stride recover an unexpected termination), and export exactly one **Complete Diagnostic Report**. Review whether the report contains the full host/Rust timeline, final snapshot and expected metrics before calling the feature device-verified.
 - All changes remain on `feat/dex-class-method-loader`; `main` is untouched. No merge performed.
+
+
+### 2026-11-15 — Phase 52: Diagnostic signal classification and failure timeline
+
+- Extended one-shot report classification for DEX register-layout rejection, invoke-kind/static-instance mismatches, class-linkage failures, package split failures, resource/asset lookup failures, guest ANR/watchdog evidence, framebuffer-not-ready states and touch/input dispatch failures.
+- Removed duplicate classification of unsupported-opcode lines as both interpreter and generic DEX failures; generic DEX classification now covers verifier and instruction-budget evidence separately.
+- Added a chronological first-40 fault/degradation extract to the Complete Diagnostic Report. The complete raw log remains authoritative and untruncated; the extract is only a fast triage view.
+- Stage coverage now reports matching-line counts instead of a binary observed/not-captured label. This reduces the chance that one incidental keyword is mistaken for a completed runtime stage; it still indicates log evidence, not successful execution.
+- Added category-specific next engineering actions for the new signatures. All classifications remain heuristic and are not asserted as proven root causes.
+- Files: `Sources/StrideApp/Services/StrideDiagnostics.swift`, `STRIDE_HANDOFF.md`.
+- Validation: run one consolidated Rust + physical-iPhone compile workflow after this batch. No IPA build, signing, export or merge to `main` is included.
+- Real-device validation remains pending: use one 2048 launch and export one Complete Diagnostic Report to verify the new chronology and signatures against actual session evidence.
