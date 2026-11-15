@@ -1518,22 +1518,21 @@ impl<'a> ArtVm<'a> {
                             "Invalid HashMap receiver for {}{} at PC {}: {:?}", target_name, target_proto, pc, error
                         ))?;
                         let entry_prefix = "__stride_hashmap_entry_";
-                        let key_id = if matches!(target_name, "get" | "containsKey" | "put" | "remove") {
+                        let field_name = if matches!(target_name, "get" | "containsKey" | "put" | "remove") {
                             match args.get(1) {
                                 Some(Value::Object(id)) if *id != 0 => {
                                     self.heap.get(*id).map_err(|error| format!(
                                         "Invalid HashMap object key at PC {}: {:?}", pc, error
                                     ))?;
-                                    Some(*id)
+                                    Some(format!("{}{}", entry_prefix, id))
                                 }
-                                Some(Value::Object(0)) => None,
+                                Some(Value::Object(0)) => Some(format!("{}null_key", entry_prefix)),
                                 Some(other) => return Err(format!(
                                     "Unsupported non-object HashMap key {:?} at PC {}", other, pc
                                 )),
                                 None => return Err(format!("Missing HashMap key argument at PC {}", pc)),
                             }
                         } else { None };
-                        let field_name = key_id.map(|id| format!("{}{}", entry_prefix, id));
                         let previous = if let Some(field) = field_name.as_deref() {
                             if self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))? {
                                 self.heap.get_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?
@@ -1552,7 +1551,7 @@ impl<'a> ArtVm<'a> {
                             ) { 1 } else { 0 })),
                             "put" => {
                                 let value = args.get(2).copied().ok_or_else(|| "Missing HashMap value argument".to_string())?;
-                                let field = field_name.as_deref().ok_or_else(|| "HashMap does not accept a null key in this compatibility path".to_string())?;
+                                let field = field_name.as_deref().ok_or_else(|| "Missing HashMap key field".to_string())?;
                                 let existed = self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
                                 self.heap.set_instance_field(receiver, field, value).map_err(|e| format!("{:?}", e))?;
                                 if !existed {
