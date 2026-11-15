@@ -1163,6 +1163,22 @@ private struct APKDetailSheet: View {
                                     .font(.system(size: 10, weight: .semibold))
                                     .foregroundStyle(res.statusCode == 0 ? muted : .red.opacity(0.9))
                             }
+                            if let blocker = sessionLogLines.first(where: { $0.contains("[MISSING_API]") }) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("FIRST STARTUP BLOCKER")
+                                        .font(.system(size: 8, weight: .heavy))
+                                        .tracking(0.8)
+                                        .foregroundStyle(.red.opacity(0.9))
+                                    Text(blocker.replacingOccurrences(of: "[RUNTIME] ", with: ""))
+                                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                        .foregroundStyle(muted)
+                                        .lineLimit(3)
+                                        .textSelection(.enabled)
+                                }
+                                .padding(9)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.red.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                            }
                             Text("Performance: \(String(format: "%.1f", res.averageFps)) FPS · RAM: \(res.heapAllocatedBytes / 1024) KB")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundStyle(muted)

@@ -1405,6 +1405,78 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // WeakReference stores its constructor argument in the inherited
+                    // Reference.referent field. Keep this exact boot signature managed:
+                    // the runtime does not emulate GC-driven weak reachability/clearing.
+                    if target_method.is_none()
+                        && target_class == "Ljava/lang/ref/WeakReference;"
+                        && target_name == "<init>"
+                        && target_proto == "(Ljava/lang/Object;)V"
+                    {
+                        let receiver = match args.first() {
+                            Some(Value::Object(id)) if *id != 0 => *id,
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic WeakReference.<init>(Object)V at PC {}",
+                                pc
+                            )),
+                        };
+                        self.heap.get(receiver).map_err(|error| format!(
+                            "Invalid WeakReference receiver at PC {}: {:?}", pc, error
+                        ))?;
+                        let referent = match args.get(1) {
+                            Some(Value::Null) | Some(Value::Object(0)) => Value::Null,
+                            Some(Value::Object(id)) => {
+                                self.heap.get(*id).map_err(|error| format!(
+                                    "Invalid WeakReference referent at PC {}: {:?}", pc, error
+                                ))?;
+                                Value::Object(*id)
+                            }
+                            _ => return Err(format!(
+                                "Invalid referent for intrinsic WeakReference.<init>(Object)V at PC {}",
+                                pc
+                            )),
+                        };
+                        self.heap.set_instance_field(receiver, "referent", referent)
+                            .map_err(|error| format!("WeakReference referent initialization failed: {:?}", error))?;
+                        pending_result = None;
+                        pc += 3;
+                        continue;
+                    }
+
+                    // get() and clear() are declared on java.lang.ref.Reference,
+                    // inherited by WeakReference. They operate on the managed referent
+                    // slot; this is a compatibility subset, not a weak-GC implementation.
+                    if target_method.is_none()
+                        && target_class == "Ljava/lang/ref/Reference;"
+                        && matches!(
+                            (target_name, target_proto),
+                            ("get", "()Ljava/lang/Object;") | ("clear", "()V")
+                        )
+                    {
+                        let receiver = match args.first() {
+                            Some(Value::Object(id)) if *id != 0 => *id,
+                            _ => return Err(format!(
+                                "Invalid null receiver for Reference.{}{} at PC {}",
+                                target_name, target_proto, pc
+                            )),
+                        };
+                        self.heap.get(receiver).map_err(|error| format!(
+                            "Invalid Reference receiver for {}{} at PC {}: {:?}",
+                            target_name, target_proto, pc, error
+                        ))?;
+                        if target_name == "get" {
+                            let referent = self.heap.get_instance_field(receiver, "referent")
+                                .unwrap_or(Value::Null);
+                            pending_result = Some(referent);
+                        } else {
+                            self.heap.set_instance_field(receiver, "referent", Value::Null)
+                                .map_err(|error| format!("Reference.clear() failed: {:?}", error))?;
+                            pending_result = None;
+                        }
+                        pc += 3;
+                        continue;
+                    }
+
                     // AtomicReference's no-argument constructor initializes its
                     // backing value to null. DEX new-instance objects are zero-initialized,
                     // so this exact boot-library constructor is a safe no-op intrinsic.
@@ -2694,6 +2766,95 @@ mod tests {
 
         let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
         assert!(error.contains("Invalid null receiver for intrinsic AtomicReference.<init>()V"));
+    }
+
+    #[test]
+    fn weak_reference_constructor_get_and_clear_use_managed_referent() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let reference = heap.allocate_instance("Ljava/lang/ref/WeakReference;").unwrap();
+        let null_reference = heap.allocate_instance("Ljava/lang/ref/WeakReference;").unwrap();
+        let referent = heap.allocate_instance("Ltest/LifecycleOwner;").unwrap();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/WeakReferenceCaller;".into(),
+                name: "construct".into(),
+                prototype: "(Ljava/lang/ref/WeakReference;Ljava/lang/Object;)V".into(),
+                // invoke-direct {v0, v1}, WeakReference.<init>(Object)V; return-void.
+                code_units: vec![0x2070, 0x0000, 0x0010, 0x000e],
+                registers_size: 2, ins_size: 2, try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/WeakReferenceCaller;".into(),
+                name: "get".into(),
+                prototype: "(Ljava/lang/ref/WeakReference;)Ljava/lang/Object;".into(),
+                // invoke-virtual {v1}, Reference.get(); move-result-object v0; return-object v0.
+                code_units: vec![0x106e, 0x0001, 0x0001, 0x000c, 0x0011],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+            (3u32, MethodCode {
+                class_descriptor: "Ltest/WeakReferenceCaller;".into(),
+                name: "clear".into(),
+                prototype: "(Ljava/lang/ref/WeakReference;)V".into(),
+                // invoke-virtual {v1}, Reference.clear(); return-void.
+                code_units: vec![0x106e, 0x0002, 0x0001, 0x000e],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+        ]);
+        let references = vec![
+            MethodReference {
+                method_index: 0,
+                class_descriptor: "Ljava/lang/ref/WeakReference;".into(),
+                name: "<init>".into(),
+                prototype: "(Ljava/lang/Object;)V".into(),
+            },
+            MethodReference {
+                method_index: 1,
+                class_descriptor: "Ljava/lang/ref/Reference;".into(),
+                name: "get".into(),
+                prototype: "()Ljava/lang/Object;".into(),
+            },
+            MethodReference {
+                method_index: 2,
+                class_descriptor: "Ljava/lang/ref/Reference;".into(),
+                name: "clear".into(),
+                prototype: "()V".into(),
+            },
+        ];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let constructed = vm.execute_method(
+            1, &[Value::Object(reference), Value::Object(referent)], 16
+        ).expect("WeakReference constructor should store referent");
+        assert_eq!(constructed.stop_reason, ExecutionStopReason::ReturnedVoid);
+        assert_eq!(heap.get_instance_field(reference, "referent").unwrap(), Value::Object(referent));
+
+        let fetched = vm.execute_method(2, &[Value::Object(reference)], 16).unwrap();
+        assert_eq!(fetched.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(referent)));
+
+        let cleared = vm.execute_method(3, &[Value::Object(reference)], 16).unwrap();
+        assert_eq!(cleared.stop_reason, ExecutionStopReason::ReturnedVoid);
+        let fetched_after_clear = vm.execute_method(2, &[Value::Object(reference)], 16).unwrap();
+        assert_eq!(fetched_after_clear.stop_reason, ExecutionStopReason::ReturnedValue(Value::Null));
+
+        let null_constructed = vm.execute_method(
+            1, &[Value::Object(null_reference), Value::Null], 16
+        ).unwrap();
+        assert_eq!(null_constructed.stop_reason, ExecutionStopReason::ReturnedVoid);
+        let null_fetched = vm.execute_method(2, &[Value::Object(null_reference)], 16).unwrap();
+        assert_eq!(null_fetched.stop_reason, ExecutionStopReason::ReturnedValue(Value::Null));
+
+        let invalid_receiver = vm.execute_method(
+            1, &[Value::Object(0), Value::Object(referent)], 16
+        ).expect_err("null WeakReference receiver must fail");
+        assert!(invalid_receiver.contains("Invalid null receiver for intrinsic WeakReference"));
     }
 
     #[test]

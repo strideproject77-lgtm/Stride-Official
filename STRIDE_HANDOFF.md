@@ -499,6 +499,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
 | 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust runtime suite passed (227/227 in dex-runtime); authorized consolidated iOS compile + unsigned IPA build triggered; device retest pending |
+| 50 | AndroidX lifecycle WeakReference constructor plus inherited Reference.get/clear; surface first unresolved startup API in runtime UI | In Progress — implementation committed; consolidated validation pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1671,3 +1672,15 @@ Status: UI implementation committed · consolidated validation and visual review
 - Triggered the repository's existing consolidated workflow from `feat/dex-class-method-loader`; it runs the complete Rust workspace test suite first, then builds the ARM64 iOS runtime, generates the XCFramework, compiles the iOS app, verifies the app bundle, packages and validates an **unsigned** IPA, and uploads the IPA plus build report as a workflow artifact.
 - This authorization covers only the unsigned build. No signing, App Store export, merge to `main`, or device compatibility claim is authorized or implied.
 - Phase 49 remains **In Progress** until the consolidated workflow result and real-device retest are reviewed.
+
+
+### 2026-11-15 — Phase 50: WeakReference lifecycle compatibility + blocker-focused UI
+
+- Reviewed the new 2048 v1.7.0 session log exported at 16:23. Package identity/split validation, resource decode, DEX load, and native pipeline all complete. The previous ArrayList constructor blocker is gone. The first unresolved call is now exactly `Ljava/lang/ref/WeakReference;-><init>(Ljava/lang/Object;)V`, called from `LifecycleRegistry.<init>` at PC 25. The Activity constructor still fails before any guest bytecode executes (0 instructions).
+- Added an exact managed `WeakReference.<init>(Object)V` implementation that validates the receiver/referent and stores the referent in the inherited managed `referent` slot. Null referents are preserved.
+- Added inherited `Reference.get()Ljava/lang/Object;` and `Reference.clear()V` compatibility operations over that managed slot, matching the owner-reference access pattern needed by AndroidX lifecycle. This does **not** emulate garbage-collector weak reachability or automatic weak-reference clearing.
+- Added a regression fixture covering non-null construction, get, clear, null referents, and rejection of a null receiver.
+- UI extra: the runtime result card now surfaces the first `[MISSING_API]` event directly as a compact, selectable “First startup blocker” panel, so users can see the exact failing API without manually scanning the full log.
+- Validation: pending one consolidated Rust + iOS compile workflow after this implementation batch. No repeated test runs.
+- Phase 50 remains **In Progress** until the consolidated workflow passes and a fresh device session log confirms the next startup stage. Do not claim 2048 compatibility or gameplay until guest instructions, a rendered frame, and interaction are observed.
+- All changes remain on `feat/dex-class-method-loader`; `main` remains untouched. No IPA build/sign/export is included in this phase.
