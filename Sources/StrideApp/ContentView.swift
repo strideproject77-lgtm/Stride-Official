@@ -1190,6 +1190,50 @@ private struct APKDetailSheet: View {
                 .statusBarHidden(true)
                 .interactiveDismissDisabled(true)
         }
+        .sheet(isPresented: $showingSessionLogs) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text(item.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(muted)
+                        Spacer()
+                        Text(String(sessionLogLines.count) + " lines").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                    }
+                    HStack(spacing: 12) {
+                        Button { copySessionLog() } label: {
+                            Label("Copy", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(raised, in: Capsule())
+                        }.buttonStyle(.plain)
+                        Button { exportSessionLog() } label: {
+                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.black).padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(accent, in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            if sessionLogLines.isEmpty {
+                                Text("No session logs saved for this app yet.")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18)
+                            } else {
+                                ForEach(Array(sessionLogLines.suffix(300).enumerated()), id: \.offset) { _, line in
+                                    Text(line).font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red : muted)
+                                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                                }
+                            }
+                        }
+                    }
+                    .padding(12).background(raised, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(16).background(canvas.ignoresSafeArea())
+                .navigationTitle("Session Logs")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
+            }
+            .preferredColorScheme(.dark)
+        }
         .onAppear(perform: loadPreviousSession)
         .onDisappear {
             launchTask?.cancel()
@@ -1322,50 +1366,7 @@ private struct APKDetailSheet: View {
                 ActivityViewController(activityItems: [logExportURL])
             }
         }
-        .sheet(isPresented: $showingSessionLogs) {
-            NavigationStack {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text(item.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(muted)
-                        Spacer()
-                        Text(String(sessionLogLines.count) + " lines").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                    }
-                    HStack(spacing: 12) {
-                        Button { copySessionLog() } label: {
-                            Label("Copy", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(raised, in: Capsule())
-                        }.buttonStyle(.plain)
-                        Button { exportSessionLog() } label: {
-                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color.black).padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(accent, in: Capsule())
-                        }.buttonStyle(.plain)
-                    }
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 6) {
-                            if sessionLogLines.isEmpty {
-                                Text("No session logs saved for this app yet.")
-                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(muted)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18)
-                            } else {
-                                ForEach(Array(sessionLogLines.suffix(300).enumerated()), id: \\.offset) { _, line in
-                                    Text(line).font(.system(size: 10, design: .monospaced))
-                                        .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red : muted)
-                                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                                }
-                            }
-                        }
-                    }
-                    .padding(12).background(raised, in: RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(16).background(canvas.ignoresSafeArea())
-                .navigationTitle("Session Logs")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
-            }
-            .preferredColorScheme(.dark)
-        }
+
     }
 
     private func closeExecutionSession() {
