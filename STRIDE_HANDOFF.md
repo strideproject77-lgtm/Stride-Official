@@ -499,7 +499,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
 | 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust runtime suite passed (227/227 in dex-runtime); authorized consolidated iOS compile + unsigned IPA build triggered; device retest pending |
-| 50 | AndroidX lifecycle WeakReference constructor plus inherited Reference.get/clear; surface first unresolved startup API in runtime UI | In Progress — implementation committed; consolidated validation pending |
+| 50 | AndroidX lifecycle WeakReference constructor plus inherited Reference.get/clear; surface first unresolved startup API in runtime UI | In Progress — Rust runtime suite passed (228/228 in dex-runtime); iOS compile validation and device retest pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1697,3 +1697,12 @@ Status: UI implementation committed · consolidated validation and visual review
 - Workflow #912 compiled successfully and ran the full Rust suite; the new WeakReference fixture was the only failing test (227 passed, 1 failed). The runtime returned `Value::Object(0)` for DEX `return-object` null, which is a valid null representation in this VM (`Value::is_null()` treats it as null).
 - Updated the fixture to assert semantic null rather than requiring one internal enum representation. No runtime behavior change was needed for this correction.
 - One final consolidated Rust validation is running after this test correction. iOS compile/IPA was skipped; no IPA build is authorized in Phase 50.
+
+
+### 2026-11-15 — Phase 50 Rust validation checkpoint
+
+- Final consolidated Rust workflow [#913](https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/43709183093) passed.
+- The dex-runtime test suite reports **228 passed, 0 failed**, including `weak_reference_constructor_get_and_clear_use_managed_referent`.
+- The earlier #911 compile failure and #912 null-representation assertion failure were corrected before this passing run. The final workflow is green.
+- The iOS/unsigned IPA job was skipped for Phase 50; no new IPA was built, signed, or exported. Phase 50 remains **In Progress** pending iOS compile validation and a fresh device session log.
+- All implementation commits remain on `feat/dex-class-method-loader`; `main` is untouched.
