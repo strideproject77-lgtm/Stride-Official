@@ -1527,17 +1527,13 @@ private struct APKDetailSheet: View {
         let persistedLog = diagnostics.currentSessionLogURL
             .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
         let sessionText = inMemoryLog.isEmpty ? persistedLog : inMemoryLog
-        let structuredText = diagnostics.entries.map(\.line).joined(separator: "\n")
         return [
-            "STRIDE SESSION LOG",
+            "STRIDE APP SESSION LOG",
             "APK: \(item.displayName)",
             "Exported: \(Date().formatted(date: .abbreviated, time: .standard))",
             "",
             "SESSION EVENTS",
-            sessionText.isEmpty ? "(No session events were captured.)" : sessionText,
-            "",
-            "UNIFIED DIAGNOSTICS",
-            structuredText.isEmpty ? "(No structured diagnostic events were captured.)" : structuredText
+            sessionText.isEmpty ? "(No session events were captured for this app.)" : sessionText
         ].joined(separator: "\n") + "\n"
     }
 
