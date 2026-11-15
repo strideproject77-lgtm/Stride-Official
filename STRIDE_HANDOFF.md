@@ -1377,12 +1377,12 @@ Status: UI implementation committed · consolidated validation and visual review
 **Status: Implementation committed · consolidated Swift/iOS + Rust validation pending.**
 
 - Moved the app-wide diagnostics view into Settings as **Overall Logs**, with event count, recent event preview, Copy and Export actions.
-- Removed the duplicate Unified Diagnostics panel from the app detail page. Per-app **Session Logs** now appear behind one dedicated expandable Logs control in that app's details, with separate Copy and Export actions.
+- Removed the duplicate Unified Diagnostics panel from the app detail page. Per-app **Session Logs** now open from a dedicated **Session Logs** button in app details, presenting a focused sheet with Copy and Export actions.
 - Kept the per-app session timeline distinct from app-wide diagnostics; the two sources are no longer presented as duplicate log panels on the same screen.
 - Replaced the Home screen's duplicate empty-state and bottom Import Game calls-to-action with one bottom-right floating `+` import button. The welcome card's first-import action remains available.
-- Extra UI improvements: the floating action has a larger touch target, accessible label and restrained accent shadow; the empty-library message is cleaner and no longer repeats import buttons; the log panels explain where each log category belongs. Fixed a source-isolation bug: an app with no saved session log no longer falls back to `stride-diagnostics.log` and mislabels global events as that app's session.
+- Extra UI improvements: the floating action has a larger touch target, accessible label and restrained accent shadow; the empty-library message is cleaner and no longer repeats import buttons; the Session Logs sheet has a dedicated navigation title, Done action, readable monospaced timeline and expanded 300-line preview. Fixed a source-isolation bug: an app with no saved session log no longer falls back to `stride-diagnostics.log` and mislabels global events as that app's session.
 - Files: `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
-- Commits: `1a05494` (floating import action and duplicate CTA removal); `7db02fa` (per-app Session Logs disclosure); `b6d85a8` (Overall Logs in Settings); `f803de7` (prevent app-wide logs from being mistaken for a per-app session).
+- Commits: `1a05494` (floating import action and duplicate CTA removal); `7db02fa` (per-app Session Logs entry); `b6d85a8` (Overall Logs in Settings); `f803de7` (prevent app-wide logs from being mistaken for a per-app session); `47c91c8` (replace inline disclosure with dedicated Session Logs sheet).
 - Remaining: verify global log retention semantics across multiple launches, inspect the new Settings and app-details flows on a real iPhone, and run one consolidated Rust + Swift/iOS validation workflow. The current Overall Logs panel exposes the in-memory app-wide diagnostic entries retained by the diagnostics service; persistence/retention across launches remains a separate verification item.
 - Tests: not run between edits, per the one-pass rule; consolidated validation pending.
 - IPA: not built, signed or exported. `main` remains untouched.
