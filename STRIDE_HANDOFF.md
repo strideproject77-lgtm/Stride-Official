@@ -1764,3 +1764,16 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - Prevented closing an APK detail page without launching it from generating a misleading “runtime released” report.
 - The Complete Diagnostic Report action is available when that APK has a saved report or a session has actually started; a report cannot accidentally attach another APK's last session.
+
+
+### 2026-11-15 — Phase 51 consolidated validation result
+
+- Final implementation commit: `f40206cd3a1b5b7d62e1ed8201025c84e6376ce8`.
+- Consolidated validation: [workflow #918](https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/43719713122) completed successfully.
+- Rust workspace tests: **294 passed, 0 failed** across the non-empty test suites (10 + 6 + 36 + 228 + 1 + 13).
+- iOS compile-only validation: **Passed** for generic physical iPhone / Release configuration. Rust ARM64 runtime, XCFramework generation, XcodeGen, dependency resolution and app compilation all passed.
+- Unsigned IPA job: **Skipped**. No IPA was built, signed or exported.
+- One-Shot Diagnostics implementation includes persisted session metadata, automatic clean-session report generation, previous-unclean-session recovery report, periodic Rust diagnostic deltas, final runtime snapshot, guest execution/render/input metrics, package/split fingerprints and a dedicated complete-report export action.
+- The report remains explicit about unavailable evidence: an unclean marker is not proof of a crash/jetsam, and iOS does not guarantee access to termination reason, registers or native backtrace.
+- Phase 51 status: **Implementation + CI validation Completed; real-device verification Pending.** The next device test should use one 2048 v1.7.0 launch, close the session normally (or let Stride recover an unexpected termination), and export exactly one **Complete Diagnostic Report**. Review whether the report contains the full host/Rust timeline, final snapshot and expected metrics before calling the feature device-verified.
+- All changes remain on `feat/dex-class-method-loader`; `main` is untouched. No merge performed.
