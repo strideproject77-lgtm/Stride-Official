@@ -1267,3 +1267,19 @@ Status: UI implementation committed · consolidated validation and visual review
 - SHA-256: `ca06fd0801db8ab2e30db0ccc0c5a79a921752b059aa8ea9e607502ec636a25f`.
 - Artifact: `Stride-unsigned-IPA-791` (GitHub Actions artifact ID `14125055574`); build report included.
 - Signing was disabled as intended. No signing, release export, or merge to `main` was performed. This confirms a successful unsigned app build, not on-device Hill Climb Racing compatibility.
+
+
+### Phase 37 — iPhone Home Screen Launcher & App Library UI
+**Status: UI implementation committed · validation and real-device visual review pending.**
+
+- Replaced the previous promotional Home hero and card-based game list with an iPhone-style launcher layout: subtle dark wallpaper gradient, date/title header, compact search field, four-column app icon grid and app-name labels.
+- Home now displays imported APK/XAPK/APKS/APKM packages as normal tappable app icons rather than large cards. Tapping an icon still opens the existing dedicated app details and launch controls.
+- Rebuilt Library to use the same four-column icon-first presentation, with its own App Library heading, search field and app count. Home and Library share the same filter state so searches stay consistent when switching tabs.
+- Added a translucent-style quick-action dock for Import, Library, Settings and Recently Played. Removed the old floating plus button so it no longer overlaps the dock.
+- Preserved long-press context-menu deletion, import flow, empty states, app details, accent-color settings, and the existing bottom navigation.
+- Extra UI/UX improvements: consistent icon sizing and label alignment, touch targets and accessibility labels; subtle wallpaper depth; clear no-app/no-search-result states; removed the old grid/list toggle in favor of the requested native-style icon layout.
+- Files: `Sources/StrideApp/ContentView.swift`, `STRIDE_HANDOFF.md`.
+- Commits: `a721d21` (Home and Library icon-grid redesign), `606be13` (source formatting correction), `5f254c0` (wallpaper polish and dock import action).
+- Remaining: run the single consolidated Swift/iOS + Rust validation pass when the current implementation batch is ready; inspect Home and Library on an iPhone XS Max for icon sizing, safe-area spacing, scrolling and dock behavior. Confirm icons with transparent source pixels retain their original artwork/background as expected.
+- Tests: not run, as requested; defer to the one consolidated validation pass.
+- IPA: not built, signed or exported. `main` untouched.
