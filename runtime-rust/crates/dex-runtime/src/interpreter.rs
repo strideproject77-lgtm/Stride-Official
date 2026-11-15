@@ -2256,6 +2256,31 @@ mod tests {
         assert_eq!(static_fields.get(&("Ltest/Owner;".into(), "score".into())), Some(&Value::Int(7)));
     }
 
+
+    #[test]
+    fn long_shift_2addr_reads_narrow_int_shift_distance() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/LongShift;".into(),
+                name: "shift".into(),
+                prototype: "()J".into(),
+                // v0/v1 = 8L; v2 = 1; shl-long/2addr v0, v2; return-wide v0.
+                code_units: vec![0x0016, 8, 0x2112, 0x20c3, 0x0010],
+                registers_size: 3,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        let report = vm.execute_method(1, &[], 16).expect("long shift should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Long(16)));
+    }
+
     #[test]
     fn art_vm_executes_double_comparison_opcodes() {
         let mut heap = ManagedHeap::default();
