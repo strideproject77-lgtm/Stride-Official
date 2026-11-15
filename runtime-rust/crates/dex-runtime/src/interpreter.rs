@@ -1424,6 +1424,12 @@ impl<'a> ArtVm<'a> {
                                     "Invalid receiver for WeakHashMap.<init>()V at PC {}: {:?}",
                                     pc, error
                                 ))?;
+                                // Initialize the default load factor. Backing-table and
+                                // weak-reference operations remain separate compatibility work.
+                                self.heap.set_instance_field(*receiver, "loadFactor", Value::Float(0.75))
+                                    .map_err(|error| format!("WeakHashMap loadFactor initialization failed: {:?}", error))?;
+                                self.heap.set_instance_field(*receiver, "threshold", Value::Int(0))
+                                    .map_err(|error| format!("WeakHashMap threshold initialization failed: {:?}", error))?;
                                 pending_result = None;
                                 pc += 3;
                                 continue;
@@ -2419,6 +2425,8 @@ mod tests {
         let report = vm.execute_method(1, &[Value::Object(receiver)], 16)
             .expect("WeakHashMap no-arg constructor should execute");
         assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+        assert_eq!(heap.get_instance_field(receiver, "loadFactor").unwrap(), Value::Float(0.75));
+        assert_eq!(heap.get_instance_field(receiver, "threshold").unwrap(), Value::Int(0));
     }
 
     #[test]
