@@ -1374,6 +1374,12 @@ Status: UI implementation committed · consolidated validation and visual review
 
 
 
+### 2026-11-15 — Explicit unsigned IPA build request
+
+- User explicitly authorized an unsigned IPA build after the Phase 43 implementation batch.
+- Build is limited to `feat/dex-class-method-loader`, runs the complete Rust test suite first, then compiles the iOS app and packages an **unsigned** IPA.
+- No signing, export to external distribution, or merge to `main` is authorized.
+
 ### Phase 43 — 2048 Launch Blocker: Core Object Constructor
 **Status: Core intrinsic, regression tests + a confirmed DEX register-format fix committed · real APK retest and consolidated validation remain open.**
 
