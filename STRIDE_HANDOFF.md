@@ -1556,6 +1556,8 @@ Status: UI implementation committed · consolidated validation and visual review
 
 ### 2026-11-15 — Phase 45: HashMap constructor compatibility for 2048 startup
 
+- Status: **Implementation committed; consolidated validation and device retest pending. Phase 45 is not marked Completed yet.**
+
 - Reviewed the fresh 2048 v1.7.0 session log. Package and split verification succeeded for all 19 APK components; the base DEX loaded 6,502 classes; resource decoding completed; the first unresolved call is exactly `Ljava/util/HashMap;-><init>()V` from `androidx.arch.core.internal.FastSafeIterableMap.<init>()V`.
 - Added a signature-exact ART intrinsic for only `java.util.HashMap.<init>()V`. It validates a non-null managed-heap receiver, initializes the default `loadFactor` to 0.75 and `threshold` to zero, and preserves lazy backing-table allocation. Other HashMap constructor signatures and map operations are not implicitly accepted.
 - Added positive regression coverage for default-field initialization and a null-receiver rejection regression.
