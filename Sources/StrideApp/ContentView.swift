@@ -307,7 +307,7 @@ struct ContentView: View {
         .accessibilityAddTraits(surfaceTheme == value ? .isSelected : [])
     }
 
-    private var homeEmptyState: some View {    private var homeEmptyState: some View {
+    private var homeEmptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: searchText.isEmpty ? "square.grid.2x2" : "magnifyingglass")
                 .font(.system(size: 27, weight: .medium))

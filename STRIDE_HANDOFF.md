@@ -1809,3 +1809,9 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - A source review caught and corrected a duplicated launch-button opening token in the generated SwiftUI section before relying on CI. The corrected source is now the branch head for the authorized build.
 - The earlier #920 run was triggered from the immediately preceding UI commit and is not the final validation for this correction. A fresh consolidated run is triggered by the corrected commit.
+
+
+### Phase 53 compile-error correction
+
+- Fixed the duplicate `homeEmptyState` declaration that caused Swift's parser to treat the rest of ContentView as nested local declarations and report a missing closing brace.
+- The first #922 compile-only job exposed this issue; the unsigned IPA job was still compiling at the time. A fresh run from this correction is required before treating the IPA as valid.
