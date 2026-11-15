@@ -1613,6 +1613,7 @@ Status: UI implementation committed · consolidated validation and visual review
   - `afe767edeb2fdb13a758f3517f7670fd976e0695` — expanded null/absent mapping regression cases.
   - `ecfc868f85caed6895f63ccea204764dcfe4a63b` — Espresso/Midnight/Graphite surface themes.
   - `f1b0a9933c7583566b1d6360861d0edc198a7593` — accurate pre-first-frame status text.
+  - `f8cc4bf7a1b64b50f0118a8f53d67f4727853d29` — complete regression cleanup after adding null/absent-key cases.
 - Status: implementation committed; Phase 48 is **In Progress**, not Completed. Consolidated Rust workspace validation and iOS compile validation have not been run yet.
 - Remaining: one consolidated test/compile pass after this implementation batch; fix any failures found; then request a fresh 2048 session log to discover the next exact missing AndroidX/framework method. Device gameplay remains unverified. The current HashMap backing remains an identity-keyed compatibility subset and does not implement full Java equals/hashCode, iterators/views, resizing, or the full Java Collections contract.
 - No IPA build, signing, export, or merge performed. `main` remains untouched.
