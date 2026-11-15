@@ -1,6 +1,6 @@
 # Stride Handoff
 
-Updated: 2026-11-15 (Phase 50 Rust tests passed; pre-build audit completed; unsigned IPA build authorized)
+Updated: 2026-11-15 (Phase 50 Rust + physical iOS compile passed in workflow #914; device retest pending)
 
 ## Goal
 
@@ -499,7 +499,7 @@ The commits from Nov 8–9 add substantial UI rendering, Android framework, even
 | 47 | AndroidX observer-map compatibility: exact HashMap.putIfAbsent behavior plus truthful guest-render status | Completed — consolidated CI validated; device retest pending |
 | 48 | Correct putIfAbsent behavior for null-valued and absent mappings; add selectable app surface themes | Completed — consolidated CI validated; device retest pending |
 | 49 | AndroidX LifecycleRegistry ArrayList constructor and indexed state-stack operations; truthful startup-blocked UI report | In Progress — Rust runtime suite passed (227/227 in dex-runtime); authorized consolidated iOS compile + unsigned IPA build triggered; device retest pending |
-| 50 | AndroidX lifecycle WeakReference constructor plus inherited Reference.get/clear; surface first unresolved startup API in runtime UI | In Progress — Rust runtime suite passed (228/228 in dex-runtime); iOS compile validation and device retest pending |
+| 50 | AndroidX lifecycle WeakReference constructor plus inherited Reference.get/clear; surface first unresolved startup API in runtime UI | In Progress — Rust workspace tests and physical iOS compile passed in workflow #914; fresh device retest pending |
 
 **Phase sizing rule:** A phase must be small enough to finish in one implementation reply. If a task needs multiple independent subsystems, split it into later phases rather than expanding the current phase.
 
@@ -1705,7 +1705,7 @@ Status: UI implementation committed · consolidated validation and visual review
 - Final consolidated Rust workflow [#913](https://github.com/strideproject77-lgtm/Stride-Official/actions/runs/43709183093) passed.
 - The dex-runtime test suite reports **228 passed, 0 failed**, including `weak_reference_constructor_get_and_clear_use_managed_referent`.
 - The earlier #911 compile failure and #912 null-representation assertion failure were corrected before this passing run. The final workflow is green.
-- The iOS/unsigned IPA job was skipped for Phase 50; no new IPA was built, signed, or exported. Phase 50 remains **In Progress** pending iOS compile validation and a fresh device session log.
+- At the initial Phase 50 checkpoint the iOS/unsigned IPA job was skipped; the follow-up authorized unsigned build completed successfully in workflow #914. Phase 50 remains **In Progress** pending a fresh device session log.
 - All implementation commits remain on `feat/dex-class-method-loader`; `main` is untouched.
 
 
@@ -1718,3 +1718,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Workflow audit: Rust tests are a required dependency of the iOS job; the job targets generic physical iOS/ARM64, disables code signing, validates the app bundle and IPA ZIP contents, and uploads the unsigned IPA plus build report. No signing or distribution step exists.
 - Added a Copy action to the FIRST STARTUP BLOCKER UI card as a small diagnostics usability improvement.
 - This checkpoint authorizes one unsigned IPA build only after the Rust test job passes. Do not sign, merge to main, or claim real-device APK execution. Phase 50 remains In Progress until the iOS compile passes and a fresh iPhone session log is reviewed.
+
+
+### 2026-11-15 — Phase 50 consolidated validation result (workflow #914)
+
+- Rust runtime tests: **Passed** on commit `83c5089e20ede11788ee9a6277f48c3d23b66269`.
+- Physical iOS build: **Passed**. ARM64 Rust runtime, device XCFramework, generated app icon, XcodeGen project, package resolution, Release compile for generic physical iPhone, bundle verification, IPA ZIP validation, and artifact upload all succeeded.
+- Artifact: `Stride-unsigned-IPA-914` (artifact ID `14160546722`); unsigned IPA SHA-256: `b7380f6765340268265933c74599ae1bd06ef4aedf8f0f9ab03c4b9e33b3e74c`.
+- Signing remained disabled. No signed IPA, App Store export, or merge to main occurred.
+- Remaining: install this exact IPA on the user's iPhone XS Max (iOS 18.7.10), import the same 2048 v1.7.0 APK, launch once, and inspect the fresh one-shot diagnostic report/session log. Record the next first unresolved API and whether guest instruction count advances. Do not claim 2048 gameplay until a rendered frame and user interaction are verified.
+- Phase 50 remains **In Progress** until that real-device retest is reviewed.
