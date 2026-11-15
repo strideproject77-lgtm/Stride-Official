@@ -1528,6 +1528,73 @@ impl<'a> ArtVm<'a> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn object_constructor_intrinsic_accepts_non_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(1u32, MethodCode {
+            class_descriptor: "Ltest/Child;".into(),
+            name: "callObjectCtor".into(),
+            prototype: "()V".into(),
+            // invoke-direct {v0}, method@0; return-void
+            code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+            registers_size: 1, ins_size: 1, try_blocks: vec![],
+        })]);
+        let inventories = vec![ClassInventory {
+            classes: vec![],
+            method_references: vec![MethodReference {
+                method_index: 0,
+                class_descriptor: "Ljava/lang/Object;".into(),
+                name: "<init>".into(),
+                prototype: "()V".into(),
+            }],
+            field_references: vec![],
+            strings: vec![],
+            type_descriptors: vec![],
+        }];
+        let method_owners = HashMap::from([(1u32, 0usize)]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_multi_dex_metadata(&inventories, &method_owners);
+        let report = vm.execute_method(1, &[Value::Object(7)], 16)
+            .expect("Object constructor intrinsic should accept a non-null receiver");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+    }
+
+    #[test]
+    fn object_constructor_intrinsic_rejects_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(1u32, MethodCode {
+            class_descriptor: "Ltest/Child;".into(),
+            name: "callObjectCtor".into(),
+            prototype: "()V".into(),
+            code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+            registers_size: 1, ins_size: 1, try_blocks: vec![],
+        })]);
+        let inventories = vec![ClassInventory {
+            classes: vec![],
+            method_references: vec![MethodReference {
+                method_index: 0,
+                class_descriptor: "Ljava/lang/Object;".into(),
+                name: "<init>".into(),
+                prototype: "()V".into(),
+            }],
+            field_references: vec![],
+            strings: vec![],
+            type_descriptors: vec![],
+        }];
+        let method_owners = HashMap::from([(1u32, 0usize)]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_multi_dex_metadata(&inventories, &method_owners);
+        let error = vm.execute_method(1, &[Value::Object(0)], 16)
+            .expect_err("null receiver must not pass Object constructor intrinsic");
+        assert!(error.contains("Invalid null receiver for intrinsic Object.<init>()V"));
+    }
+
+    #[test]
     fn each_method_uses_its_own_dex_string_table() {
         let mut heap = ManagedHeap::default();
         let mut hierarchy = ClassHierarchy::new();
