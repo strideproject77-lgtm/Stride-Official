@@ -1803,3 +1803,9 @@ Status: UI implementation committed · consolidated validation and visual review
 - Files: `ContentView.swift`, `APKArchiveInspector.swift`, `APKInspectionTests.swift`, `STRIDE_HANDOFF.md`.
 - Validation: this commit triggers the consolidated Rust suite, physical-iPhone compile-only validation and the explicitly authorized unsigned IPA job. IPA packaging remains unsigned; no certificate signing or main-branch merge.
 - Device verification remains pending for 2048 icon rendering and the updated settings/detail interactions.
+
+
+### Phase 53 pre-validation source correction
+
+- A source review caught and corrected a duplicated launch-button opening token in the generated SwiftUI section before relying on CI. The corrected source is now the branch head for the authorized build.
+- The earlier #920 run was triggered from the immediately preceding UI commit and is not the final validation for this correction. A fresh consolidated run is triggered by the corrected commit.

@@ -1135,7 +1135,7 @@ private struct APKDetailSheet: View {
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
                     .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.075), lineWidth: 1))
 
-                    Button { startGame() } label: {                    Button { startGame() } label: {
+                    Button { startGame() } label: {
                         HStack(spacing: 9) {
                             if isExecuting {
                                 ProgressView().tint(.black)
