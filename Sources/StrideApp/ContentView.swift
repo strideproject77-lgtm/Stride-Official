@@ -1128,39 +1128,24 @@ private struct APKDetailSheet: View {
                             Spacer()
                             Image(systemName: "clock.arrow.circlepath").foregroundStyle(accent)
                         }
-                        DisclosureGroup(isExpanded: $showingSessionLogs) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack {
-                                    Text("SESSION EVENTS").font(.system(size: 9, weight: .heavy)).tracking(1).foregroundStyle(muted)
-                                    Spacer()
-                                    Button { copySessionLog() } label: { Label("Copy", systemImage: "doc.on.doc").font(.system(size: 10, weight: .bold)).foregroundStyle(accent) }.buttonStyle(.plain)
-                                    Button { exportSessionLog() } label: { Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 10, weight: .bold)).foregroundStyle(accent) }.buttonStyle(.plain)
+                        Button { showingSessionLogs = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .font(.system(size: 16, weight: .semibold)).foregroundStyle(accent)
+                                    .frame(width: 38, height: 38).background(accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 11))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Session Logs").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                    Text("View this game's launch history, copy or export")
+                                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                                 }
-                                ScrollView {
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        if sessionLogLines.isEmpty {
-                                            Text("No session logs saved for this app yet.").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                                        } else {
-                                            ForEach(Array(sessionLogLines.suffix(100).enumerated()), id: \.offset) { _, line in
-                                                Text(line).font(.system(size: 9, weight: .regular, design: .monospaced))
-                                                    .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red.opacity(0.95) : muted)
-                                                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                                            }
-                                        }
-                                    }
-                                }.frame(maxHeight: 210).padding(10).background(canvas, in: RoundedRectangle(cornerRadius: 11))
-                                Text("Copy or export this app's session timeline. Overall diagnostics are available in Settings.")
-                                    .font(.system(size: 10, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                            }.padding(.top, 8)
-                        } label: {
-                            HStack {
-                                Label("Session Logs", systemImage: "doc.text.magnifyingglass").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                                 Spacer()
-                                Text(String(sessionLogLines.count) + " lines").font(.system(size: 9, weight: .medium)).foregroundStyle(muted)
-                            }
-                        }.tint(accent).padding(14)
-                            .background(panel, in: RoundedRectangle(cornerRadius: 16))
-                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
+                                Text(String(sessionLogLines.count)).font(.system(size: 10, weight: .semibold)).foregroundStyle(muted)
+                                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(muted)
+                            }.padding(14).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.075), lineWidth: 1))
                     if let res = executionResult {
                         VStack(alignment: .leading, spacing: 7) {
                             HStack {
@@ -1336,6 +1321,50 @@ private struct APKDetailSheet: View {
             if let logExportURL {
                 ActivityViewController(activityItems: [logExportURL])
             }
+        }
+        .sheet(isPresented: $showingSessionLogs) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text(item.displayName).font(.system(size: 13, weight: .semibold)).foregroundStyle(muted)
+                        Spacer()
+                        Text(String(sessionLogLines.count) + " lines").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                    }
+                    HStack(spacing: 12) {
+                        Button { copySessionLog() } label: {
+                            Label("Copy", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(raised, in: Capsule())
+                        }.buttonStyle(.plain)
+                        Button { exportSessionLog() } label: {
+                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Color.black).padding(.horizontal, 14).padding(.vertical, 10)
+                                .background(accent, in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            if sessionLogLines.isEmpty {
+                                Text("No session logs saved for this app yet.")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18)
+                            } else {
+                                ForEach(Array(sessionLogLines.suffix(300).enumerated()), id: \\.offset) { _, line in
+                                    Text(line).font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(line.contains("[ERROR]") || line.contains("[CRASH]") || line.contains("FAILED") ? Color.red : muted)
+                                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                                }
+                            }
+                        }
+                    }
+                    .padding(12).background(raised, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(16).background(canvas.ignoresSafeArea())
+                .navigationTitle("Session Logs")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
+            }
+            .preferredColorScheme(.dark)
         }
     }
 
