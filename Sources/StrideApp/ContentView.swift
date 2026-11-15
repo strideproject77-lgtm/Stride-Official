@@ -113,14 +113,6 @@ struct ContentView: View {
         .accessibilityLabel(label)
     }
 
-    private func headerIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-                .frame(width: 44, height: 44).background(Color.black.opacity(0.55), in: Circle())
-                .overlay(Circle().stroke(accent.opacity(0.48), lineWidth: 1))
-        }.buttonStyle(.plain).accessibilityLabel(label)
-    }
-
     private var home: some View {
         ScrollView(showsIndicators: false) {
             VStack(alignment: .leading, spacing: 23) {
