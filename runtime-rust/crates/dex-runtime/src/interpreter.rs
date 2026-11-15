@@ -1504,6 +1504,7 @@ impl<'a> ArtVm<'a> {
                             ("get", "(Ljava/lang/Object;)Ljava/lang/Object;")
                                 | ("containsKey", "(Ljava/lang/Object;)Z")
                                 | ("put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+                                | ("putIfAbsent", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
                                 | ("remove", "(Ljava/lang/Object;)Ljava/lang/Object;")
                                 | ("size", "()I")
                                 | ("isEmpty", "()Z")
@@ -1518,7 +1519,7 @@ impl<'a> ArtVm<'a> {
                             "Invalid HashMap receiver for {}{} at PC {}: {:?}", target_name, target_proto, pc, error
                         ))?;
                         let entry_prefix = "__stride_hashmap_entry_";
-                        let field_name = if matches!(target_name, "get" | "containsKey" | "put" | "remove") {
+                        let field_name = if matches!(target_name, "get" | "containsKey" | "put" | "putIfAbsent" | "remove") {
                             match args.get(1) {
                                 Some(Value::Object(id)) if *id != 0 => {
                                     self.heap.get(*id).map_err(|error| format!(
@@ -1549,11 +1550,13 @@ impl<'a> ArtVm<'a> {
                             "containsKey" => pending_result = Some(Value::Int(if field_name.as_deref().is_some_and(|field|
                                 self.heap.has_instance_field(receiver, field).unwrap_or(false)
                             ) { 1 } else { 0 })),
-                            "put" => {
+                            "put" | "putIfAbsent" => {
                                 let value = args.get(2).copied().ok_or_else(|| "Missing HashMap value argument".to_string())?;
                                 let field = field_name.as_deref().ok_or_else(|| "Missing HashMap key field".to_string())?;
                                 let existed = self.heap.has_instance_field(receiver, field).map_err(|e| format!("{:?}", e))?;
-                                self.heap.set_instance_field(receiver, field, value).map_err(|e| format!("{:?}", e))?;
+                                if !existed || target_name == "put" {
+                                    self.heap.set_instance_field(receiver, field, value).map_err(|e| format!("{:?}", e))?;
+                                }
                                 if !existed {
                                     self.heap.set_instance_field(receiver, size_field, Value::Int(current_size.saturating_add(1)))
                                         .map_err(|e| format!("{:?}", e))?;
@@ -2704,6 +2707,13 @@ mod tests {
                 code_units: vec![0x106e, 0x0003, 0x0000, 0x000a, 0x000f],
                 registers_size: 2, ins_size: 1, try_blocks: vec![],
             }),
+            (6u32, MethodCode {
+                class_descriptor: "Ltest/MapCaller;".into(),
+                name: "putIfAbsent".into(),
+                prototype: "(Ljava/util/HashMap;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into(),
+                code_units: vec![0x306e, 0x0005, 0x0210, 0x030c, 0x0311],
+                registers_size: 4, ins_size: 3, try_blocks: vec![],
+            }),
             (5u32, MethodCode {
                 class_descriptor: "Ltest/MapCaller;".into(),
                 name: "remove".into(),
@@ -2718,6 +2728,7 @@ mod tests {
             MethodReference { method_index: 2, class_descriptor: "Ljava/util/HashMap;".into(), name: "containsKey".into(), prototype: "(Ljava/lang/Object;)Z".into() },
             MethodReference { method_index: 3, class_descriptor: "Ljava/util/HashMap;".into(), name: "size".into(), prototype: "()I".into() },
             MethodReference { method_index: 4, class_descriptor: "Ljava/util/HashMap;".into(), name: "remove".into(), prototype: "(Ljava/lang/Object;)Ljava/lang/Object;".into() },
+            MethodReference { method_index: 5, class_descriptor: "Ljava/util/HashMap;".into(), name: "putIfAbsent".into(), prototype: "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;".into() },
         ];
         let lookup = HashMap::new();
         let types = Vec::new();
@@ -2734,6 +2745,10 @@ mod tests {
         assert_eq!(contains.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
         let size = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
         assert_eq!(size.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
+        let ignored_insert = vm.execute_method(6, &[Value::Object(map), Value::Object(key), Value::Object(key)], 32).unwrap();
+        assert_eq!(ignored_insert.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
+        let still_original = vm.execute_method(2, &[Value::Object(map), Value::Object(key)], 32).unwrap();
+        assert_eq!(still_original.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let removed = vm.execute_method(5, &[Value::Object(map), Value::Object(key)], 32).unwrap();
         assert_eq!(removed.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(value)));
         let size_after = vm.execute_method(4, &[Value::Object(map)], 32).unwrap();
