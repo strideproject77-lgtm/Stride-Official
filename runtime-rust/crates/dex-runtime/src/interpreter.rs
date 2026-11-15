@@ -1410,6 +1410,31 @@ impl<'a> ArtVm<'a> {
                     // so this exact boot-library constructor is a safe no-op intrinsic.
                     // Keep this limited to the no-arg signature; constructors accepting an
                     // initial value must execute a real framework implementation.
+                    // WeakHashMap's no-argument constructor leaves its lazily
+                    // allocated table and bookkeeping fields at their zero values.
+                    // Validate the receiver and keep this intrinsic signature-exact.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/WeakHashMap;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for WeakHashMap.<init>()V at PC {}: {:?}",
+                                    pc, error
+                                ))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic WeakHashMap.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     if target_method.is_none()
                         && target_class == "Ljava/util/concurrent/atomic/AtomicReference;"
                         && target_name == "<init>"
@@ -2356,6 +2381,80 @@ mod tests {
 
         let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
         assert!(error.contains("Invalid null receiver for intrinsic AtomicReference.<init>()V"));
+    }
+
+    #[test]
+    fn weak_hash_map_no_arg_constructor_intrinsic_accepts_valid_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let receiver = heap.allocate_instance("Ljava/util/WeakHashMap;").unwrap();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/WeakHashMapCaller;".into(),
+                name: "construct".into(),
+                prototype: "(Ljava/util/WeakHashMap;)V".into(),
+                // invoke-direct {v0}, WeakHashMap.<init>()V; return-void.
+                code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+                registers_size: 1,
+                ins_size: 1,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/util/WeakHashMap;".into(),
+            name: "<init>".into(),
+            prototype: "()V".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[Value::Object(receiver)], 16)
+            .expect("WeakHashMap no-arg constructor should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+    }
+
+    #[test]
+    fn weak_hash_map_no_arg_constructor_intrinsic_rejects_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/WeakHashMapCaller;".into(),
+                name: "construct".into(),
+                prototype: "()V".into(),
+                // invoke-direct {v0}, WeakHashMap.<init>()V; return-void.
+                code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/util/WeakHashMap;".into(),
+            name: "<init>".into(),
+            prototype: "()V".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
+        assert!(error.contains("Invalid null receiver for intrinsic WeakHashMap.<init>()V"));
     }
 
     #[test]
