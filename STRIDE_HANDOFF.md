@@ -1815,3 +1815,9 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - Fixed the duplicate `homeEmptyState` declaration that caused Swift's parser to treat the rest of ContentView as nested local declarations and report a missing closing brace.
 - The first #922 compile-only job exposed this issue; the unsigned IPA job was still compiling at the time. A fresh run from this correction is required before treating the IPA as valid.
+
+
+### Phase 53 build-pipeline guard
+
+- The unsigned IPA job now depends on both the Rust test suite and the physical-iPhone compile-only validation. This prevents the workflow from packaging an IPA when Swift/Xcode compilation has failed.
+- Triggered the explicitly authorized unsigned IPA build from the corrected Phase 53 source. The IPA remains unsigned; no certificate signing or main merge.

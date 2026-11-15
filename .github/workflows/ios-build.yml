@@ -84,7 +84,7 @@ jobs:
   build-ipa:
     name: Build and verify unsigned iOS IPA
     if: (github.event_name == 'workflow_dispatch' && inputs.build_ipa == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'Build Stride unsigned IPA after tests'))
-    needs: rust-tests
+    needs: [rust-tests, ios-compile-validation]
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
