@@ -13,14 +13,14 @@ struct ContentView: View {
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
     @State private var showingAbout = false
-    @AppStorage("stride.accentColorHex") private var accentColorHex = "E8AB64"
+    @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
 
     private var background: Color { .black }
     private var panel: Color { .black }
-    private var raised: Color { Color(red: 0.075, green: 0.080, blue: 0.090) }
-    private var accent: Color { Color(hex: accentColorHex) ?? Color(red: 0.91, green: 0.67, blue: 0.39) }
+    private var raised: Color { Color(red: 0.075, green: 0.055, blue: 0.115) }
+    private var accent: Color { Color(hex: accentColorHex) ?? Color(red: 0.68, green: 0.25, blue: 0.98) }
     private var muted: Color { Color(red: 0.59, green: 0.60, blue: 0.64) }
-    private var line: Color { Color.white.opacity(0.075) }
+    private var line: Color { accent.opacity(0.24) }
 
     var body: some View {
         ZStack {
@@ -35,8 +35,10 @@ struct ContentView: View {
                         home
                     } else if selectedTab == 1 {
                         libraryView
-                    } else {
+                    } else if selectedTab == 2 {
                         settingsView
+                    } else {
+                        moreView
                     }
                 }
                 .fullScreenCover(item: $selectedPackage) { item in
@@ -80,176 +82,149 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Text("Stride")
-                .font(.system(size: 28, weight: .black, design: .rounded))
-                .tracking(-1.15)
-                .foregroundStyle(.primary)
+        HStack(spacing: 12) {
+            Text("Stride").font(.system(size: 35, weight: .black, design: .rounded)).italic().tracking(-1.5)
+                .foregroundStyle(LinearGradient(colors: [.white, accent], startPoint: .top, endPoint: .bottom))
+                .shadow(color: accent.opacity(0.42), radius: 12, y: 2)
             Spacer()
-            if isImporting {
-                ProgressView().tint(accent).frame(width: 34, height: 34)
-            } else {
-                Button { selectedTab = 1 } label: {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(accent)
-                        .frame(width: 37, height: 37)
-                        .background(panel, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Search games")
-                Button { selectedTab = 2 } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(accent)
-                        .frame(width: 37, height: 37)
-                        .background(panel, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Settings")
+            if isImporting { ProgressView().tint(accent).frame(width: 42, height: 42) }
+            else {
+                headerIcon("magnifyingglass", label: "Search games") { selectedTab = 1 }
+                headerIcon("gearshape.fill", label: "Settings") { selectedTab = 2 }
             }
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 12)
-        .padding(.bottom, 13)
+        }.padding(.horizontal, 22).padding(.top, 12).padding(.bottom, 14)
+    }
+
+    private func headerIcon(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                .frame(width: 44, height: 44).background(Color.black.opacity(0.55), in: Circle())
+                .overlay(Circle().stroke(accent.opacity(0.48), lineWidth: 1))
+        }.buttonStyle(.plain).accessibilityLabel(label)
     }
 
     private var home: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(muted)
-                    Text("Your Apps")
-                        .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                }
-                .padding(.top, 5)
-
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(muted)
-                    TextField("Search apps", text: $searchText)
-                        .font(.system(size: 15))
-                        .tint(accent)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Search your imported Android apps")
-                    if !searchText.isEmpty {
-                        Button { searchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear search")
-                    }
-                }
-                .padding(.horizontal, 15)
-                .frame(height: 48)
-                .background(Color.white.opacity(0.085), in: Capsule())
-                .overlay(Capsule().stroke(Color.white.opacity(0.07), lineWidth: 1))
-
+            VStack(alignment: .leading, spacing: 23) {
+                featuredCard
                 HStack {
-                    Text(searchText.isEmpty ? "ALL APPS" : "SEARCH RESULTS")
-                        .font(.system(size: 10, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundStyle(muted)
-                    Spacer()
-                    Text("\(filteredPackages.count)")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(muted)
-                }
-
-                if filteredPackages.isEmpty {
-                    homeEmptyState
-                } else {
-                    appIconGrid(filteredPackages)
-                }
-
-                HStack(spacing: 0) {
-                    dockAction("Import", symbol: "plus") { showingImporter = true }
-                    dockAction("Library", symbol: "square.grid.2x2") { selectedTab = 1 }
-                    dockAction("Settings", symbol: "gearshape") { selectedTab = 2 }
-                    dockAction("Recent", symbol: "clock.arrow.circlepath") {
-                        if let recent = recentlyPlayedPackages.first { selectedPackage = recent }
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 5, height: 30)
+                            .shadow(color: accent.opacity(0.8), radius: 8)
+                        Text(searchText.isEmpty ? "All Games" : "Search Results")
+                            .font(.system(size: 23, weight: .bold, design: .rounded)).foregroundStyle(.white)
                     }
+                    Spacer()
+                    Text("\(filteredPackages.count)").font(.system(size: 12, weight: .bold)).foregroundStyle(accent)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 12)
-                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 1))
-                .padding(.top, 8)
-                .padding(.bottom, 14)
+                if filteredPackages.isEmpty { homeEmptyState } else { appIconGrid(filteredPackages) }
+                Button { showingImporter = true } label: {
+                    Label("Import Game", systemImage: "plus").font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 48)
+                        .background(LinearGradient(colors: [accent, accent.opacity(0.58)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 15))
+                }.buttonStyle(.plain).disabled(isImporting).padding(.bottom, 20)
+            }.padding(.horizontal, 20).padding(.top, 4)
+        }.background(gamingBackdrop)
+    }
+
+    private var featuredCard: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 24).fill(LinearGradient(colors: [Color(red: 0.20, green: 0.08, blue: 0.34), Color(red: 0.035, green: 0.025, blue: 0.09), .black], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Circle().fill(accent.opacity(0.24)).frame(width: 190, height: 190).blur(radius: 38).offset(x: 145, y: -28)
+            if let featured = recentlyPlayedPackages.first ?? library.packages.first {
+                HStack(spacing: 14) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("FEATURED GAME").font(.system(size: 9, weight: .heavy)).tracking(1.8).foregroundStyle(accent)
+                        Text(featured.displayName).font(.system(size: 23, weight: .bold, design: .rounded)).foregroundStyle(.white).lineLimit(2)
+                        Text(recentlyPlayedPackages.isEmpty ? "Ready in your library" : "Recently played").font(.system(size: 11)).foregroundStyle(.white.opacity(0.7))
+                        Button { selectedPackage = featured } label: {
+                            Text("View Game").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 9).background(accent.opacity(0.82), in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
+                    Spacer(minLength: 0)
+                    APKIconView(data: featured.iconData, accent: accent, size: 108)
+                        .clipShape(RoundedRectangle(cornerRadius: 22)).shadow(color: accent.opacity(0.32), radius: 18)
+                }.padding(18)
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("WELCOME TO STRIDE").font(.system(size: 9, weight: .heavy)).tracking(1.8).foregroundStyle(accent)
+                    Text("Your games.\nOne library.").font(.system(size: 27, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                    Text("Import an Android package to get started.").font(.system(size: 11)).foregroundStyle(.white.opacity(0.72))
+                    Button { showingImporter = true } label: {
+                        Label("Import your first game", systemImage: "plus").font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.white).padding(.horizontal, 13).padding(.vertical, 9).background(accent.opacity(0.82), in: Capsule())
+                    }.buttonStyle(.plain)
+                }.padding(20)
             }
-            .padding(.horizontal, 20)
-        }
-        .background(LinearGradient(
-                colors: [Color(red: 0.12, green: 0.10, blue: 0.15), Color(red: 0.055, green: 0.055, blue: 0.075), .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ).ignoresSafeArea())
+        }.frame(height: 205).clipShape(RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).stroke(accent.opacity(0.55), lineWidth: 1))
+            .shadow(color: accent.opacity(0.12), radius: 16, y: 5)
+    }
+
+    private var gamingBackdrop: some View {
+        ZStack {
+            Color(red: 0.012, green: 0.008, blue: 0.028)
+            LinearGradient(colors: [Color(red: 0.12, green: 0.035, blue: 0.20).opacity(0.58), .clear, Color(red: 0.08, green: 0.025, blue: 0.17).opacity(0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
+        }.ignoresSafeArea()
     }
 
     private var libraryView: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 19) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("APP LIBRARY")
-                            .font(.system(size: 10, weight: .bold))
-                            .tracking(1.4)
-                            .foregroundStyle(muted)
-                        Text("All Apps")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                    }
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 6, height: 42).shadow(color: accent.opacity(0.8), radius: 8)
+                    Text("Library").font(.system(size: 32, weight: .bold, design: .rounded)).italic().foregroundStyle(.white)
                     Spacer()
-                    Text("\(filteredPackages.count) APPS")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(muted)
-                }
-                .padding(.top, 7)
-
+                    headerIcon("magnifyingglass", label: "Search library") { searchText = searchText.isEmpty ? " " : "" }
+                }.padding(.top, 12)
                 HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(muted)
-                    TextField("Search your app library", text: $searchText)
-                        .font(.system(size: 14))
-                        .tint(accent)
-                        .autocorrectionDisabled()
-                        .accessibilityLabel("Search your imported Android apps")
+                    Image(systemName: "magnifyingglass").foregroundStyle(muted)
+                    TextField("Search your games...", text: $searchText).font(.system(size: 14)).tint(accent).autocorrectionDisabled()
                     if !searchText.isEmpty {
-                        Button { searchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear library search")
+                        Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(muted) }.buttonStyle(.plain)
                     }
+                }.padding(.horizontal, 15).frame(height: 46).background(Color.white.opacity(0.055), in: Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 1))
+                HStack {
+                    Text("YOUR GAMES").font(.system(size: 10, weight: .heavy)).tracking(1.5).foregroundStyle(muted)
+                    Spacer()
+                    Text("\(filteredPackages.count) GAMES").font(.system(size: 10, weight: .bold)).foregroundStyle(accent)
                 }
-                .padding(.horizontal, 14)
-                .frame(height: 46)
-                .background(Color.white.opacity(0.085), in: Capsule())
-
                 if filteredPackages.isEmpty {
-                    if library.packages.isEmpty {
-                        emptyState
-                    } else {
-                        homeEmptyState
-                    }
-                } else {
-                    appIconGrid(filteredPackages)
+                    if library.packages.isEmpty { emptyState } else { homeEmptyState }
+                } else { appIconGrid(filteredPackages) }
+            }.padding(.horizontal, 20).padding(.bottom, 28)
+        }.background(gamingBackdrop)
+    }
+
+    private var moreView: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("More").font(.system(size: 30, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                moreAction("Import Android Game", detail: "Add APK, XAPK, APKS or APKM", symbol: "plus.square.fill") { showingImporter = true }
+                moreAction("Recently Played", detail: "Open your latest game", symbol: "clock.fill") {
+                    if let recent = recentlyPlayedPackages.first { selectedPackage = recent } else { selectedTab = 1 }
                 }
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 9)
-            .padding(.bottom, 24)
-        }
-        .background(LinearGradient(
-                colors: [Color(red: 0.12, green: 0.10, blue: 0.15), Color(red: 0.055, green: 0.055, blue: 0.075), .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ).ignoresSafeArea())
+                moreAction("About Stride", detail: "Creator, version and project information", symbol: "info.circle.fill") { showingAbout = true }
+            }.padding(20)
+        }.background(gamingBackdrop)
+    }
+
+    private func moreAction(_ title: String, detail: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                Image(systemName: symbol).font(.system(size: 19, weight: .semibold)).foregroundStyle(accent)
+                    .frame(width: 44, height: 44).background(accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                    Text(detail).font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold)).foregroundStyle(muted)
+            }.padding(13).background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 17))
+                .overlay(RoundedRectangle(cornerRadius: 17).stroke(accent.opacity(0.18), lineWidth: 1))
+        }.buttonStyle(.plain)
     }
 
     private var homeEmptyState: some View {
@@ -304,7 +279,7 @@ struct ContentView: View {
     }
 
     private func appIconGrid(_ items: [ImportedAPK]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 4), alignment: .center, spacing: 22) {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 3), alignment: .center, spacing: 22) {
             ForEach(items) { item in packageButton(item) }
         }
     }
@@ -491,11 +466,10 @@ struct ContentView: View {
             tab("house.fill", title: "Home", index: 0)
             tab("square.grid.2x2.fill", title: "Library", index: 1)
             tab("gearshape.fill", title: "Settings", index: 2)
-        }
-        .padding(.top, 10)
-        .padding(.bottom, 6)
-        .background(panel)
-        .overlay(alignment: .top) { Rectangle().fill(line).frame(height: 1) }
+            tab("ellipsis", title: "More", index: 3)
+        }.padding(.top, 9).padding(.bottom, 5)
+            .background(Color(red: 0.025, green: 0.012, blue: 0.045))
+            .overlay(alignment: .top) { Rectangle().fill(accent.opacity(0.36)).frame(height: 1) }
     }
 
     private func tab(_ symbol: String, title: String, index: Int) -> some View {
