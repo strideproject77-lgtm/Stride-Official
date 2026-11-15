@@ -1821,3 +1821,13 @@ Status: UI implementation committed · consolidated validation and visual review
 
 - The unsigned IPA job now depends on both the Rust test suite and the physical-iPhone compile-only validation. This prevents the workflow from packaging an IPA when Swift/Xcode compilation has failed.
 - Triggered the explicitly authorized unsigned IPA build from the corrected Phase 53 source. The IPA remains unsigned; no certificate signing or main merge.
+
+
+### 2026-11-15 — Phase 54: Compact iOS-native detail and Session Logs controls
+
+- Increased the APK detail app icon from 66pt to 86pt while retaining its rounded-square artwork presentation.
+- Moved the Launch control into the app identity row beside the larger icon, directly above Package Analysis. The control is now a compact 42pt-high capsule rather than a full-width 56pt banner; launch behavior is unchanged.
+- Reduced the three Session Logs actions to consistent 44pt minimum-height controls with compact labels and rounded-rectangle surfaces. The Complete Diagnostic Report action remains visually primary; Copy and Export Raw Log use quieter secondary surfaces.
+- Kept different shapes where they suit the component: the app's primary Launch action remains a capsule, while the denser Session Logs toolbar uses compact continuous rounded rectangles. No project-wide forced button shape was introduced.
+- Validation: source-level replacement checks passed. No GitHub Actions, workflows, builds, signing, IPA packaging/export, or device tests were run. Swift compile and device layout verification remain pending.
+- Branch: `feat/dex-class-method-loader`. No merge to `main`.

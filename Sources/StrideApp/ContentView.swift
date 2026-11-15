@@ -1059,11 +1059,11 @@ private struct APKDetailSheet: View {
 
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack(spacing: 14) {
-                        APKIconView(data: item.iconData, accent: accent, size: 66)
-                            .background(raised, in: RoundedRectangle(cornerRadius: 18))
-                            .clipShape(RoundedRectangle(cornerRadius: 18))
-                        VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 15) {
+                        APKIconView(data: item.iconData, accent: accent, size: 86)
+                            .background(raised, in: RoundedRectangle(cornerRadius: 20))
+                            .clipShape(RoundedRectangle(cornerRadius: 20))
+                        VStack(alignment: .leading, spacing: 7) {
                             Text(item.displayName)
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                                 .lineLimit(2)
@@ -1078,6 +1078,30 @@ private struct APKDetailSheet: View {
                             .font(.system(size: 9, weight: .medium))
                             .foregroundStyle(muted)
                             .lineLimit(1)
+                            Button { startGame() } label: {
+                                HStack(spacing: 8) {
+                                    if isExecuting {
+                                        ProgressView().tint(.black)
+                                        Text("Preparing…")
+                                    } else {
+                                        Image(systemName: "play.fill")
+                                        Text("Launch")
+                                    }
+                                }
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color.black)
+                                .padding(.horizontal, 19)
+                                .frame(height: 42)
+                                .background(
+                                    LinearGradient(colors: [accent, accent.opacity(0.84)],
+                                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                                    in: Capsule()
+                                )
+                                .overlay(Capsule().stroke(Color.white.opacity(0.20), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isExecuting)
+                            .accessibilityLabel(isExecuting ? "Launching app" : "Launch app")
                         }
                         Spacer(minLength: 0)
                     }
@@ -1134,32 +1158,6 @@ private struct APKDetailSheet: View {
                     .padding(14)
                     .background(panel, in: RoundedRectangle(cornerRadius: 18))
                     .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.075), lineWidth: 1))
-
-                    Button { startGame() } label: {
-                        HStack(spacing: 9) {
-                            if isExecuting {
-                                ProgressView().tint(.black)
-                                Text("Preparing app…")
-                            } else {
-                                Image(systemName: "play.fill")
-                                Text("Launch")
-                            }
-                        }
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Color.black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(
-                            LinearGradient(colors: [accent, accent.opacity(0.82)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing),
-                            in: Capsule()
-                        )
-                        .overlay(Capsule().stroke(Color.white.opacity(0.22), lineWidth: 1))
-                        .shadow(color: accent.opacity(0.24), radius: 12, y: 5)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isExecuting)
-                    .accessibilityLabel(isExecuting ? "Launching app" : "Launch app")
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -1283,30 +1281,41 @@ private struct APKDetailSheet: View {
                         Spacer()
                         Text(String(sessionLogLines.count) + " lines").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                     }
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Button { exportCompleteDiagnosticReport() } label: {
-                            Label("Export Complete Diagnostic Report", systemImage: "doc.badge.gearshape")
-                                .font(.system(size: 12, weight: .bold))
+                            Label("Report", systemImage: "doc.badge.gearshape")
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(Color.black)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(accent, in: Capsule())
+                                .frame(height: 44)
+                                .background(accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel("Export Complete Diagnostic Report")
                         .disabled(!hasStartedDiagnosticSession && diagnosticReportURL == nil)
                         .opacity(!hasStartedDiagnosticSession && diagnosticReportURL == nil ? 0.45 : 1)
-                        HStack(spacing: 12) {
-                            Button { copySessionLog() } label: {
-                                Label("Copy Raw Log", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
-                                    .background(raised, in: Capsule())
-                            }.buttonStyle(.plain)
-                            Button { exportSessionLog() } label: {
-                                Label("Export Raw Log", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(Color.white).padding(.horizontal, 14).padding(.vertical, 10)
-                                    .background(raised, in: Capsule())
-                            }.buttonStyle(.plain)
+
+                        Button { copySessionLog() } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Copy Raw Log")
+
+                        Button { exportSessionLog() } label: {
+                            Label("Export", systemImage: "square.and.arrow.up")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Export Raw Log")
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
