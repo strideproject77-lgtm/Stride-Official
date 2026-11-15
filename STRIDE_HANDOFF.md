@@ -1493,3 +1493,4 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: perform the one consolidated Rust + iOS compile validation for this batch; rebuild the authorized unsigned 2048 test IPA only after it passes; then use the next session log to identify the next startup/API blocker. 2048 is not yet confirmed compatible.
 - Extra quality: keep the constructor fallback signature-exact and receiver-checked rather than broadly accepting unresolved framework constructors.
 - All work remains on `feat/dex-class-method-loader`; `main` remains untouched; no signing or export.
+- Authorized validation/build trigger: this handoff update uses the workflow's explicit unsigned-IPA trigger message; signing remains disabled.
