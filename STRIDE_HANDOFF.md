@@ -1543,3 +1543,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Icon source: the silver metallic S / midnight navy / violet-cyan artwork is already authored in `Scripts/generate-app-icon.swift`; the build workflow regenerates `Assets.xcassets/AppIcon.appiconset/StrideAppIcon.png` from that source and checks 1024x1024 dimensions. The PNG is a generated build asset, not yet a separately committed raster source file.
 - This commit records the fresh diagnostic and keeps Phase 44 open. HashMap runtime implementation and 2048 device retest remain incomplete. Do not claim game compatibility.
 - User requested a fresh unsigned icon build. Run the existing workflow on this feature branch after this handoff commit; it is not a newly created workflow. No signing, export, or main-branch changes.
+
+
+### 2026-11-15 — Home Screen icon artwork correction
+
+- User confirmed the corrupted icon is the Stride iPhone Home Screen icon, not an imported game's Library icon.
+- Inspected the successful unsigned IPA from run #883 (artifact #14156688420). The app bundle contains `AppIcon60x60@2x.png` and `AppIcon76x76@2x~ipad.png`; the iOS-optimized CgBI PNG decodes successfully. This proves the icon asset is embedded, but the rendered 120x120 artwork looks like a flat blue S rather than the intended metallic silver mark.
+- Reworked `Scripts/generate-app-icon.swift`: replaced the open stroked path with a closed smooth S-ribbon contour, added a restrained violet/cyan aura, a brighter silver gradient face, and a metallic highlight. Kept the existing asset-catalog path and generator-based build pipeline.
+- The revised icon has not yet been rendered/visually verified from a new build. Next: one consolidated workflow run; inspect the embedded Home Screen icon image from the resulting IPA before calling the icon fixed.
+- Runtime note: the supplied 15:05 2048 log still reports unresolved `Ljava/util/HashMap;-><init>()V` from `FastSafeIterableMap`; no new runtime implementation was made in this icon-only batch. 2048 remains blocked before Activity startup.
+- All edits remain on `feat/dex-class-method-loader`; `main` untouched. User authorized the unsigned build; no signing or export.
