@@ -1283,3 +1283,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: run the single consolidated Swift/iOS + Rust validation pass when the current implementation batch is ready; inspect Home and Library on an iPhone XS Max for icon sizing, safe-area spacing, scrolling and dock behavior. Confirm icons with transparent source pixels retain their original artwork/background as expected.
 - Tests: not run, as requested; defer to the one consolidated validation pass.
 - IPA: not built, signed or exported. `main` untouched.
+
+### Phase 38 — Proprietary Repository License & Reuse Restrictions
+**Status: Documentation implementation committed · legal ownership details should be confirmed before public release.**
+
+- Added a root `LICENSE` file declaring the repository proprietary and **All Rights Reserved**.
+- The terms state that public visibility does not grant permission to use, copy, reproduce, modify, create derivatives, redistribute, sublicense, sell, or incorporate the Materials into another project without prior express written permission from the authorized Stride Project rights holder.
+- Added a matching **Copyright and permissions** section to `README.md`, linking to the full LICENSE and warning that viewing, downloading, or forking does not itself grant reuse rights.
+- Added a non-waivable-rights qualification and an "AS IS" warranty disclaimer; the notice does not claim to override rights that applicable law does not allow the project to restrict.
+- Extra improvement: the permission rule is stated in both the canonical LICENSE and the repository landing page, so visitors see the restriction before browsing files.
+- Remaining: confirm the exact legal copyright holder name and contact route before treating this as final legal documentation; obtain jurisdiction-appropriate legal review if formal enforcement is important.
+- Validation: documentation-only change; no tests or workflows run. No IPA build, signing, export, or merge to `main`. All commits remain on `feat/dex-class-method-loader`.
