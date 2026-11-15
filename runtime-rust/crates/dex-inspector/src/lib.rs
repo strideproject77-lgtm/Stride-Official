@@ -253,7 +253,7 @@ pub fn validate_register_operands(
         let b4 = usize::from((first >> 12) & 0x0f);
         match op {
             // 12x: two four-bit register operands.
-            0x01 | 0x04 | 0x07 | 0x21 | 0x7b..=0x8f | 0xb0..=0xcf => {
+            0x01 | 0x04 | 0x07 | 0x21 | 0x7b..=0x8f | 0xb0..=0xc2 | 0xc6..=0xcf => {
                 check(a4)?; check(b4)?;
             }
             // 11x and 11n: one byte or four-bit register.
