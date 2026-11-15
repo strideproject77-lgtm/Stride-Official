@@ -977,6 +977,10 @@ private struct APKDetailSheet: View {
     @State private var executionError: String?
     @State private var sessionLogLines: [String] = []
     @State private var logExportURL: URL?
+    @State private var diagnosticReportURL: URL?
+    @State private var didFinalizeDiagnosticReport = false
+    @State private var lastGuestDiagnosticLineCount = 0
+    @State private var guestDiagnosticPollTicks = 0
     @State private var lastRunLabel = "No previous launch recorded"
     let accent: Color
     let canvas: Color
@@ -1235,16 +1239,26 @@ private struct APKDetailSheet: View {
                         Text(String(sessionLogLines.count) + " lines").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                     }
                     HStack(spacing: 12) {
-                        Button { copySessionLog() } label: {
-                            Label("Copy", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
-                                .background(raised, in: Capsule())
-                        }.buttonStyle(.plain)
-                        Button { exportSessionLog() } label: {
-                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Color.black).padding(.horizontal, 14).padding(.vertical, 10)
+                        Button { exportCompleteDiagnosticReport() } label: {
+                            Label("Export Complete Diagnostic Report", systemImage: "doc.badge.gearshape")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(Color.black)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
                                 .background(accent, in: Capsule())
                         }.buttonStyle(.plain)
+                        HStack(spacing: 12) {
+                            Button { copySessionLog() } label: {
+                                Label("Copy Raw Log", systemImage: "doc.on.doc").font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.white).padding(.horizontal, 14).padding(.vertical, 10)
+                                    .background(raised, in: Capsule())
+                            }.buttonStyle(.plain)
+                            Button { exportSessionLog() } label: {
+                                Label("Export Raw Log", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Color.white).padding(.horizontal, 14).padding(.vertical, 10)
+                                    .background(raised, in: Capsule())
+                            }.buttonStyle(.plain)
+                        }
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
@@ -1272,6 +1286,7 @@ private struct APKDetailSheet: View {
         }
         .onAppear {
             loadPreviousSession()
+            diagnosticReportURL = diagnostics.latestDiagnosticReportURL(apkName: item.displayName)
             if autoLaunchOnAppear && !didAutoLaunch {
                 didAutoLaunch = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { startGame() }
@@ -1285,10 +1300,12 @@ private struct APKDetailSheet: View {
             touchResponseMilliseconds = nil
             liveGuestFPS = nil
             StrideOrientationController.shared.reset()
-            executionResult?.session.close()
-            diagnostics.finishSession(status: isExecuting
+            let dismissalStatus = isExecuting
                 ? "view dismissed while launch was active"
-                : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user"))
+                : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user")
+            finalizeDiagnosticReport(status: dismissalStatus)
+            executionResult?.session.close()
+            executionResult = nil
         }
     }
 
@@ -1426,11 +1443,11 @@ private struct APKDetailSheet: View {
         guestFramebufferHeight = 0
         showingExecutionScreen = false
         isExecutionChromeHidden = false
+        appendSessionLog("[SESSION] Runtime closed safely by user")
+        finalizeDiagnosticReport(status: "runtime released safely by user")
         executionResult?.session.close()
         executionResult = nil
         StrideOrientationController.shared.reset()
-        diagnostics.finishSession(status: "runtime released by user")
-        appendSessionLog("[SESSION] Runtime closed safely by user")
         // Close only the execution cover; retain the app detail screen underneath.
     }
 
@@ -1447,7 +1464,16 @@ private struct APKDetailSheet: View {
                             lastGuestTouchDiagnostic = ""
                             executionResult = nil
                             sessionLogLines = []
-                            diagnostics.beginSession(apkName: item.displayName)
+                            diagnosticReportURL = nil
+                            didFinalizeDiagnosticReport = false
+                            lastGuestDiagnosticLineCount = 0
+                            guestDiagnosticPollTicks = 0
+                            diagnostics.beginSession(
+                                apkName: item.displayName,
+                                apkURL: item.fileURL,
+                                packageFormat: item.packageFormat.rawValue,
+                                splitAPKURLs: item.splitAPKURLs
+                            )
                             logExportURL = diagnostics.currentSessionLogURL
                             appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
                             appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
@@ -1461,6 +1487,7 @@ private struct APKDetailSheet: View {
                                     return
                                 }
                                 executionResult = res
+                                captureRuntimeDiagnosticDelta(res.session, includeExisting: true)
                                 UserDefaults.standard.set(Date(), forKey: "stride.lastPlayed.\(item.packageDirectoryURL.standardizedFileURL.path)")
                                 // Seed the guest surface before accepting the first gesture. The
                                 // touch mapper needs real framebuffer dimensions; waiting for the
@@ -1476,6 +1503,11 @@ private struct APKDetailSheet: View {
                                 appendSessionLog("[SESSION] APK screenOrientation=\(res.screenOrientation) recorded; iOS auto-rotation remains enabled")
                                 lastRunLabel = "Runtime retained · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 let scheduler = GuestFrameScheduler { _ in
+                                    guestDiagnosticPollTicks += 1
+                                    if guestDiagnosticPollTicks >= 120 {
+                                        guestDiagnosticPollTicks = 0
+                                        captureRuntimeDiagnosticDelta(res.session)
+                                    }
                                     let pump = res.session.pumpGuestEvents()
                                     let guestFrames = res.session.guestFrameStats()
                                     if let fps = guestFrames.fps {
@@ -1484,16 +1516,7 @@ private struct APKDetailSheet: View {
                                     if pump.status == 0 {
                                         if pump.delivered > 0 {
                                             appendSessionLog("[INPUT] Delivered \(pump.delivered) Android touch event(s) to the guest Activity")
-                                            if let snapshot = res.session.diagnosticsSnapshot() {
-                                                let callbackLines = snapshot.components(separatedBy: .newlines).filter {
-                                                    $0.contains("ACTIVITY_TOUCH_CALLBACK_EXECUTED") ||
-                                                    $0.contains("GUEST_TOUCH_DISPATCH_FAILED")
-                                                }
-                                                if let latest = callbackLines.last, latest != lastGuestTouchDiagnostic {
-                                                    lastGuestTouchDiagnostic = latest
-                                                    appendSessionLog("[GUEST] \(latest)")
-                                                }
-                                            }
+                                            captureRuntimeDiagnosticDelta(res.session)
                                         }
                                         if let frame = res.session.copyFramebuffer() {
                                             guestFramebufferData = frame.data
@@ -1519,7 +1542,7 @@ private struct APKDetailSheet: View {
                                 executionError = error.localizedDescription
                                 lastRunLabel = "Failed · \(Date().formatted(date: .abbreviated, time: .shortened))"
                                 appendSessionLog("[SESSION] FAILED: \(error.localizedDescription)")
-                                diagnostics.finishSession(status: "failed: \(error.localizedDescription)")
+                                finalizeDiagnosticReport(status: "failed: \(error.localizedDescription)")
                             }
                             if !Task.isCancelled { isExecuting = false }
                         }
@@ -1659,6 +1682,103 @@ private struct APKDetailSheet: View {
         diagnostics.latestSessionLogURL(apkName: item.displayName)
     }
 
+    private func captureRuntimeDiagnosticDelta(_ session: APKRuntimeSession, includeExisting: Bool = false) {
+        guard let snapshot = session.diagnosticsSnapshot() else { return }
+        let lines = snapshot.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        if lines.count < lastGuestDiagnosticLineCount { lastGuestDiagnosticLineCount = 0 }
+        let startIndex = includeExisting ? 0 : min(lastGuestDiagnosticLineCount, lines.count)
+        for line in lines.dropFirst(startIndex) {
+            appendSessionLog("[RUST] \(line)")
+        }
+        lastGuestDiagnosticLineCount = lines.count
+        if let latest = lines.last(where: {
+            $0.contains("ACTIVITY_TOUCH_CALLBACK_EXECUTED") || $0.contains("GUEST_TOUCH_DISPATCH_FAILED")
+        }) {
+            lastGuestTouchDiagnostic = latest
+        }
+    }
+
+    private func createCompleteDiagnosticReport(status: String, finishSession: Bool) -> URL? {
+        let runtimeSnapshot = executionResult?.session.diagnosticsSnapshot() ?? ""
+        let frameStats = executionResult?.session.guestFrameStats()
+        let resultMetrics: [String] = {
+            guard let result = executionResult else {
+                return [
+                    "Launch result: no runtime result returned",
+                    "Guest framebuffer: \(guestFramebufferWidth)x\(guestFramebufferHeight)",
+                    "Touch response: \(touchResponseMilliseconds.map { String(format: "%.2f ms", $0) } ?? "Not measured")"
+                ]
+            }
+            return [
+                "Runtime status code: \(result.statusCode)",
+                "Guest instructions executed: \(result.instructionsExecuted)",
+                "DEX classes loaded: \(result.totalClassesLoaded)",
+                "Lifecycle state: \(result.lifecycleState)",
+                "Missing Android APIs: \(result.missingApisCount)",
+                "Average FPS reported at launch: \(String(format: "%.2f", result.averageFps))",
+                "Guest frame count: \(frameStats?.count ?? 0)",
+                "Current guest FPS: \(frameStats?.fps.map { String(format: "%.2f", $0) } ?? "Unavailable")",
+                "Guest heap allocated bytes: \(result.heapAllocatedBytes)",
+                "Framebuffer: \(guestFramebufferWidth)x\(guestFramebufferHeight)",
+                "Latest touch processing: \(touchResponseMilliseconds.map { String(format: "%.2f ms", $0) } ?? "Not measured")"
+            ]
+        }()
+        let packageName = sessionLogLines.first(where: { $0.contains("Android package identity:") })?
+            .components(separatedBy: "Android package identity:").last?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Not resolved"
+        if finishSession {
+            diagnostics.finishSession(status: status)
+        }
+        let runtimeEvidence = runtimeSnapshot.isEmpty
+            ? "No Rust runtime snapshot was available at report time."
+            : "FULL RUST RUNTIME SNAPSHOT\n==============================\n\(runtimeSnapshot)"
+        let url = diagnostics.exportSessionReport(
+            apkName: item.displayName,
+            apkURL: item.fileURL,
+            status: status,
+            rawLog: runtimeEvidence,
+            packageName: packageName,
+            inspection: item.inspection,
+            packageFormat: item.packageFormat.rawValue,
+            splitCount: item.splitAPKURLs.count,
+            runtimeMetrics: resultMetrics.joined(separator: "\n"),
+            splitAPKURLs: item.splitAPKURLs
+        )
+        if let url {
+            diagnosticReportURL = url
+            logExportURL = url
+            lastRunLabel = "Complete diagnostic report saved · \(Date().formatted(date: .abbreviated, time: .shortened))"
+        } else {
+            appendSessionLog("[ERROR] Complete diagnostic report could not be created")
+        }
+        return url
+    }
+
+    private func finalizeDiagnosticReport(status: String) {
+        guard !didFinalizeDiagnosticReport else { return }
+        didFinalizeDiagnosticReport = true
+        _ = createCompleteDiagnosticReport(status: status, finishSession: true)
+    }
+
+    private func exportCompleteDiagnosticReport() {
+        if let existing = diagnosticReportURL ?? diagnostics.latestDiagnosticReportURL(apkName: item.displayName) {
+            logExportURL = existing
+            showingLogShare = true
+            return
+        }
+        if !didFinalizeDiagnosticReport {
+            _ = createCompleteDiagnosticReport(
+                status: isExecuting ? "report captured while session was active" : "manual diagnostic export",
+                finishSession: !isExecuting
+            )
+            if !isExecuting { didFinalizeDiagnosticReport = true }
+        }
+        if let url = diagnosticReportURL {
+            logExportURL = url
+            showingLogShare = true
+        }
+    }
+
     private func sessionLogExportText() -> String {
         diagnostics.flush()
         let inMemoryLog = sessionLogLines.joined(separator: "\n")
@@ -1760,6 +1880,7 @@ private struct APKDetailSheet: View {
               let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return }
         sessionLogLines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
         logExportURL = url
+        diagnosticReportURL = diagnostics.latestDiagnosticReportURL(apkName: item.displayName)
         if let last = sessionLogLines.last { lastRunLabel = "Saved session · \(last)" }
     }
 

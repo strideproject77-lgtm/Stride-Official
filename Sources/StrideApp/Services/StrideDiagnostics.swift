@@ -49,6 +49,7 @@ final class StrideDiagnostics: ObservableObject {
     private var pendingStructured = Data()
     private var pendingSession = Data()
     private var sessionFileURL: URL?
+    private var lastSessionFileURL: URL?
     private let flushBatchSize = 16
     private var sequence: UInt64 = 0
     private let capacity = 2000
@@ -75,9 +76,22 @@ final class StrideDiagnostics: ObservableObject {
 
     func latestSessionLogURL(apkName: String) -> URL? {
         let folder = documentsURL.appendingPathComponent("StrideLogs/Sessions", isDirectory: true)
-        guard let files = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
         let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        return files.filter { $0.lastPathComponent.hasPrefix(String(safeName.prefix(72)) + "-") && $0.pathExtension == "log" }
+        let prefix = String(safeName.prefix(72)) + "-"
+        let files = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files.filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "log" }
+            .sorted {
+                let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return a > b
+            }.first ?? lastSessionFileURL
+    }
+
+    func latestDiagnosticReportURL(apkName: String) -> URL? {
+        let safeName = apkName.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let prefix = String(safeName.prefix(72)) + "-"
+        let files = (try? fileManager.contentsOfDirectory(at: reportsFolder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        return files.filter { $0.lastPathComponent.hasPrefix(prefix) && $0.lastPathComponent.hasSuffix("-Diagnostic-Report.txt") }
             .sorted {
                 let a = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let b = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
@@ -104,7 +118,8 @@ final class StrideDiagnostics: ObservableObject {
         }
     }
 
-    func beginSession(apkName: String) {
+    func beginSession(apkName: String, apkURL: URL? = nil,
+                      packageFormat: String = "APK", splitAPKURLs: [URL] = []) {
         if sessionIsActive { finishSession(status: "replaced by a new launch") }
         resetStoredDiagnosticsForLatestSession()
         sessionIsActive = true
@@ -123,6 +138,7 @@ final class StrideDiagnostics: ObservableObject {
             _ = fileManager.createFile(atPath: file.path, contents: nil)
             sessionHandle = try FileHandle(forWritingTo: file)
             sessionFileURL = file
+            lastSessionFileURL = file
         } catch {
             record(.error, stage: "SESSION", code: "SESSION_LOG_OPEN_FAILED",
                    "Could not open per-session log: \(error.localizedDescription)",
@@ -134,7 +150,11 @@ final class StrideDiagnostics: ObservableObject {
             "started_at": ISO8601DateFormatter().string(from: sessionStartedAt),
             "app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             "app_build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
-            "ios_version": UIDevice.current.systemVersion
+            "ios_version": UIDevice.current.systemVersion,
+            "apk_path": apkURL?.path ?? "",
+            "session_log_path": sessionFileURL?.path ?? "",
+            "package_format": packageFormat,
+            "split_paths": splitAPKURLs.map(\.path).joined(separator: "\n")
         ]
         do {
             try fileManager.createDirectory(at: markerURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -178,6 +198,7 @@ final class StrideDiagnostics: ObservableObject {
         record(.info, stage: "SESSION", code: "END",
                "Session ended: \(status); collected \(issueCount) error(s)")
         flush()
+        lastSessionFileURL = sessionFileURL ?? lastSessionFileURL
         try? sessionHandle?.close()
         sessionHandle = nil
         sessionFileURL = nil
@@ -236,7 +257,8 @@ final class StrideDiagnostics: ObservableObject {
             // events, while rawLog carries the screen's launch output and final Rust snapshot.
             // Previously, a readable session file caused rawLog to be discarded, silently
             // omitting the guest runtime evidence from otherwise "complete" reports.
-            let persistedSessionLog = sessionFileURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+            let persistedSessionLog = (sessionFileURL ?? lastSessionFileURL)
+                .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
             let suppliedSessionLog = rawLog.trimmingCharacters(in: .whitespacesAndNewlines)
             let combinedSessionLog: String
             if !persistedSessionLog.isEmpty && !suppliedSessionLog.isEmpty {
@@ -483,19 +505,45 @@ final class StrideDiagnostics: ObservableObject {
         guard fileManager.fileExists(atPath: markerURL.path),
               let data = try? Data(contentsOf: markerURL),
               let marker = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+
         let apk = marker["apk"] ?? "unknown APK"
         let started = marker["started_at"] ?? "unknown"
-        record(.warning, stage: "SESSION", code: "POSSIBLE_PREVIOUS_RUN_TERMINATION",
-               "Previous session did not write a clean end marker (APK: \(apk), started: \(started)). Cause is unknown; this is not proof of a crash or jetsam.")
-        // Keep the marker until the next explicit run starts, so the evidence is not silently erased.
-        let note = reportsFolder.appendingPathComponent("Possible-Previous-Run-Termination.txt")
-        try? fileManager.createDirectory(at: reportsFolder, withIntermediateDirectories: true)
-        try? "Possible previous-run termination\nAPK: \(apk)\nStarted: \(started)\nNo cause can be inferred from the marker alone.\n".write(to: note, atomically: true, encoding: .utf8)
+        let sessionPath = marker["session_log_path"] ?? ""
+        let apkPath = marker["apk_path"] ?? ""
+        let packageFormat = marker["package_format"] ?? "APK"
+        let splitPaths = (marker["split_paths"] ?? "").components(separatedBy: .newlines).filter { !$0.isEmpty }
+        if let sessionID = marker["session_id"] { self.sessionID = sessionID }
+        if let parsedStart = ISO8601DateFormatter().date(from: started) { sessionStartedAt = parsedStart }
+        if !sessionPath.isEmpty {
+            lastSessionFileURL = URL(fileURLWithPath: sessionPath)
+        }
+        currentAPK = apk
+
+        let warning = "Previous session did not write a clean end marker (APK: \(apk), started: \(started)). Cause is unknown; this is not proof of a crash or jetsam."
+        record(.warning, stage: "SESSION", code: "POSSIBLE_PREVIOUS_RUN_TERMINATION", warning)
+
+        // Generate a recovery report immediately, before a new APK launch can rotate or
+        // replace the session context. The original session log remains the evidence source.
+        let previousRunEvidence = """
+        [CRASH RECOVERY] \(warning)
+        [CRASH RECOVERY] iOS did not provide a confirmed termination reason to this process.
+        [CRASH RECOVERY] Treat this as an unclean end marker, not proof of a native crash or jetsam.
+        """
+        let apkURL = URL(fileURLWithPath: apkPath.isEmpty ? documentsURL.path : apkPath)
+        _ = exportSessionReport(
+            apkName: apk,
+            apkURL: apkURL,
+            status: "Previous process ended without a clean session marker; cause unknown",
+            rawLog: previousRunEvidence,
+            packageFormat: packageFormat,
+            splitCount: splitPaths.count,
+            splitAPKURLs: splitPaths.map { URL(fileURLWithPath: $0) }
+        )
         try? fileManager.removeItem(at: markerURL)
     }
 
-    /// Retain only the most recent launch's diagnostic material. Boot/preflight noise
-    /// is cleared at launch start, and old session/report/archive files are discarded.
+    /// Reset rolling host logs for a new run while preserving the last completed
+    /// session and report until the user has had a chance to export them.
     private func resetStoredDiagnosticsForLatestSession() {
         flush()
         try? handle?.close()
@@ -504,14 +552,8 @@ final class StrideDiagnostics: ObservableObject {
         structuredHandle = nil
         try? fileManager.removeItem(at: logFileURL)
         try? fileManager.removeItem(at: structuredLogFileURL)
-        let root = documentsURL.appendingPathComponent("StrideLogs", isDirectory: true)
-        for name in ["Sessions", "Reports", "Archive"] {
-            let folder = root.appendingPathComponent(name, isDirectory: true)
-            if let children = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) {
-                for child in children { try? fileManager.removeItem(at: child) }
-            }
-        }
-        try? fileManager.removeItem(at: root.appendingPathComponent("Possible-Previous-Run-Termination.txt"))
+        // Keep per-session logs and complete reports. A new launch must not erase
+        // evidence from the previous run before it can be shared or diagnosed.
         pendingText.removeAll(keepingCapacity: true)
         pendingStructured.removeAll(keepingCapacity: true)
         pendingSession.removeAll(keepingCapacity: true)

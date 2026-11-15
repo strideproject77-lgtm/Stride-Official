@@ -1728,3 +1728,19 @@ Status: UI implementation committed · consolidated validation and visual review
 - Signing remained disabled. No signed IPA, App Store export, or merge to main occurred.
 - Remaining: install this exact IPA on the user's iPhone XS Max (iOS 18.7.10), import the same 2048 v1.7.0 APK, launch once, and inspect the fresh one-shot diagnostic report/session log. Record the next first unresolved API and whether guest instruction count advances. Do not claim 2048 gameplay until a rendered frame and user interaction are verified.
 - Phase 50 remains **In Progress** until that real-device retest is reviewed.
+
+
+### 2026-11-15 — Phase 51: One-Shot Session Diagnostics (implementation batch)
+
+- Began upgrading the existing report foundation into an automatic one-shot diagnostic flow. This is a diagnostics implementation batch; it does not change Android compatibility claims.
+- Stride now records APK path, package format, split APK paths and the per-session log path in its active-session marker so an unclean termination can be associated with the exact imported package.
+- Previous session/report artifacts are no longer deleted at the next launch before the user can retrieve them. Finished session log paths remain available after the writer is closed.
+- On the next app launch, an active marker without a clean end now produces a recovery diagnostic report with the previous APK identity, saved raw session log (when available), start time and an explicit warning that an unclean marker alone does not prove a crash or jetsam.
+- Complete reports now read the persisted log even after the session file handle has been closed.
+- Runtime UI work: periodic Rust diagnostic snapshots are sampled during guest execution and new runtime lines are appended to the same chronological host session log. Launch-time Rust diagnostics are also captured.
+- Session finalization now gathers available guest instruction count, loaded classes, lifecycle state, missing API count, FPS/frame count, guest heap allocation, framebuffer dimensions and latest touch timing; it includes the final Rust runtime snapshot and APK/split fingerprints in one Complete Diagnostic Report.
+- Added an explicit **Export Complete Diagnostic Report** action in Session Logs, while retaining raw-log copy/export for troubleshooting.
+- Automatic report generation is wired for normal runtime close, launch failure and detail-view dismissal. Unexpected process termination is handled on the next app launch using the persisted marker.
+- Limitations remain honest: iOS does not expose a guaranteed jetsam/crash reason or arbitrary register/backtrace data to this app. Such evidence is included only when the runtime/OS actually supplies it. Runtime metrics unavailable at the time of termination remain marked unavailable.
+- Validation status: implementation committed; one consolidated repository validation is required next. No IPA build, signing, export or merge to main is included or authorized in this batch.
+- Phase 51 status: **In Progress — implementation batch prepared; CI validation and device verification pending.** The next 2048 test should require only one launch/session and one exported Complete Diagnostic Report; no compatibility claim is made until the resulting evidence is reviewed.
