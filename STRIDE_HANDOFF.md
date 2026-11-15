@@ -1579,3 +1579,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Remaining: run the one consolidated validation pass after the current implementation batch; inspect its compile/test result and correct any regressions; then obtain a new 2048 device session log. Continue implementing the next exact missing lifecycle/framework API until Activity starts and the game reaches interactive gameplay. A full compatibility claim requires a successful real-device play session, not just archive/DEX loading.
 - UI extra: runtime progress UI should distinguish package analysis, framework startup, Activity lifecycle, first frame, and interactive state; do not present a single misleading “execution %” derived from DEX class count. UI implementation remains a separate scope.
 - All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
+
+### 2026-11-15 — Phase 47: FastSafeIterableMap putIfAbsent + truthful guest-render status
+
+- Continued from Phase 46 after reviewing the Common Compatibility Engine roadmap and current interpreter dispatch. AndroidX lifecycle observer maps use the Java `Map.putIfAbsent(Object,Object)` contract in addition to basic get/put/remove/contains operations.
+- Added an exact-signature managed `HashMap.putIfAbsent(Object,Object)` intrinsic. Existing values are returned unchanged; absent keys are inserted; map size increases only for a newly inserted key. Existing `HashMap.put` continues to replace existing values.
+- Extended the HashMap regression fixture to call putIfAbsent on an existing key and verify both the returned value and the preserved original mapping.
+- UI improvement: execution status indicator is now green only when the guest has reported a positive real FPS sample. A created session that has not produced guest frames remains amber; startup failure is red; ready/idle state is neutral. This avoids presenting session creation as proof that the Android app is rendering.
+- Commits: `84a72998f4043b0b3351673efc3e1efb217f88f8` (putIfAbsent runtime + regression), `32fa7e85b657060cba71dfd2549713fb1988cfda` (execution status UI).
+- Extra improvement: the status color is sourced from the same guest FPS signal already used by the execution metrics; host display-link polling is not treated as guest rendering.
+- Status: implementation committed; consolidated Rust + iOS compile validation remains deferred to the final validation pass. Phase 47 is **In Progress**, not Completed.
+- Remaining: validate the expanded interpreter tests; inspect the next fresh 2048 session for the first unresolved call after the HashMap observer-map path; implement subsequent lifecycle and UI framework requirements in small phases. The current HashMap subset still does not implement Java key equality/hashCode, iterators, entrySet/keySet/value views, resizing, or full collection contracts.
+- UI balance: runtime feedback now distinguishes a real guest frame from a merely-created session. Continue prioritizing app UI polish alongside runtime and bug-fix work.
+- All work remains on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
