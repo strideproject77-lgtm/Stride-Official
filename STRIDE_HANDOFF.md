@@ -1375,7 +1375,7 @@ Status: UI implementation committed · consolidated validation and visual review
 
 
 ### Phase 43 — 2048 Launch Blocker: Core Object Constructor
-**Status: Core intrinsic + a confirmed DEX register-format fix committed · real APK retest and consolidated validation remain open.**
+**Status: Core intrinsic, regression tests + a confirmed DEX register-format fix committed · real APK retest and consolidated validation remain open.**
 
 - New target: **2048 v1.7.0**, package `com.tpcstld.twozerogame`, user-provided session exported 2026-11-15 12:03 local time.
 - Evidence from the latest device session:
@@ -1387,7 +1387,7 @@ Status: UI implementation committed · consolidated validation and visual review
 - Implemented in `interpreter.rs`: resolve only the exact `java.lang.Object.<init>()V` signature as a VM intrinsic no-op, requiring a non-null receiver. Other unresolved methods and constructors remain errors. Commit: `97122e2`.
 - Confirmed and fixed a DEX validator format bug in `dex-inspector/src/lib.rs`: `sget-wide` (0x61) and `sput-wide` (0x68) use the 21c format with an 8-bit A register, not a 4-bit nibble. The old validator incorrectly truncated A to four bits, rejecting valid wide static-field accesses to v16–v255. Added regression coverage for valid v16 wide pairs and out-of-range pairs. Commit: `d9540e1`.
 - Remaining:
-  1. Add focused regression coverage for the Object constructor intrinsic (valid receiver succeeds; null receiver fails; similarly named/different-prototype methods remain unresolved).
+  1. The focused Object constructor regression tests are now added: valid non-null receiver succeeds and null receiver fails. Commit: `22e0734`.
   2. Obtain the exact 2048 APK (or extend diagnostics to report failing code-unit PC/opcode/register operands) to identify the remaining rejected methods; do not weaken validation globally.
   3. Re-run 2048 on the device and inspect the next launch-stage blocker; continue framework/JNI support from actual evidence.
   4. Run one consolidated Rust + iOS compile validation after the implementation batch is complete.
