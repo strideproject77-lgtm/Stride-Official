@@ -1391,6 +1391,10 @@ Status: UI implementation committed · consolidated validation and visual review
   2. Obtain the exact 2048 APK (or extend diagnostics to report failing code-unit PC/opcode/register operands) to identify the remaining rejected methods; do not weaken validation globally.
   3. Re-run 2048 on the device and inspect the next launch-stage blocker; continue framework/JNI support from actual evidence.
   4. Run one consolidated Rust + iOS compile validation after the implementation batch is complete.
+
+- 2026-11-15 follow-up: fixed the Kotlin DEX long-shift register layout for opcodes `shl-long/2addr`, `shr-long/2addr`, and `ushr-long/2addr` (0xc3–0xc5): destination/source A remains wide, shift-distance B is a narrow int. Interpreter now reads B as int. Commits: `0e49a0a`, `e096aab`, `a114bdc`; regression test covers 8L << 1 = 16L. This specifically addresses the logged `ULong.shl-s-VKNKU(JI)J` and `ULong.shr-s-VKNKU(JI)J` signatures, but does not prove the other rejected methods are fixed.
+- 2026-11-15 diagnostic improvement: `DEX_METHOD_REGISTER_LAYOUT_REJECTED` now records `registers_size`, `ins_size`, `outs_size`, method `access_flags`, and explicitly labels when instruction context is unavailable because failure may be incoming-layout validation. Commit: `cab594b`. This should make the next one-shot report sufficient to distinguish argument-layout rejection from a specific invalid instruction operand.
+- Updated remaining work: use the next 2048 session report's new fields to classify all remaining rejected methods, fix only confirmed DEX-format/validator defects, then perform the single consolidated Rust + iOS compile validation and device retest.
 - Extra quality work: preserve strict unresolved-method behavior and non-null constructor receiver validation instead of adding a broad fallback that could hide genuine runtime defects; added regression coverage for the 21c wide-static-field register encoding.
 - No IPA build/sign/export, no merge to `main`. All changes remain on `feat/dex-class-method-loader`.
 
