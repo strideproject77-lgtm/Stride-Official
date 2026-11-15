@@ -886,6 +886,7 @@ private struct APKDetailSheet: View {
     @State private var showingLogShare = false
     @State private var showingSessionLogs = false
     @State private var showingExecutionScreen = false
+    @State private var didAutoLaunch = false
     @State private var isExecutionChromeHidden = false
     @State private var launchTask: Task<Void, Never>?
     @State private var frameScheduler: GuestFrameScheduler?
@@ -1164,7 +1165,8 @@ private struct APKDetailSheet: View {
         }
         .onAppear {
             loadPreviousSession()
-            if autoLaunchOnAppear {
+            if autoLaunchOnAppear && !didAutoLaunch {
+                didAutoLaunch = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { startGame() }
             }
         }
