@@ -1684,3 +1684,9 @@ Status: UI implementation committed · consolidated validation and visual review
 - Validation: pending one consolidated Rust + iOS compile workflow after this implementation batch. No repeated test runs.
 - Phase 50 remains **In Progress** until the consolidated workflow passes and a fresh device session log confirms the next startup stage. Do not claim 2048 compatibility or gameplay until guest instructions, a rendered frame, and interaction are observed.
 - All changes remain on `feat/dex-class-method-loader`; `main` remains untouched. No IPA build/sign/export is included in this phase.
+
+
+### Phase 50 validation correction
+
+- The first consolidated Rust workflow (#911) exposed a test-only Rust borrow-check error: the new fixture inspected the heap while the interpreter still held its mutable borrow. Runtime implementation itself compiled; the test assertion was moved until after the VM is dropped. The test will now verify the stored referent through the guest-visible `Reference.get()` path before clearing, then inspect the cleared slot after dropping the VM.
+- Workflow #911 failed at compile time, so no Phase 50 tests are counted as passing yet. Run one consolidated validation after this correction; do not build an IPA unless separately authorized.

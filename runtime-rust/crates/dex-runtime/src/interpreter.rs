@@ -2834,7 +2834,6 @@ mod tests {
             1, &[Value::Object(reference), Value::Object(referent)], 16
         ).expect("WeakReference constructor should store referent");
         assert_eq!(constructed.stop_reason, ExecutionStopReason::ReturnedVoid);
-        assert_eq!(heap.get_instance_field(reference, "referent").unwrap(), Value::Object(referent));
 
         let fetched = vm.execute_method(2, &[Value::Object(reference)], 16).unwrap();
         assert_eq!(fetched.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(referent)));
@@ -2855,6 +2854,9 @@ mod tests {
             1, &[Value::Object(0), Value::Object(referent)], 16
         ).expect_err("null WeakReference receiver must fail");
         assert!(invalid_receiver.contains("Invalid null receiver for intrinsic WeakReference"));
+
+        drop(vm);
+        assert_eq!(heap.get_instance_field(reference, "referent").unwrap(), Value::Null);
     }
 
     #[test]
