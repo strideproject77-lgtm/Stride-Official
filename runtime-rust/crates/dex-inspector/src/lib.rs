@@ -532,7 +532,7 @@ mod decoder_tests {
   assert_eq!(validate_register_operands(&words(&[0x10c4,0x000e]),3),Ok(()));
   assert_eq!(validate_register_operands(&words(&[0x10c5,0x000e]),3),Ok(()));
   // The wide destination/source pair must still fit.
-  assert_eq!(validate_register_operands(&words(&[0x10c3,0x000e]),2),Err(DecodeError::InvalidRegister));
+  assert_eq!(validate_register_operands(&words(&[0x11c3,0x000e]),2),Err(DecodeError::InvalidRegister));
   // 12x encodes A in bits 8..11 and B in bits 12..15.
   // Here B=v3 is outside a three-register frame (v0..v2).
   assert_eq!(validate_register_operands(&words(&[0x30c3,0x000e]),3),Err(DecodeError::InvalidRegister));
