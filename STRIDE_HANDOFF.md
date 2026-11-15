@@ -1494,3 +1494,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Extra quality: keep the constructor fallback signature-exact and receiver-checked rather than broadly accepting unresolved framework constructors.
 - All work remains on `feat/dex-class-method-loader`; `main` remains untouched; no signing or export.
 - Authorized validation/build trigger: this handoff update uses the workflow's explicit unsigned-IPA trigger message; signing remains disabled.
+
+
+### 2026-11-15 — Phase 44: return navigation, quick launch and WeakHashMap startup compatibility
+
+- The latest 2048 v1.7.0 session passes the previous AtomicReference constructor and reaches the next unresolved boot-library call: `Ljava/util/WeakHashMap;-><init>()V`, invoked from `androidx.arch.core.internal.SafeIterableMap`. The Activity lifecycle still has not started.
+- Added a signature-exact ART intrinsic for `WeakHashMap.<init>()V`. It validates a non-null receiver and confirms the managed heap handle; the default constructor's table is lazily allocated, so this exact constructor can be a no-op. Other WeakHashMap constructors remain unresolved until implemented.
+- Added positive receiver and null receiver regression tests for the WeakHashMap intrinsic.
+- UI fix: closing the execution overlay now releases runtime resources and closes only the execution cover. It no longer dismisses the underlying app detail sheet, so the user returns to the exact app detail/source screen instead of being sent to Home or Library.
+- Quick action: long-pressing a game icon now shows **Launch** above **Delete App**. Launch opens that game's details and automatically starts the runtime, without requiring a second tap. Closing the game returns to the retained detail view.
+- Extra UX hardening: quick-launch state clears when the detail sheet is dismissed, preventing accidental auto-launch on a later ordinary open.
+- Icon status: the old blue S mark is still what the current icon generator draws. The previous CI change only validates that a 1024x1024 icon exists; it did not replace the artwork. The branded icon replacement remains explicitly open and must use the intended source artwork rather than claiming an integrity check changed the design.
+- Remaining: confirm the exact branded artwork and wire it as the actual app icon source; verify that the compiled app bundle embeds the new icon; run one consolidated Rust + iOS compile validation; then retest 2048 to identify the next startup/API blocker.
+- Phase 44 remains in progress pending consolidated validation and device verification. All code remains on `feat/dex-class-method-loader`; `main` untouched. No signing or export.
