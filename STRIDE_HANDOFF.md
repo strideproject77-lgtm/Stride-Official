@@ -1347,3 +1347,17 @@ Status: UI implementation committed · consolidated validation and visual review
 - Build must remain unsigned; do not sign, export through a signing service, publish a release, or merge to `main`.
 - Rust test suite is the prerequisite; the macOS iOS packaging job must run only after it passes.
 - Device-side visual review remains pending installation by the user.
+
+
+### Phase 41 UI refinement — user visual feedback (2026-11-15)
+**Status: Visual refinements committed · real Android manifest app-label extraction remains open.**
+
+- Removed the broad purple glow/gradient treatment from the dashboard background and featured panel; kept surfaces predominantly neutral black/charcoal.
+- Removed the accent-colored circular outlines around the Home search and Settings controls. Their icons are now clean, unframed controls.
+- Changed the Stride wordmark from the previous rounded gradient treatment to a cleaner, solid-white italic system font with tighter tracking.
+- Added a clearly visible Import button to the Library header.
+- Increased library/home game icon tiles from 64 pt to 84 pt and increased app-name text size for readability.
+- Reduced accent-colored borders on cards/search surfaces and the bottom navigation divider to subtle neutral separators; purple remains for selected/primary controls.
+- Preserved the 4-item bottom navigation and omitted the large center Play button.
+- User also requested the actual Android app label rather than the imported filename. Current ImportedAPK.displayName is still derived from the imported package directory/file name; APK inspection does not yet resolve application android:label from binary AndroidManifest.xml/resources. Do not claim this is fixed. Remaining engineering task: safely decode the manifest label and resolve resource-backed labels, with filename fallback when metadata is unavailable.
+- No runtime execution changes. Changes remain on feat/dex-class-method-loader; no signing, IPA export, or merge to main in this refinement.
