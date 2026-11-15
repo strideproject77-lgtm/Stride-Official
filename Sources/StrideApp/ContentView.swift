@@ -13,7 +13,6 @@ struct ContentView: View {
     @State private var pendingDelete: ImportedAPK?
     @State private var searchText = ""
     @State private var showingAbout = false
-    @AppStorage("stride.appLayout") private var appLayoutRawValue = "grid"
     @AppStorage("stride.accentColorHex") private var accentColorHex = "E8AB64"
 
     private var background: Color { .black }
@@ -134,318 +133,184 @@ struct ContentView: View {
 
     private var home: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 19) {
-                HStack(spacing: 9) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(muted)
-                    TextField("Search your games...", text: $searchText)
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(Date.now.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                         .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(muted)
+                    Text("Your Apps")
+                        .font(.system(size: 29, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                .padding(.top, 5)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(muted)
+                    TextField("Search apps", text: $searchText)
+                        .font(.system(size: 15))
                         .tint(accent)
                         .autocorrectionDisabled()
                         .accessibilityLabel("Search your imported Android apps")
-                        .accessibilityHint("Filters the Home library as you type")
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
                             Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
-                        }.buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
                     }
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 15)
                 .frame(height: 48)
-                .background(panel, in: RoundedRectangle(cornerRadius: 15))
-                .overlay(RoundedRectangle(cornerRadius: 15).stroke(line, lineWidth: 1))
-
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 25)
-                        .fill(LinearGradient(
-                            colors: [Color(red: 0.29, green: 0.19, blue: 0.14), Color(red: 0.18, green: 0.12, blue: 0.10), Color(red: 0.08, green: 0.07, blue: 0.07)],
-                            startPoint: .topLeading, endPoint: .bottomTrailing
-                        ))
-                    Circle()
-                        .fill(Color(red: 0.78, green: 0.43, blue: 0.22).opacity(0.24))
-                        .frame(width: 180, height: 180)
-                        .blur(radius: 28)
-                        .offset(x: 205, y: -48)
-                    HStack(spacing: 4) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("WELCOME TO STRIDE")
-                                .font(.system(size: 9, weight: .heavy))
-                                .kerning(1.5)
-                                .foregroundStyle(Color.white.opacity(0.72))
-                            Text("Welcome to Stride")
-                                .font(.system(size: 23, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text("Run Android Apps on iOS")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(Color.white.opacity(0.76))
-                            Button {
-                                if library.packages.isEmpty { showingImporter = true } else { selectedTab = 1 }
-                            } label: {
-                                Image(systemName: "arrow.right")
-                                    .font(.system(size: 15, weight: .bold))
-                                    .foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.10))
-                                    .frame(width: 39, height: 39)
-                                    .background(.white, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(library.packages.isEmpty ? "Import your first APK" : "Open your library")
-                        }
-                        Spacer(minLength: 0)
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 23)
-                                .fill(Color.white.opacity(0.10))
-                                .frame(width: 91, height: 158)
-                                .overlay(RoundedRectangle(cornerRadius: 23).stroke(Color.white.opacity(0.34), lineWidth: 1.3))
-                            VStack(spacing: 10) {
-                                Capsule().fill(Color.white.opacity(0.6)).frame(width: 27, height: 3)
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color(red: 0.78, green: 0.48, blue: 0.25), Color(red: 0.40, green: 0.25, blue: 0.16)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    Image(systemName: "hexagon.fill")
-                                        .font(.system(size: 36, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.9))
-                                        .overlay {
-                                            Text("S").font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(Color(red: 0.22, green: 0.14, blue: 0.10))
-                                        }
-                                }
-                                .frame(width: 57, height: 65)
-                                HStack(spacing: 5) {
-                                    Circle().fill(Color.white.opacity(0.75)).frame(width: 5, height: 5)
-                                    Capsule().fill(Color.white.opacity(0.35)).frame(width: 27, height: 4)
-                                }
-                            }
-                        }
-                        .rotationEffect(.degrees(7))
-                        .shadow(color: .black.opacity(0.25), radius: 16, y: 9)
-                        .padding(.trailing, 4)
-                    }
-                    .padding(19)
-                }
-                .frame(height: 205)
-                .clipShape(RoundedRectangle(cornerRadius: 25))
+                .background(Color.white.opacity(0.085), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.07), lineWidth: 1))
 
                 HStack {
-                    Text("RECENTLY PLAYED")
-                        .font(.system(size: 10, weight: .heavy))
-                        .kerning(1.25)
-                        .foregroundStyle(muted)
-                    Spacer()
-                    Text("PLAY HISTORY")
-                        .font(.system(size: 8, weight: .bold))
-                        .kerning(0.8)
-                        .foregroundStyle(muted.opacity(0.75))
-                }
-                if let recent = recentlyPlayedPackages.first {
-                    Button { selectedPackage = recent } label: {
-                        HStack(spacing: 12) {
-                            APKIconView(data: recent.iconData, accent: accent, size: 45)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(recent.displayName).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                Text("Last played · \(lastPlayedLabel(for: recent))").font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                            }
-                            Spacer()
-                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .bold)).foregroundStyle(accent)
-                        }
-                        .padding(13).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Your recently played apps will appear here.")
-                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white.opacity(0.82))
-                        Text("Launch an app to start your play history.")
-                            .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(15).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
-                }
-
-                HStack {
-                    Text("YOUR GAMES")
-                        .font(.system(size: 10, weight: .heavy))
-                        .kerning(1.25)
+                    Text(searchText.isEmpty ? "ALL APPS" : "SEARCH RESULTS")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(1.2)
                         .foregroundStyle(muted)
                     Spacer()
                     Text("\(filteredPackages.count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(muted)
-                    Button("SEE ALL  →") { selectedTab = 1 }
-                        .font(.system(size: 9, weight: .heavy))
-                        .foregroundStyle(accent)
                 }
+
                 if filteredPackages.isEmpty {
-                    VStack(spacing: 10) {
-                        Image(systemName: "square.grid.2x2")
-                            .font(.system(size: 25, weight: .medium))
-                            .foregroundStyle(accent)
-                        Text(searchText.isEmpty ? "Your library is empty" : "No games match your search")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(searchText.isEmpty ? "Import an APK to add your own apps." : "Try another app name.")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(muted)
-                        if searchText.isEmpty {
-                            Button { showingImporter = true } label: {
-                                Label("Import Android Package", systemImage: "plus")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(Color.black)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 11)
-                                    .background(accent, in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isImporting)
-                        } else {
-                            Button { searchText = "" } label: {
-                                Label("Clear search", systemImage: "xmark.circle.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(accent)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(accent.opacity(0.10), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 25)
-                    .background(panel, in: RoundedRectangle(cornerRadius: 17))
+                    homeEmptyState
                 } else {
-                    appCollection(Array(filteredPackages.prefix(4)))
+                    appIconGrid(filteredPackages)
                 }
+
+                HStack(spacing: 0) {
+                    dockAction("Import", symbol: "plus") { showingImporter = true }
+                    dockAction("Library", symbol: "square.grid.2x2") { selectedTab = 1 }
+                    dockAction("Settings", symbol: "gearshape") { selectedTab = 2 }
+                    dockAction("Recent", symbol: "clock.arrow.circlepath") {
+                        if let recent = recentlyPlayedPackages.first { selectedPackage = recent }
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 12)
+                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 25, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).stroke(Color.white.opacity(0.07), lineWidth: 1))
+                .padding(.top, 8)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 7)
-            .padding(.bottom, 22)
+            .padding(.horizontal, 20)
         }
     }
 
     private var libraryView: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 15) {
-                HStack {
+            VStack(alignment: .leading, spacing: 19) {
+                HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("YOUR LIBRARY")
-                            .font(.system(size: 23, weight: .bold, design: .rounded))
+                        Text("APP LIBRARY")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.4)
+                            .foregroundStyle(muted)
+                        Text("All Apps")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
                     }
                     Spacer()
-                    layoutToggle
-                }
-                HStack(spacing: 9) {
-                    Image(systemName: "magnifyingglass")
+                    Text("\(filteredPackages.count) APPS")
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                         .foregroundStyle(muted)
-                    TextField("Search your games…", text: $searchText)
-                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.top, 7)
+
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(muted)
+                    TextField("Search your app library", text: $searchText)
+                        .font(.system(size: 14))
                         .tint(accent)
                         .autocorrectionDisabled()
                         .accessibilityLabel("Search your imported Android apps")
-                        .accessibilityHint("Filters the Library as you type")
                     if !searchText.isEmpty {
                         Button { searchText = "" } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(muted)
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(muted)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Clear library search")
                     }
                 }
-                .padding(.horizontal, 13)
-                .frame(height: 44)
-                .background(panel, in: RoundedRectangle(cornerRadius: 13))
-                .overlay(RoundedRectangle(cornerRadius: 13).stroke(line, lineWidth: 1))
+                .padding(.horizontal, 14)
+                .frame(height: 46)
+                .background(Color.white.opacity(0.085), in: Capsule())
 
-                if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    HStack(spacing: 6) {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("FILTERED RESULTS")
-                            .font(.system(size: 8, weight: .heavy))
-                            .kerning(1.0)
-                        Spacer()
-                        Text("\(filteredPackages.count) OF \(library.packages.count)")
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    }
-                    .foregroundStyle(muted)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(filteredPackages.count) matching apps out of \(library.packages.count)")
-                }
-
-                HStack {
-                    Text("ALL APPS")
-                        .font(.system(size: 9, weight: .heavy))
-                        .kerning(1.2)
-                        .foregroundStyle(muted)
-                    Spacer()
-                    Text("\(filteredPackages.count) ITEMS")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(muted)
-                }
                 if filteredPackages.isEmpty {
                     if library.packages.isEmpty {
                         emptyState
                     } else {
-                        VStack(spacing: 10) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(accent)
-                            Text("No apps match “\(searchText)”.")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(muted)
-                            Button { searchText = "" } label: {
-                                Label("Clear search", systemImage: "xmark.circle.fill")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(accent)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 10)
-                                    .background(accent.opacity(0.10), in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
+                        homeEmptyState
                     }
                 } else {
-                    appCollection(filteredPackages)
+                    appIconGrid(filteredPackages)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, 22)
+            .padding(.horizontal, 20)
+            .padding(.top, 9)
+            .padding(.bottom, 24)
         }
     }
 
-    private var isGridLayout: Bool { appLayoutRawValue == "grid" }
-
-    private var layoutToggle: some View {
-        Button {
-            appLayoutRawValue = isGridLayout ? "list" : "grid"
-        } label: {
-            Image(systemName: isGridLayout ? "list.bullet" : "square.grid.2x2")
-                .font(.system(size: 15, weight: .semibold))
+    private var homeEmptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: searchText.isEmpty ? "square.grid.2x2" : "magnifyingglass")
+                .font(.system(size: 27, weight: .medium))
                 .foregroundStyle(accent)
-                .frame(width: 38, height: 38)
-                .background(panel, in: RoundedRectangle(cornerRadius: 12))
+            Text(searchText.isEmpty ? "No apps yet" : "No matching apps")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+            Text(searchText.isEmpty ? "Import an APK, XAPK, APKS or APKM to add its app icon here." : "Try another app name.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(muted)
+                .multilineTextAlignment(.center)
+            if searchText.isEmpty {
+                Button { showingImporter = true } label: {
+                    Label("Import App", systemImage: "plus")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Color.black)
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 11)
+                        .background(accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(isImporting)
+            } else {
+                Button("Clear Search") { searchText = "" }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 35)
+    }
+
+    private func dockAction(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 48, height: 43)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.86))
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(isGridLayout ? "Switch to list view" : "Switch to grid view")
     }
 
-    @ViewBuilder
-    private func appCollection(_ items: [ImportedAPK]) -> some View {
-        if isGridLayout {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)], spacing: 11) {
-                ForEach(items) { item in packageButton(item) }
-            }
-        } else {
-            VStack(spacing: 9) {
-                ForEach(items) { item in packageButton(item) }
-            }
-        }
-    }
-
-    private var filteredPackages: [ImportedAPK] {
+    private func appIconGrid(_ items: [ImportedAPK]) -> some View {\n        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 13), count: 4), alignment: .center, spacing: 22) {\n            ForEach(items) { item in packageButton(item) }\n        }\n    }\n\n    private var filteredPackages: [ImportedAPK] {
         guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return library.packages
         }
@@ -685,14 +550,11 @@ struct ContentView: View {
 
     private func packageButton(_ item: ImportedAPK) -> some View {
         Button { selectedPackage = item } label: {
-            if isGridLayout {
-                APKGridCard(item: item, accent: accent, panel: panel, raised: raised, muted: muted, line: line)
-            } else {
-                APKRow(item: item, accent: accent, panel: panel, raised: raised, muted: muted, line: line)
-            }
+            APKGridCard(item: item, accent: accent)
         }
         .buttonStyle(.plain)
-        .accessibilityHint("Opens package inspection details")
+        .accessibilityLabel(item.displayName)
+        .accessibilityHint("Opens app details and launch controls")
         .contextMenu {
             Button(role: .destructive) {
                 pendingDelete = item
@@ -826,22 +688,20 @@ private struct APKRow: View {
 private struct APKGridCard: View {
     let item: ImportedAPK
     let accent: Color
-    let panel: Color
-    let raised: Color
-    let muted: Color
-    let line: Color
 
     var body: some View {
-        VStack(spacing: 8) {
-            APKIconView(data: item.iconData, accent: accent, size: 88)
+        VStack(spacing: 7) {
+            APKIconView(data: item.iconData, accent: accent, size: 64)
+                .frame(width: 64, height: 64)
+                .shadow(color: .black.opacity(0.24), radius: 5, y: 3)
             Text(item.displayName)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
+                .frame(height: 27, alignment: .top)
         }
-        .padding(.vertical, 5)
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
     }
