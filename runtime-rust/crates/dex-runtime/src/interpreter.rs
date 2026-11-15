@@ -1233,7 +1233,12 @@ impl<'a> ArtVm<'a> {
                 }
                 0xbb..=0xc5 => { // long /2addr
                     let lhs = rf.read_long(a4).map_err(|e| format!("Invalid reg {}", e))?;
-                    let rhs = rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?;
+                    // DEX long shifts take an int shift distance in B, not a long.
+                    let rhs = if (0xc3..=0xc5).contains(&op) {
+                        i64::from(rf.read_int(b4).map_err(|e| format!("Invalid reg {}", e))?)
+                    } else {
+                        rf.read_long(b4).map_err(|e| format!("Invalid reg {}", e))?
+                    };
                     let res = match op {
                         0xbb => lhs.wrapping_add(rhs),
                         0xbc => lhs.wrapping_sub(rhs),
