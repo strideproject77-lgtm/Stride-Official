@@ -1553,3 +1553,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - The revised icon has not yet been rendered/visually verified from a new build. Next: one consolidated workflow run; inspect the embedded Home Screen icon image from the resulting IPA before calling the icon fixed.
 - Runtime note: the supplied 15:05 2048 log still reports unresolved `Ljava/util/HashMap;-><init>()V` from `FastSafeIterableMap`; no new runtime implementation was made in this icon-only batch. 2048 remains blocked before Activity startup.
 - All edits remain on `feat/dex-class-method-loader`; `main` untouched. User authorized the unsigned build; no signing or export.
+
+### 2026-11-15 — Phase 45: HashMap constructor compatibility for 2048 startup
+
+- Reviewed the fresh 2048 v1.7.0 session log. Package and split verification succeeded for all 19 APK components; the base DEX loaded 6,502 classes; resource decoding completed; the first unresolved call is exactly `Ljava/util/HashMap;-><init>()V` from `androidx.arch.core.internal.FastSafeIterableMap.<init>()V`.
+- Added a signature-exact ART intrinsic for only `java.util.HashMap.<init>()V`. It validates a non-null managed-heap receiver, initializes the default `loadFactor` to 0.75 and `threshold` to zero, and preserves lazy backing-table allocation. Other HashMap constructor signatures and map operations are not implicitly accepted.
+- Added positive regression coverage for default-field initialization and a null-receiver rejection regression.
+- Commit: `d411a84d33ec9284b2c9ee29750eb37fb23c4984`.
+- Extra compatibility hardening: the intrinsic is exact-signature and receiver-checked; it does not mask unresolved HashMap methods or claim full Java Collections support.
+- Remaining: inspect the next 2048 startup blocker after this constructor resolves; implement the exact collection methods actually reached by `FastSafeIterableMap`; complete one consolidated Rust + iOS compile validation, then request a fresh device retest. 2048 is not yet confirmed compatible and has not reached its Activity lifecycle.
+- UI balance: no UI-only change was mixed into this runtime-focused batch; the separate dedicated app-page/About/pure-black UI scope remains open from Phase 28.
+- All changes remain on `feat/dex-class-method-loader`; `main` untouched. No IPA build, signing, export, or merge performed.
