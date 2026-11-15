@@ -1361,3 +1361,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Preserved the 4-item bottom navigation and omitted the large center Play button.
 - User also requested the actual Android app label rather than the imported filename. Current ImportedAPK.displayName is still derived from the imported package directory/file name; APK inspection does not yet resolve application android:label from binary AndroidManifest.xml/resources. Do not claim this is fixed. Remaining engineering task: safely decode the manifest label and resolve resource-backed labels, with filename fallback when metadata is unavailable.
 - No runtime execution changes. Changes remain on feat/dex-class-method-loader; no signing, IPA export, or merge to main in this refinement.
+
+
+### 2026-11-15 — Build #812 compile failure diagnosis and fix
+
+- Consolidated build #812 result: Rust runtime tests passed; iOS Swift compilation failed before IPA packaging, so no IPA artifact was produced.
+- Exact compiler error: `Sources/StrideApp/ContentView.swift:116:18: invalid redeclaration of headerIcon(_:label:action:)`; the prior declaration was at line 104.
+- Root cause: the UI refinement had left the previous circular/bordered `headerIcon` helper alongside the new clean unframed helper.
+- Fix committed: removed the obsolete duplicate helper, preserving the newer clean unframed icon implementation. Commit: `206d49d92718131c17ac1727152de3f2522b8bc8`.
+- Rust tests were already green in build #812; next step is a fresh consolidated workflow run to verify Swift compilation, IPA packaging and artifact upload.
+- No signing, no main merge, no runtime changes.
