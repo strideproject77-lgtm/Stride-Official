@@ -1239,7 +1239,7 @@ private struct APKDetailSheet: View {
                 .padding(16).background(canvas.ignoresSafeArea())
                 .navigationTitle("Session Logs")
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { showingSessionLogs = false }.foregroundStyle(accent) } }
+                .navigationBarItems(trailing: Button("Done") { showingSessionLogs = false }.foregroundColor(accent))
             }
             .preferredColorScheme(.dark)
         }
