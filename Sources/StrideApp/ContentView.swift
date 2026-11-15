@@ -1491,7 +1491,7 @@ private struct APKDetailSheet: View {
         if isExecuting { return "Starting…" }
         if executionError != nil { return "Could not start — see the log" }
         if executionResult != nil {
-            guard let fps = liveGuestFPS else { return "Activity resumed · waiting for guest frames" }
+            guard let fps = liveGuestFPS else { return "Runtime session ready · waiting for first guest frame" }
             return fps > 0 ? "Guest rendering active" : "Guest renderer idle"
         }
         return "Ready"
