@@ -56,12 +56,13 @@ mark.close()
 
 // Soft aura follows the complete silhouette.
 let outerGlow = mark.copy() as! NSBezierPath
-outerGlow.transform(using: AffineTransform(scaleBy: 1.035))
-NSColor(calibratedRed: 0.30, green: 0.20, blue: 1, alpha: 0.30).setFill()
-outerGlow.fill()
+outerGlow.lineWidth = 92
+NSColor(calibratedRed: 0.30, green: 0.20, blue: 1, alpha: 0.30).setStroke()
+outerGlow.stroke()
 let innerGlow = mark.copy() as! NSBezierPath
-NSColor(calibratedRed: 0.02, green: 0.72, blue: 1, alpha: 0.18).setFill()
-innerGlow.fill()
+innerGlow.lineWidth = 48
+NSColor(calibratedRed: 0.02, green: 0.72, blue: 1, alpha: 0.22).setStroke()
+innerGlow.stroke()
 
 // Silver metal face with a bright upper edge and cool shaded lower edge.
 NSGraphicsContext.saveGraphicsState()
