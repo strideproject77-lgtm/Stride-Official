@@ -1294,3 +1294,14 @@ Status: UI implementation committed · consolidated validation and visual review
 - Extra improvement: the permission rule is stated in both the canonical LICENSE and the repository landing page, so visitors see the restriction before browsing files.
 - Remaining: confirm the exact legal copyright holder name and contact route before treating this as final legal documentation; obtain jurisdiction-appropriate legal review if formal enforcement is important.
 - Validation: documentation-only change; no tests or workflows run. No IPA build, signing, export, or merge to `main`. All commits remain on `feat/dex-class-method-loader`.
+
+
+### Phase 39 — AhmiiDev Copyright Attribution
+**Status: Documentation update committed · formal legal ownership review remains advisable.**
+
+- Updated the LICENSE copyright line to `Copyright (c) 2026 AhmiiDev`.
+- Replaced the temporary `Stride Project` rights-holder placeholder with `AhmiiDev` in the permission wording.
+- Updated the README copyright/permissions section to identify AhmiiDev consistently with the LICENSE.
+- Extra improvement: aligned the repository landing page and canonical license so the public attribution is consistent.
+- Remaining: confirm that AhmiiDev is the intended legal rights-holder identity and review the notice under applicable local law if formal enforcement is required.
+- Validation: documentation-only update; no tests or workflows run. No IPA build, signing, export, or merge to `main`. All changes remain on `feat/dex-class-method-loader`.
