@@ -78,6 +78,19 @@ struct ContentView: View {
         } message: {
             Text(importError ?? "Please try another Android package file.")
         }
+        .overlay(alignment: .bottomTrailing) {
+            if selectedTab == 0 {
+                Button { showingImporter = true } label: {
+                    Image(systemName: "plus").font(.system(size: 25, weight: .semibold))
+                        .foregroundStyle(Color.black).frame(width: 62, height: 62)
+                        .background(accent, in: Circle())
+                        .shadow(color: accent.opacity(0.28), radius: 14, y: 5)
+                }
+                .buttonStyle(.plain).disabled(isImporting)
+                .accessibilityLabel("Import game")
+                .padding(.trailing, 22).padding(.bottom, 82)
+            }
+        }
         .preferredColorScheme(.dark)
     }
 
@@ -128,11 +141,6 @@ struct ContentView: View {
                     Text("\(filteredPackages.count)").font(.system(size: 12, weight: .bold)).foregroundStyle(accent)
                 }
                 if filteredPackages.isEmpty { homeEmptyState } else { appIconGrid(filteredPackages) }
-                Button { showingImporter = true } label: {
-                    Label("Import Game", systemImage: "plus").font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white).frame(maxWidth: .infinity).frame(height: 48)
-                        .background(LinearGradient(colors: [accent, accent.opacity(0.58)], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 15))
-                }.buttonStyle(.plain).disabled(isImporting).padding(.bottom, 20)
             }.padding(.horizontal, 20).padding(.top, 4)
         }.background(gamingBackdrop)
     }
@@ -274,18 +282,7 @@ struct ContentView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(muted)
                 .multilineTextAlignment(.center)
-            if searchText.isEmpty {
-                Button { showingImporter = true } label: {
-                    Label("Import App", systemImage: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(Color.black)
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 11)
-                        .background(accent, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(isImporting)
-            } else {
+            if !searchText.isEmpty {
                 Button("Clear Search") { searchText = "" }
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(accent)
