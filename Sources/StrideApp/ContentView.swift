@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showingAbout = false
     @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
+    @ObservedObject private var diagnostics = StrideDiagnostics.shared
 
     private var background: Color { .black }
     private var panel: Color { .black }
@@ -404,6 +405,36 @@ struct ContentView: View {
                 .padding(14)
                 .background(panel, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Overall Logs", systemImage: "waveform.path").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                        Spacer()
+                        Text(String(diagnostics.entries.count) + " events").font(.system(size: 10, weight: .semibold)).foregroundStyle(muted)
+                    }
+                    Text("App-wide diagnostics from imports, startup and runtime. Individual game session logs are inside each app's details.")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        Button { UIPasteboard.general.string = diagnostics.entries.map(\.line).joined(separator: "\n") } label: {
+                            Label("Copy Logs", systemImage: "doc.on.doc").font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 9).background(raised, in: Capsule())
+                        }.buttonStyle(.plain)
+                        ShareLink(item: diagnostics.entries.map(\.line).joined(separator: "\n")) {
+                            Label("Export", systemImage: "square.and.arrow.up").font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color.black).padding(.horizontal, 12).padding(.vertical, 9).background(accent, in: Capsule())
+                        }
+                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 5) {
+                            ForEach(Array(diagnostics.entries.suffix(12))) { entry in
+                                Text(entry.line).font(.system(size: 9, design: .monospaced))
+                                    .foregroundStyle(entry.severity == .error || entry.severity == .fatal ? Color.red : muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                            }
+                        }
+                    }.frame(maxHeight: 145).padding(9).background(raised, in: RoundedRectangle(cornerRadius: 10))
+                }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
 
                 Button { showingAbout = true } label: {
                     HStack(spacing: 13) {
