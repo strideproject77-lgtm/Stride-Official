@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var quickLaunchPackagePath: String?
     @State private var selectedTab = 0
     @AppStorage("stride.homeExperience") private var homeExperience = "classic"
+    @AppStorage("stride.iosHome.wallpaper") private var iosHomeWallpaper = "dusk"
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
@@ -428,6 +429,16 @@ struct ContentView: View {
                          ? "Use the iPhone-style launcher. Your existing Stride Home and Library stay available by switching back."
                          : "Use the original Stride Home and Library interface. Your iPhone-style launcher remains saved.")
                         .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                    if homeExperience == "ios" {
+                        Picker("Home Screen Wallpaper", selection: $iosHomeWallpaper) {
+                            Text("Dusk").tag("dusk")
+                            Text("Ocean").tag("ocean")
+                            Text("Forest").tag("forest")
+                            Text("Pure Black").tag("black")
+                        }
+                        .pickerStyle(.menu)
+                        .tint(accent)
+                    }
                 }
                 .padding(13)
                 .background(panel, in: RoundedRectangle(cornerRadius: 16))
