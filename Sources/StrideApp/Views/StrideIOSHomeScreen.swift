@@ -14,17 +14,21 @@ struct StrideIOSHomeScreen: View {
 
     @AppStorage("stride.iosHome.wallpaper") private var wallpaper = "dusk"
     @State private var searchText = ""
+    @State private var isSearchPresented = false
     @State private var selectedPage = 0
+    @FocusState private var searchFocused: Bool
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
 
     private var filteredPackages: [ImportedAPK] {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return packages }
-        return packages.filter { $0.displayName.localizedCaseInsensitiveContains(searchText) }
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return packages }
+        return packages.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
     }
 
+    // A 4 × 6 page mirrors the standard iPhone Home Screen grid.
     private var pages: [[ImportedAPK]] {
-        stridePages(filteredPackages, size: 16)
+        stridePages(filteredPackages, size: 24)
     }
 
     private var dockPackages: [ImportedAPK] {
@@ -48,132 +52,177 @@ struct StrideIOSHomeScreen: View {
         ZStack {
             LinearGradient(colors: wallpaperColors, startPoint: .topLeading, endPoint: .bottomTrailing)
                 .ignoresSafeArea()
-            VStack(spacing: 0) {
-                topBar
-                searchBar
-                    .padding(.horizontal, 22)
-                    .padding(.top, 12)
 
-                if filteredPackages.isEmpty {
-                    emptyState
+            VStack(spacing: 0) {
+                topControls
+                    .padding(.horizontal, 22)
+                    .padding(.top, 5)
+
+                launcherPages
+                    .frame(maxHeight: .infinity)
+
+                if isSearchPresented {
+                    activeSearchBar
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 9)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 } else {
-                    launcherPages
+                    searchButton
+                        .padding(.bottom, 10)
+                        .transition(.opacity)
                 }
 
-                Spacer(minLength: 8)
                 if !searchText.isEmpty {
                     Text("\(filteredPackages.count) RESULTS")
                         .font(.system(size: 9, weight: .bold, design: .rounded))
-                        .tracking(1.2)
-                        .foregroundStyle(.white.opacity(0.62))
-                        .padding(.bottom, 9)
+                        .tracking(1.1)
+                        .foregroundStyle(.white.opacity(0.68))
+                        .padding(.bottom, 8)
                 } else if pages.count > 1 {
                     pageIndicator
-                        .padding(.bottom, 10)
+                        .padding(.bottom, 9)
                 }
 
                 dock
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 10)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous)
-                        .stroke(Color.white.opacity(0.16), lineWidth: 1))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 27, style: .continuous)
+                            .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                    }
                     .padding(.horizontal, 18)
-                    .padding(.bottom, 9)
+                    .padding(.bottom, 8)
             }
         }
         .preferredColorScheme(.dark)
+        .animation(.easeInOut(duration: 0.2), value: isSearchPresented)
         .onChange(of: searchText) { _, _ in selectedPage = 0 }
+        .onChange(of: isSearchPresented) { _, presented in
+            if presented {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    searchFocused = true
+                }
+            } else {
+                searchFocused = false
+                searchText = ""
+            }
+        }
     }
 
-    private var topBar: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Stride")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
-                    .tracking(-1.2)
-                    .foregroundStyle(.white)
-                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.72))
-            }
+    private var topControls: some View {
+        HStack {
             Spacer()
-            Button(action: onImport) {
-                Image(systemName: "plus")
+            Menu {
+                Button(action: onImport) {
+                    Label("Add App", systemImage: "plus")
+                }
+                Button(action: onSettings) {
+                    Label("Stride Settings", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 36, height: 36)
                     .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.13), lineWidth: 0.8))
+                    .contentShape(Circle())
             }
-            .accessibilityLabel("Import Android app")
-            Button(action: onSettings) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-            .accessibilityLabel("Stride settings")
+            .accessibilityLabel("Home Screen options")
         }
-        .padding(.horizontal, 23)
-        .padding(.top, 8)
     }
 
-    private var searchBar: some View {
+    private var activeSearchBar: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.white.opacity(0.72))
-            TextField("Search apps", text: $searchText)
-                .font(.system(size: 14))
+            TextField("Search", text: $searchText)
+                .font(.system(size: 15))
                 .tint(.white)
+                .foregroundStyle(.white)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
-            if !searchText.isEmpty {
-                Button { searchText = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.7))
+                .focused($searchFocused)
+                .submitLabel(.search)
+            Button("Cancel") {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isSearchPresented = false
                 }
-                .accessibilityLabel("Clear search")
             }
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(.white)
         }
         .padding(.horizontal, 14)
-        .frame(height: 43)
+        .frame(height: 42)
         .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.14), lineWidth: 1))
+        .overlay(Capsule().stroke(Color.white.opacity(0.16), lineWidth: 0.8))
+    }
+
+    private var searchButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isSearchPresented = true
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Search")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(0.88))
+            .padding(.horizontal, 15)
+            .frame(height: 29)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.13), lineWidth: 0.7))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Search apps")
     }
 
     private var launcherPages: some View {
-        TabView(selection: $selectedPage) {
-            ForEach(Array(pages.enumerated()), id: \.offset) { entry in
-                let pageIndex = entry.offset
-                let page = entry.element
-                LazyVGrid(columns: columns, alignment: .center, spacing: 19) {
-                    ForEach(page) { item in
-                        appIcon(item)
+        Group {
+            if filteredPackages.isEmpty {
+                emptyState
+            } else {
+                TabView(selection: $selectedPage) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { entry in
+                        GeometryReader { geometry in
+                            let horizontalInset: CGFloat = 17
+                            let spacing: CGFloat = 9
+                            let iconSize = min(60, max(45, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
+                            LazyVGrid(columns: columns, alignment: .center, spacing: 19) {
+                                ForEach(entry.element) { item in
+                                    appIcon(item, size: iconSize)
+                                }
+                            }
+                            .padding(.horizontal, horizontalInset)
+                            .padding(.top, 15)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
+                        .tag(entry.offset)
                     }
                 }
-                .padding(.horizontal, 17)
-                .padding(.top, 24)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .tag(pageIndex)
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .animation(.easeInOut(duration: 0.2), value: selectedPage)
             }
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
-        .animation(.easeInOut(duration: 0.2), value: selectedPage)
     }
 
-    private func appIcon(_ item: ImportedAPK) -> some View {
+    private func appIcon(_ item: ImportedAPK, size: CGFloat) -> some View {
         Button { onSelect(item) } label: {
-            VStack(spacing: 6) {
-                StrideLauncherIcon(data: item.iconData, accent: accent, size: 61)
-                    .shadow(color: .black.opacity(0.24), radius: 5, y: 3)
+            VStack(spacing: 5) {
+                StrideLauncherIcon(data: item.iconData, accent: accent, size: size)
+                    .shadow(color: .black.opacity(0.22), radius: 4, y: 2)
                 Text(item.displayName)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity)
-                    .shadow(color: .black.opacity(0.75), radius: 3, y: 1)
+                    .shadow(color: .black.opacity(0.78), radius: 3, y: 1)
             }
             .contentShape(Rectangle())
         }
@@ -201,7 +250,7 @@ struct StrideIOSHomeScreen: View {
                     .frame(width: index == selectedPage ? 17 : 6, height: 6)
             }
         }
-        .accessibilityLabel("Home screen page \(selectedPage + 1) of \(pages.count)")
+        .accessibilityLabel("Home Screen page \(selectedPage + 1) of \(pages.count)")
     }
 
     private var dock: some View {
@@ -241,13 +290,13 @@ struct StrideIOSHomeScreen: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white)
             Text(searchText.isEmpty
-                 ? "Import an Android APK to add its app icon here."
+                 ? "Add an Android app to place its icon here."
                  : "Try a different app name.")
                 .font(.system(size: 12))
                 .foregroundStyle(.white.opacity(0.72))
                 .multilineTextAlignment(.center)
             Button(action: searchText.isEmpty ? onImport : { searchText = "" }) {
-                Text(searchText.isEmpty ? "Import App" : "Clear Search")
+                Text(searchText.isEmpty ? "Add App" : "Clear Search")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.black)
                     .padding(.horizontal, 20)
@@ -272,9 +321,11 @@ private struct StrideLauncherIcon: View {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
-                    .scaledToFill()
+                    // Preserve the complete APK icon. Fill+clipped crops artwork and is
+                    // intentionally avoided; fit keeps the original aspect ratio visible.
+                    .scaledToFit()
                     .frame(width: size, height: size)
-                    .clipped()
+                    .background(Color.black.opacity(0.08))
             } else {
                 ZStack {
                     RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
@@ -284,6 +335,7 @@ private struct StrideLauncherIcon: View {
                         .font(.system(size: size * 0.42, weight: .medium))
                         .foregroundStyle(.white)
                 }
+                .frame(width: size, height: size)
             }
         }
         .frame(width: size, height: size)
