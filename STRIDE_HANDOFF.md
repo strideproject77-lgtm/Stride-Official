@@ -1831,3 +1831,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Kept different shapes where they suit the component: the app's primary Launch action remains a capsule, while the denser Session Logs toolbar uses compact continuous rounded rectangles. No project-wide forced button shape was introduced.
 - Validation: source-level replacement checks passed. No GitHub Actions, workflows, builds, signing, IPA packaging/export, or device tests were run. Swift compile and device layout verification remain pending.
 - Branch: `feat/dex-class-method-loader`. No merge to `main`.
+
+
+### 2026-11-16 — Phase 55: Selectable iPhone Home Screen foundation
+
+- Added a separate SwiftUI launcher surface in `Sources/StrideApp/Views/StrideIOSHomeScreen.swift`; the original Stride Home/Library experience remains intact and is not overwritten.
+- Added a persistent Settings selector: **Classic Stride** or **iPhone Home**. The selected mode is stored with AppStorage and can be changed at any time.
+- iPhone Home foundation includes a native-style wallpaper background (Dusk, Ocean, Forest, Pure Black), app search, four-column icon grid, swipeable pages (16 apps per page), page indicators, a translucent bottom dock, app detail/quick-launch context actions, import and Settings shortcuts, and empty/search states.
+- APKs are sourced from the existing `APKLibraryStore`; no duplicate package store or altered runtime launch path was introduced. Tapping an icon opens the existing APK detail/Launch flow; context-menu Launch uses the existing quick-launch path.
+- Scope intentionally not yet complete: user-customizable dock ordering, drag-to-reorder, folder creation/management, widgets, custom photo wallpapers, and true iOS-style icon jiggle/edit mode remain follow-up work. The initial dock currently displays up to the first four imported packages; it is not yet a favorites manager.
+- Existing Classic Stride interface remains the default and can be selected again. No SideStore code or components were changed.
+- Branch: `feat/dex-class-method-loader`; `main` untouched.
+- Validation: source changes pushed in commits `cd12e2a`, `4edcf40`, and `2a77e0a`. Consolidated Rust + physical-iPhone compile validation has **not yet run**. No IPA build, signing, export, merge, or real-device UI test was performed.
+- Phase 55 status: **Initial implementation committed; compile validation pending.** Do not call this a complete Strata-equivalent launcher until the remaining editing/folder/dock customization features and device checks are implemented.
