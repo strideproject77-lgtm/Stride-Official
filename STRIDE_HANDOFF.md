@@ -1844,3 +1844,16 @@ Status: UI implementation committed · consolidated validation and visual review
 - Branch: `feat/dex-class-method-loader`; `main` untouched.
 - Validation: source changes pushed in commits `cd12e2a`, `4edcf40`, `2a77e0a`, and `08654de` (SwiftUI paged-view closure correction). Consolidated Rust + physical-iPhone compile validation has **not yet run**. No IPA build, signing, export, merge, or real-device UI test was performed.
 - Phase 55 status: **Initial implementation committed; compile validation pending.** Do not call this a complete Strata-equivalent launcher until the remaining editing/folder/dock customization features and device checks are implemented.
+
+
+### 2026-11-16 — Phase 56: iPhone Home Screen fidelity pass
+
+- Refined `Sources/StrideApp/Views/StrideIOSHomeScreen.swift` toward the native iPhone Home Screen layout while keeping the Classic Stride interface and the existing APK store/runtime navigation unchanged.
+- Replaced the prominent Stride title and always-visible top search field with a compact top-right options menu (Add App / Stride Settings), a native-style Search pill above the dock, and an inline focused search field with Cancel.
+- Changed the app grid from 4 × 4 (16 apps per page) to 4 × 6 (24 apps per page), matching the standard iPhone Home Screen page capacity more closely. Icon size is calculated from available width to avoid horizontal clipping on narrower devices.
+- Fixed the APK icon presentation bug: removed `scaledToFill()` + `clipped()` and now use `scaledToFit()` within a fixed square frame, preserving the complete source icon artwork instead of cropping or zooming it. Dock icons use the same rendering path.
+- Preserved swipe paging, page indicators, app detail taps, long-press quick launch/remove actions, wallpaper choices, and the four-item dock.
+- Remaining fidelity work: true iOS SpringBoard spacing must be checked on an actual iPhone XS Max; icon extraction must be verified against real imported APKs (including adaptive/vector icons); dock favorites/reordering, folders, widgets, and jiggle/edit mode are not implemented. This is an iOS-style in-app launcher, not a replacement for Apple's system SpringBoard.
+- Validation: source change committed as `a946497`. No Swift compile, Rust test suite, simulator/device test, IPA build, signing, or export was run in this batch. Compile and device validation remain pending.
+- Branch: `feat/dex-class-method-loader`; `main` untouched.
+- Phase 56 status: **UI refinement committed; validation pending.** Do not claim pixel-perfect or 100% equivalence until visual comparison and interaction tests on the target device are completed.
