@@ -1842,5 +1842,5 @@ Status: UI implementation committed · consolidated validation and visual review
 - Scope intentionally not yet complete: user-customizable dock ordering, drag-to-reorder, folder creation/management, widgets, custom photo wallpapers, and true iOS-style icon jiggle/edit mode remain follow-up work. The initial dock currently displays up to the first four imported packages; it is not yet a favorites manager.
 - Existing Classic Stride interface remains the default and can be selected again. No SideStore code or components were changed.
 - Branch: `feat/dex-class-method-loader`; `main` untouched.
-- Validation: source changes pushed in commits `cd12e2a`, `4edcf40`, and `2a77e0a`. Consolidated Rust + physical-iPhone compile validation has **not yet run**. No IPA build, signing, export, merge, or real-device UI test was performed.
+- Validation: source changes pushed in commits `cd12e2a`, `4edcf40`, `2a77e0a`, and `08654de` (SwiftUI paged-view closure correction). Consolidated Rust + physical-iPhone compile validation has **not yet run**. No IPA build, signing, export, merge, or real-device UI test was performed.
 - Phase 55 status: **Initial implementation committed; compile validation pending.** Do not call this a complete Strata-equivalent launcher until the remaining editing/folder/dock customization features and device checks are implemented.
