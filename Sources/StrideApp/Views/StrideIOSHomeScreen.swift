@@ -144,7 +144,9 @@ struct StrideIOSHomeScreen: View {
 
     private var launcherPages: some View {
         TabView(selection: $selectedPage) {
-            ForEach(Array(pages.enumerated()), id: \.offset) { pageIndex, page in
+            ForEach(Array(pages.enumerated()), id: \.offset) { entry in
+                let pageIndex = entry.offset
+                let page = entry.element
                 LazyVGrid(columns: columns, alignment: .center, spacing: 19) {
                     ForEach(page) { item in
                         appIcon(item)
