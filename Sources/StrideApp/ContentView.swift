@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var selectedPackage: ImportedAPK?
     @State private var quickLaunchPackagePath: String?
     @State private var selectedTab = 0
+    @AppStorage("stride.homeExperience") private var homeExperience = "classic"
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
@@ -52,10 +53,25 @@ struct ContentView: View {
         ZStack {
             background.ignoresSafeArea()
             VStack(spacing: 0) {
-                if selectedTab == 0 { header }
+                if selectedTab == 0 && homeExperience == "classic" { header }
                 Group {
                     if selectedTab == 0 {
-                        home
+                        if homeExperience == "ios" {
+                            StrideIOSHomeScreen(
+                                packages: library.packages,
+                                accent: accent,
+                                onSelect: { selectedPackage = $0 },
+                                onQuickLaunch: {
+                                    quickLaunchPackagePath = $0.packageDirectoryURL.standardizedFileURL.path
+                                    selectedPackage = $0
+                                },
+                                onDelete: { pendingDelete = $0 },
+                                onImport: { showingImporter = true },
+                                onSettings: { selectedTab = 2 }
+                            )
+                        } else {
+                            home
+                        }
                     } else if selectedTab == 1 {
                         libraryView
                     } else {
@@ -78,8 +94,10 @@ struct ContentView: View {
                 .fullScreenCover(isPresented: $showingOverallLogsPage) {
                     overallLogsPage
                 }
-                Spacer(minLength: 12)
-                tabBar
+                if !(selectedTab == 0 && homeExperience == "ios") {
+                    Spacer(minLength: 12)
+                    tabBar
+                }
             }
         }
         .sheet(isPresented: $showingImporter) {
@@ -115,7 +133,7 @@ struct ContentView: View {
             Text(importError ?? "Please try another Android package file.")
         }
         .overlay(alignment: .bottomTrailing) {
-            if selectedTab == 0 {
+            if selectedTab == 0 && homeExperience == "classic" {
                 Button { showingImporter = true } label: {
                     Image(systemName: "plus").font(.system(size: 25, weight: .semibold))
                         .foregroundStyle(Color.black).frame(width: 62, height: 62)
@@ -397,6 +415,23 @@ struct ContentView: View {
                 settingsAction("Appearance & Colors", detail: "Accent color and app background", symbol: "paintpalette") {
                     showingAppearancePage = true
                 }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("HOME SCREEN")
+                        .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(muted)
+                    Picker("Home Screen", selection: $homeExperience) {
+                        Text("Classic Stride").tag("classic")
+                        Text("iPhone Home").tag("ios")
+                    }
+                    .pickerStyle(.segmented)
+                    Text(homeExperience == "ios"
+                         ? "Use the iPhone-style launcher. Your existing Stride Home and Library stay available by switching back."
+                         : "Use the original Stride Home and Library interface. Your iPhone-style launcher remains saved.")
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                }
+                .padding(13)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
                 settingsAction("Overall Logs", detail: "\(diagnostics.entries.count) app-wide diagnostic events", symbol: "waveform.path") {
                     showingOverallLogsPage = true
                 }
