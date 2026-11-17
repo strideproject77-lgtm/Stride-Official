@@ -1730,7 +1730,7 @@ impl<'a> ArtVm<'a> {
 
                     // Snapshot iterator returned by the managed CopyOnWriteArraySet bridge.
                     if target_method.is_none()
-                        && target_class == "Ljava/util/concurrent/CopyOnWriteArraySet$StrideSnapshotIterator;"
+                        && target_class == "Ljava/util/Iterator;"
                         && matches!(
                             (target_name, target_proto),
                             ("hasNext", "()Z") | ("next", "()Ljava/lang/Object;")
@@ -1740,9 +1740,15 @@ impl<'a> ArtVm<'a> {
                             Some(Value::Object(id)) if *id != 0 => *id,
                             _ => return Err(format!("Invalid null snapshot iterator receiver at PC {}", pc)),
                         };
-                        self.heap.get(iterator).map_err(|error| format!(
+                        let iterator_object = self.heap.get(iterator).map_err(|error| format!(
                             "Invalid snapshot iterator at PC {}: {:?}", pc, error
                         ))?;
+                        if iterator_object.class_descriptor() != "Ljava/util/concurrent/CopyOnWriteArraySet$StrideSnapshotIterator;" {
+                            return Err(format!(
+                                "Iterator receiver is not a Stride CopyOnWriteArraySet snapshot at PC {}",
+                                pc
+                            ));
+                        }
                         let cursor = match self.heap.get_instance_field(iterator, "__stride_snapshot_cursor")
                             .map_err(|error| format!("Snapshot iterator cursor read failed: {:?}", error))? {
                             Value::Int(value) if value >= 0 => value as usize,
