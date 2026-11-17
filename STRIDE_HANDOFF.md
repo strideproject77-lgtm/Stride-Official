@@ -1875,3 +1875,37 @@ Status: UI implementation committed · consolidated validation and visual review
 - Build is unsigned; no certificate signing, provisioning, or installation is performed.
 - Build trigger commit is on `feat/dex-class-method-loader`; `main` remains untouched.
 - Report the workflow result and artifact only after GitHub Actions confirms completion.
+
+
+## Runtime blocker progress — 2026-11-17
+
+The 2048 session log showed the first unresolved framework call was
+`java.util.concurrent.CopyOnWriteArraySet.<init>()V`, reached while constructing
+AndroidX `ContextAwareHelper` through the Activity base classes.
+
+Changes on `feat/dex-class-method-loader`:
+- Added the exact no-argument `CopyOnWriteArraySet` constructor intrinsic.
+- Added managed set operations for `add(Object)`, `remove(Object)`,
+  `contains(Object)`, `size()`, `isEmpty()`, and `clear()`.
+- Added a snapshot iterator bridge returned as `java.util.Iterator`, with
+  `hasNext()` and `next()` dispatch. This preserves copy-on-write traversal
+  when listeners are changed after iterator creation.
+- Added a regression test covering construction, duplicate insertion, membership,
+  removal, and snapshot iteration.
+
+Known scope limitation:
+- Set element matching currently uses managed-object identity, not arbitrary
+  Java `equals()` overrides. It is a targeted AndroidX compatibility subset,
+  not a complete Java Collections implementation.
+- Exhausted iterator `next()` currently returns a runtime error rather than a
+  guest `NoSuchElementException`; this remains to be aligned with Java exception
+  dispatch if the APK reaches that path.
+- These source changes have not yet been validated by the Rust CI run or by
+  executing 2048 on an iPhone. Do not mark 2048 playable from this change alone.
+
+Build request:
+- User explicitly authorized an unsigned IPA build on 2026-11-17.
+- The existing GitHub Actions pipeline is configured to package an unsigned IPA
+  after Rust tests and iOS compile validation when the commit message contains
+  `Build Stride unsigned IPA after tests`.
+- No signing, certificate, or installation steps are part of this build.
