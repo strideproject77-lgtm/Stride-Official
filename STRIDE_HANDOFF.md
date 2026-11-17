@@ -1867,3 +1867,11 @@ Status: UI implementation committed · consolidated validation and visual review
 - Run #939 evidence: Rust runtime tests passed; iOS compile failed only at the two iOS 17-only `.onChange` overloads. The unrelated AppIcon missing-file warning was non-fatal and is not the cause of this compile failure.
 - A new push-triggered Rust + iOS compile validation is expected. The workflow's IPA job requires explicit opt-in; no IPA build, signing, or export was authorized or performed.
 - `main` remains untouched. Phase 56 remains **compile revalidation pending** until the new workflow completes.
+
+
+### 2026-11-17 — Authorized unsigned IPA build
+
+- User explicitly authorized building the Stride IPA. Trigger the repository's existing `.github/workflows/ios-build.yml` unsigned IPA job after its Rust tests and iOS compile validation pass.
+- Build is unsigned; no certificate signing, provisioning, or installation is performed.
+- Build trigger commit is on `feat/dex-class-method-loader`; `main` remains untouched.
+- Report the workflow result and artifact only after GitHub Actions confirms completion.
