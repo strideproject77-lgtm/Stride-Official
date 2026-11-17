@@ -1569,6 +1569,40 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // CopyOnWriteArraySet's no-argument constructor creates an empty
+                    // backing set. Stride stores managed collection contents in explicit
+                    // instance fields, so a zero-initialized receiver is already the correct
+                    // empty state. This intrinsic covers construction only; collection
+                    // operations must still be implemented with their own exact signatures.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/concurrent/CopyOnWriteArraySet;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for CopyOnWriteArraySet.<init>()V at PC {}: {:?}",
+                                    pc, error
+                                ))?;
+                                self.heap.set_instance_field(
+                                    *receiver,
+                                    "__stride_copy_on_write_array_set_size",
+                                    Value::Int(0),
+                                ).map_err(|error| format!(
+                                    "CopyOnWriteArraySet size initialization failed: {:?}", error
+                                ))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic CopyOnWriteArraySet.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     if target_method.is_none()
                         && target_class == "Ljava/util/concurrent/atomic/AtomicReference;"
                         && target_name == "<init>"
