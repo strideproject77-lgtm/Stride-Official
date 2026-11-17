@@ -3455,4 +3455,112 @@ mod tests {
         assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(-1)));
     }
 
+    #[test]
+    fn copy_on_write_array_set_operations_and_snapshot_iterator() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let set = heap.allocate_instance("Ljava/util/concurrent/CopyOnWriteArraySet;").unwrap();
+        let first = heap.allocate_instance("Ltest/FirstListener;").unwrap();
+        let second = heap.allocate_instance("Ltest/SecondListener;").unwrap();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "construct".into(),
+                prototype: "(Ljava/util/concurrent/CopyOnWriteArraySet;)V".into(),
+                code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+                registers_size: 1, ins_size: 1, try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "add".into(),
+                prototype: "(Ljava/util/concurrent/CopyOnWriteArraySet;Ljava/lang/Object;)Z".into(),
+                code_units: vec![0x206e, 0x0001, 0x0021, 0x000a, 0x000f],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (3u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "contains".into(),
+                prototype: "(Ljava/util/concurrent/CopyOnWriteArraySet;Ljava/lang/Object;)Z".into(),
+                code_units: vec![0x206e, 0x0002, 0x0021, 0x000a, 0x000f],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (4u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "remove".into(),
+                prototype: "(Ljava/util/concurrent/CopyOnWriteArraySet;Ljava/lang/Object;)Z".into(),
+                code_units: vec![0x206e, 0x0003, 0x0021, 0x000a, 0x000f],
+                registers_size: 3, ins_size: 2, try_blocks: vec![],
+            }),
+            (5u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "iterator".into(),
+                prototype: "(Ljava/util/concurrent/CopyOnWriteArraySet;)Ljava/util/Iterator;".into(),
+                code_units: vec![0x106e, 0x0004, 0x0001, 0x000c, 0x0011],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+            (6u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "hasNext".into(),
+                prototype: "(Ljava/util/Iterator;)Z".into(),
+                code_units: vec![0x106e, 0x0005, 0x0001, 0x000a, 0x000f],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+            (7u32, MethodCode {
+                class_descriptor: "Ltest/SetCaller;".into(), name: "next".into(),
+                prototype: "(Ljava/util/Iterator;)Ljava/lang/Object;".into(),
+                code_units: vec![0x106e, 0x0006, 0x0001, 0x000c, 0x0011],
+                registers_size: 2, ins_size: 1, try_blocks: vec![],
+            }),
+        ]);
+        let references = vec![
+            MethodReference { method_index: 0, class_descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(), name: "<init>".into(), prototype: "()V".into() },
+            MethodReference { method_index: 1, class_descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(), name: "add".into(), prototype: "(Ljava/lang/Object;)Z".into() },
+            MethodReference { method_index: 2, class_descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(), name: "contains".into(), prototype: "(Ljava/lang/Object;)Z".into() },
+            MethodReference { method_index: 3, class_descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(), name: "remove".into(), prototype: "(Ljava/lang/Object;)Z".into() },
+            MethodReference { method_index: 4, class_descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(), name: "iterator".into(), prototype: "()Ljava/util/Iterator;".into() },
+            MethodReference { method_index: 5, class_descriptor: "Ljava/util/Iterator;".into(), name: "hasNext".into(), prototype: "()Z".into() },
+            MethodReference { method_index: 6, class_descriptor: "Ljava/util/Iterator;".into(), name: "next".into(), prototype: "()Ljava/lang/Object;".into() },
+        ];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        vm.execute_method(1, &[Value::Object(set)], 16).unwrap();
+        assert_eq!(
+            vm.execute_method(2, &[Value::Object(set), Value::Object(first)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(1))
+        );
+        assert_eq!(
+            vm.execute_method(2, &[Value::Object(set), Value::Object(first)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(0))
+        );
+        vm.execute_method(2, &[Value::Object(set), Value::Object(second)], 16).unwrap();
+        assert_eq!(
+            vm.execute_method(3, &[Value::Object(set), Value::Object(second)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(1))
+        );
+
+        let iterator_report = vm.execute_method(5, &[Value::Object(set)], 16).unwrap();
+        let iterator = match iterator_report.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(id)) => id,
+            other => panic!("Expected snapshot iterator, got {:?}", other),
+        };
+        vm.execute_method(4, &[Value::Object(set), Value::Object(first)], 16).unwrap();
+        assert_eq!(
+            vm.execute_method(7, &[Value::Object(iterator)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Object(first))
+        );
+        assert_eq!(
+            vm.execute_method(7, &[Value::Object(iterator)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Object(second))
+        );
+        assert_eq!(
+            vm.execute_method(6, &[Value::Object(iterator)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(0))
+        );
+        assert_eq!(
+            vm.execute_method(3, &[Value::Object(set), Value::Object(first)], 16).unwrap().stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Int(0))
+        );
+    }
+
 }
