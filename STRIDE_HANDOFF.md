@@ -1857,3 +1857,13 @@ Status: UI implementation committed · consolidated validation and visual review
 - Validation: source change committed as `a946497`. No Swift compile, Rust test suite, simulator/device test, IPA build, signing, or export was run in this batch. Compile and device validation remain pending.
 - Branch: `feat/dex-class-method-loader`; `main` untouched.
 - Phase 56 status: **UI refinement committed; validation pending.** Do not claim pixel-perfect or 100% equivalence until visual comparison and interaction tests on the target device are completed.
+
+
+### 2026-11-17 — Phase 56 compile-error correction
+
+- GitHub Actions run #939 exposed two deployment-target errors in `StrideIOSHomeScreen.swift`: the two-parameter `.onChange(of:)` closures require iOS 17, while Stride's `project.yml` deployment target is iOS 15.0.
+- Replaced both handlers with the iOS 15-compatible single-value closure form. Search page reset and search-field focus/clear behavior are retained.
+- Fix committed as `d8e47e4` on `feat/dex-class-method-loader`.
+- Run #939 evidence: Rust runtime tests passed; iOS compile failed only at the two iOS 17-only `.onChange` overloads. The unrelated AppIcon missing-file warning was non-fatal and is not the cause of this compile failure.
+- A new push-triggered Rust + iOS compile validation is expected. The workflow's IPA job requires explicit opt-in; no IPA build, signing, or export was authorized or performed.
+- `main` remains untouched. Phase 56 remains **compile revalidation pending** until the new workflow completes.
