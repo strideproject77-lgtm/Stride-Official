@@ -97,8 +97,8 @@ struct StrideIOSHomeScreen: View {
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: isSearchPresented)
-        .onChange(of: searchText) { _, _ in selectedPage = 0 }
-        .onChange(of: isSearchPresented) { _, presented in
+        .onChange(of: searchText) { _ in selectedPage = 0 }
+        .onChange(of: isSearchPresented) { presented in
             if presented {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                     searchFocused = true
