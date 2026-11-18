@@ -1917,3 +1917,5 @@ Build request:
 - New failure: AndroidX `ComponentActivity.<init>()V` throws `ClassCastException` because the managed `CopyOnWriteArraySet` object was not represented in the runtime hierarchy as a `java.util.Set`.
 - Commit `94c128451d0d2f9255f699e102f5684fb08a3229` on `feat/dex-class-method-loader` bootstraps the core `Iterable -> Collection -> Set` interface graph, registers `CopyOnWriteArraySet` as implementing `Set`, `Cloneable`, and `Serializable`, and adds positive/negative assignability regressions.
 - Next validation: run the Rust workspace tests, then iOS compile and the authorized unsigned IPA packaging path if the workflow gates pass. This is a source-level regression fix only; 2048 device launch is not yet verified.
+
+- Validation trigger: this handoff-only commit intentionally requests the existing workflow's authorized unsigned IPA path after Rust tests and iOS compile validation; it does not sign or install the app.
