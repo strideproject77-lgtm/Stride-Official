@@ -246,6 +246,68 @@ impl ClassHierarchy {
         };
         self.register_class(string_class);
 
+        // Bootstrap the Java collection interface graph needed by framework
+        // objects that are created by runtime intrinsics rather than DEX class loading.
+        // CopyOnWriteArraySet is a concrete Set, which is also a Collection and Iterable.
+        let iterable = RuntimeClass {
+            descriptor: "Ljava/lang/Iterable;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: Vec::new(),
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        };
+        self.register_class(iterable);
+
+        let collection = RuntimeClass {
+            descriptor: "Ljava/util/Collection;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec!["Ljava/lang/Iterable;".into()],
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        };
+        self.register_class(collection);
+
+        let set_interface = RuntimeClass {
+            descriptor: "Ljava/util/Set;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec!["Ljava/util/Collection;".into()],
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        };
+        self.register_class(set_interface);
+
+        for descriptor in ["Ljava/lang/Cloneable;", "Ljava/io/Serializable;"] {
+            self.register_class(RuntimeClass {
+                descriptor: descriptor.into(),
+                superclass_descriptor: Some("Ljava/lang/Object;".into()),
+                interface_descriptors: Vec::new(),
+                access_flags: 0x0601,
+                fields: HashMap::new(),
+                methods: HashMap::new(),
+                is_initialized: true,
+            });
+        }
+
+        self.register_class(RuntimeClass {
+            descriptor: "Ljava/util/concurrent/CopyOnWriteArraySet;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec![
+                "Ljava/util/Set;".into(),
+                "Ljava/lang/Cloneable;".into(),
+                "Ljava/io/Serializable;".into(),
+            ],
+            access_flags: 0x0001,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        });
+
         let throwable_class = RuntimeClass {
             descriptor: "Ljava/lang/Throwable;".into(),
             superclass_descriptor: Some("Ljava/lang/Object;".into()),
@@ -307,6 +369,22 @@ impl ClassHierarchy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_on_write_array_set_is_assignable_to_set_collection_iterable_and_object() {
+        let hierarchy = ClassHierarchy::new();
+        let concrete = "Ljava/util/concurrent/CopyOnWriteArraySet;";
+
+        assert!(hierarchy.is_assignable_from("Ljava/util/Set;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/util/Collection;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Iterable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Cloneable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/io/Serializable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Object;", concrete));
+
+        assert!(!hierarchy.is_assignable_from("Ljava/util/List;", concrete));
+        assert!(!hierarchy.is_assignable_from(concrete, "Ljava/util/Set;"));
+    }
 
     #[test]
     fn class_hierarchy_resolves_inheritance_and_virtual_override() {
