@@ -1909,3 +1909,11 @@ Build request:
   after Rust tests and iOS compile validation when the commit message contains
   `Build Stride unsigned IPA after tests`.
 - No signing, certificate, or installation steps are part of this build.
+
+
+## 2026-11-18 — 2048 Activity constructor type-cast blocker
+
+- Device log confirms the previous `CopyOnWriteArraySet.<init>()V` unresolved-method blocker is cleared: constructor dispatch now proceeds, with 0 missing APIs and 0 missing classes/methods in this session.
+- New failure: AndroidX `ComponentActivity.<init>()V` throws `ClassCastException` because the managed `CopyOnWriteArraySet` object was not represented in the runtime hierarchy as a `java.util.Set`.
+- Commit `94c128451d0d2f9255f699e102f5684fb08a3229` on `feat/dex-class-method-loader` bootstraps the core `Iterable -> Collection -> Set` interface graph, registers `CopyOnWriteArraySet` as implementing `Set`, `Cloneable`, and `Serializable`, and adds positive/negative assignability regressions.
+- Next validation: run the Rust workspace tests, then iOS compile and the authorized unsigned IPA packaging path if the workflow gates pass. This is a source-level regression fix only; 2048 device launch is not yet verified.
