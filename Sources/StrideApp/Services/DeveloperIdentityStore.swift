@@ -128,8 +128,11 @@ final class DeveloperIdentityStore {
               let first = items.first else {
             throw StoreError.invalidPKCS12
         }
-        guard let rawIdentity = first[kSecImportItemIdentity as String] as? CFTypeRef,
-              CFGetTypeID(rawIdentity) == SecIdentityGetTypeID() else {
+        guard let identityValue = first[kSecImportItemIdentity as String] else {
+            throw StoreError.identityMissing
+        }
+        let rawIdentity = identityValue as! CFTypeRef
+        guard CFGetTypeID(rawIdentity) == SecIdentityGetTypeID() else {
             throw StoreError.identityMissing
         }
         return unsafeBitCast(rawIdentity, to: SecIdentity.self)
