@@ -85,8 +85,15 @@ fn register(registry: &mut JniNativeRegistry) {
     registry.register("Landroid/graphics/Canvas;", "drawBitmap", "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V", |env, args| {
         let canvas = receiver(args)?;
         let bitmap = args.get(1).and_then(Value::as_object).ok_or("Canvas.drawBitmap Bitmap is null")?;
+        // Android permits a null Paint; in that case the bitmap is drawn at full alpha.
+        // A supplied Paint modulates the bitmap's per-pixel alpha via Paint.getAlpha().
+        let alpha = if let Some(paint) = args.get(4).and_then(Value::as_object) {
+            env.get_object_field(paint, "mAlpha").map(|value| value.as_int())
+                .unwrap_or(255).clamp(0, 255)
+        } else { 255 };
         append(env, canvas, 10, &[
             Value::Object(bitmap), Value::Float(float(args, 2)), Value::Float(float(args, 3)),
+            Value::Int(alpha),
         ])?;
         Ok(None)
     });
@@ -170,6 +177,31 @@ mod tests {
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Type").unwrap(), Value::Int(1));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Type").unwrap(), Value::Int(2));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Arg4").unwrap(), Value::Int(0xff123456u32 as i32));
+    }
+
+    #[test]
+    fn draw_bitmap_records_paint_alpha_and_defaults_null_paint_to_opaque() {
+        let mut registry = JniNativeRegistry::new();
+        register(&mut registry);
+        let mut heap = ManagedHeap::default();
+        let canvas = heap.allocate_instance("Landroid/graphics/Canvas;").unwrap();
+        let bitmap = heap.allocate_instance("Landroid/graphics/Bitmap;").unwrap();
+        let paint = heap.allocate_instance("Landroid/graphics/Paint;").unwrap();
+        heap.set_instance_field(paint, "mAlpha", Value::Int(96)).unwrap();
+        let draw = registry.find("Landroid/graphics/Canvas;", "drawBitmap",
+            "(Landroid/graphics/Bitmap;FFLandroid/graphics/Paint;)V").unwrap().clone();
+
+        draw(&mut JniEnv::new(&mut heap), &[
+            Value::Object(canvas), Value::Object(bitmap), Value::Float(4.0),
+            Value::Float(7.0), Value::Object(paint),
+        ]).unwrap();
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg3").unwrap(), Value::Int(96));
+
+        draw(&mut JniEnv::new(&mut heap), &[
+            Value::Object(canvas), Value::Object(bitmap), Value::Float(0.0),
+            Value::Float(0.0), Value::Null,
+        ]).unwrap();
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Arg3").unwrap(), Value::Int(255));
     }
 }
 
