@@ -22,6 +22,8 @@ struct ContentView: View {
     @State private var showingOverallLogsPage = false
     @State private var showingOverallLogsShare = false
     @State private var overallLogsShareText = ""
+    @State private var showingWelcome = !UserDefaults.standard.bool(forKey: "stride.onboarding.completed")
+    @AppStorage("stride.execution.defaultMode") private var defaultExecutionModeRaw = StrideExecutionMode.jitless.rawValue
     @AppStorage("stride.accentColorHex") private var accentColorHex = "A855F7"
     @AppStorage("stride.surfaceTheme") private var surfaceTheme = "espresso"
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
@@ -98,6 +100,20 @@ struct ContentView: View {
                 }
                 .fullScreenCover(isPresented: $showingOverallLogsPage) {
                     overallLogsPage
+                }
+                .fullScreenCover(isPresented: $showingWelcome) {
+                    StrideWelcomeView(
+                        selectedModeRaw: $defaultExecutionModeRaw,
+                        accent: accent,
+                        background: background,
+                        panel: panel,
+                        muted: muted,
+                        onComplete: {
+                            UserDefaults.standard.set(true, forKey: "stride.onboarding.completed")
+                            showingWelcome = false
+                        }
+                    )
+                    .interactiveDismissDisabled(true)
                 }
                 if !(selectedTab == 0 && homeExperience == "ios") {
                     Spacer(minLength: 12)
@@ -416,6 +432,27 @@ struct ContentView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(muted)
                 }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("DEFAULT EXECUTION MODE")
+                        .font(.system(size: 10, weight: .heavy)).tracking(1.3).foregroundStyle(muted)
+                    Picker("Default mode", selection: $defaultExecutionModeRaw) {
+                        ForEach(StrideExecutionMode.allCases) { mode in
+                            Text(mode.shortTitle).tag(mode.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(accent)
+                    Text(StrideExecutionMode(rawValue: defaultExecutionModeRaw)?.detail ?? StrideExecutionMode.jitless.detail)
+                        .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                    if defaultExecutionModeRaw == StrideExecutionMode.jitlessP12.rawValue && !DeveloperIdentityStore.shared.hasStoredIdentity() {
+                        Button("Import required P12 identity") { showingDeveloperIdentityPage = true }
+                            .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                    }
+                }
+                .padding(13)
+                .background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(line, lineWidth: 1))
 
                 settingsAction("Appearance & Colors", detail: "Accent color and app background", symbol: "paintpalette") {
                     showingAppearancePage = true
@@ -1058,6 +1095,7 @@ private struct APKDetailSheet: View {
     @State private var lastGuestDiagnosticLineCount = 0
     @State private var guestDiagnosticPollTicks = 0
     @State private var lastRunLabel = "No previous launch recorded"
+    @State private var selectedExecutionModeRaw = StrideExecutionMode.jitless.rawValue
     let accent: Color
     let canvas: Color
     let panel: Color
@@ -1213,6 +1251,30 @@ private struct APKDetailSheet: View {
                     .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.075), lineWidth: 1))
 
                     VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("EXECUTION MODE")
+                                .font(.system(size: 9, weight: .heavy)).tracking(1.2).foregroundStyle(muted)
+                            Picker("Execution mode", selection: $selectedExecutionModeRaw) {
+                                ForEach(StrideExecutionMode.allCases) { mode in
+                                    Text(mode.shortTitle).tag(mode.rawValue)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .tint(accent)
+                            Text(StrideExecutionMode(rawValue: selectedExecutionModeRaw)?.detail ?? StrideExecutionMode.jitless.detail)
+                                .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
+                            Text("This setting applies only to this app. Choose Default to follow the global setting.")
+                                .font(.system(size: 9, weight: .medium)).foregroundStyle(muted)
+                        }
+                        .padding(13)
+                        .background(panel, in: RoundedRectangle(cornerRadius: 14))
+                        .onChange(of: selectedExecutionModeRaw) { newValue in
+                            if newValue == "default" {
+                                StrideExecutionPreferences.clearOverride(for: item.fileURL)
+                            } else if let mode = StrideExecutionMode(rawValue: newValue) {
+                                StrideExecutionPreferences.setOverride(mode, for: item.fileURL)
+                            }
+                        }
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("How was this app run last time?")
@@ -1532,6 +1594,9 @@ private struct APKDetailSheet: View {
             .allowsHitTesting(false)
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            selectedExecutionModeRaw = StrideExecutionPreferences.override(for: item.fileURL)?.rawValue ?? "default"
+        }
         .sheet(isPresented: $showingLogShare) {
             if let logExportURL {
                 ActivityViewController(activityItems: [logExportURL])
@@ -1564,6 +1629,19 @@ private struct APKDetailSheet: View {
     }
 
     private func startGame() {
+                        let mode = selectedExecutionModeRaw == "default"
+                            ? StrideExecutionPreferences.defaultMode
+                            : (StrideExecutionMode(rawValue: selectedExecutionModeRaw) ?? StrideExecutionPreferences.defaultMode)
+                        if mode == .externalJIT {
+                            executionError = "External JIT is selected, but Stride does not yet have a supported external JIT provider/authorization adapter on this device. Choose a JIT-less mode for now."
+                            lastRunLabel = "Blocked · external JIT provider unavailable"
+                            return
+                        }
+                        if mode == .jitlessP12 && !DeveloperIdentityStore.shared.hasStoredIdentity() {
+                            executionError = "This app is set to JIT-less + P12, but no valid P12 identity is stored. Import it in Settings → Developer Identity first. P12 storage does not itself enable JIT or executable signing."
+                            lastRunLabel = "Blocked · P12 identity required"
+                            return
+                        }
                         showingExecutionScreen = true
                         launchTask = Task {
                             isExecuting = true
@@ -1589,6 +1667,10 @@ private struct APKDetailSheet: View {
                             )
                             logExportURL = diagnostics.currentSessionLogURL
                             appendSessionLog("[SESSION] Force execution requested for \(item.displayName)")
+                            appendSessionLog("[MODE] \(mode.title) · backend=managed interpreter/JIT-less")
+                            if mode == .jitlessP12 {
+                                appendSessionLog("[MODE] P12 identity is stored separately; this does not activate JIT or native executable signing")
+                            }
                             appendSessionLog("[SESSION] Started: \(Date().formatted(date: .abbreviated, time: .standard))")
                             do {
                                 let backend = StrideArtExecutionBackend()
