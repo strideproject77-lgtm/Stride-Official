@@ -1095,7 +1095,8 @@ private struct APKDetailSheet: View {
     @State private var lastGuestDiagnosticLineCount = 0
     @State private var guestDiagnosticPollTicks = 0
     @State private var lastRunLabel = "No previous launch recorded"
-    @State private var selectedExecutionModeRaw = StrideExecutionMode.jitless.rawValue
+    @State private var selectedExecutionModeRaw = "default"
+    @State private var showingIdentitySettings = false
     let accent: Color
     let canvas: Color
     let panel: Color
@@ -1255,6 +1256,7 @@ private struct APKDetailSheet: View {
                             Text("EXECUTION MODE")
                                 .font(.system(size: 9, weight: .heavy)).tracking(1.2).foregroundStyle(muted)
                             Picker("Execution mode", selection: $selectedExecutionModeRaw) {
+                                Text("Use global default").tag("default")
                                 ForEach(StrideExecutionMode.allCases) { mode in
                                     Text(mode.shortTitle).tag(mode.rawValue)
                                 }
@@ -1265,6 +1267,10 @@ private struct APKDetailSheet: View {
                                 .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                             Text("This setting applies only to this app. Choose Default to follow the global setting.")
                                 .font(.system(size: 9, weight: .medium)).foregroundStyle(muted)
+                            if selectedExecutionModeRaw == StrideExecutionMode.jitlessP12.rawValue && !DeveloperIdentityStore.shared.hasStoredIdentity() {
+                                Button("Import required P12 identity") { showingIdentitySettings = true }
+                                    .font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                            }
                         }
                         .padding(13)
                         .background(panel, in: RoundedRectangle(cornerRadius: 14))
@@ -1601,6 +1607,9 @@ private struct APKDetailSheet: View {
             if let logExportURL {
                 ActivityViewController(activityItems: [logExportURL])
             }
+        }
+        .sheet(isPresented: $showingIdentitySettings) {
+            DeveloperIdentitySettingsView(accent: accent, background: canvas, panel: panel, muted: muted)
         }
 
     }
