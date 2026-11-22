@@ -128,10 +128,11 @@ final class DeveloperIdentityStore {
               let first = items.first else {
             throw StoreError.invalidPKCS12
         }
-        guard let identity = first[kSecImportItemIdentity as String] as? SecIdentity else {
+        guard let rawIdentity = first[kSecImportItemIdentity as String] as? CFTypeRef,
+              CFGetTypeID(rawIdentity) == SecIdentityGetTypeID() else {
             throw StoreError.identityMissing
         }
-        return identity
+        return unsafeBitCast(rawIdentity, to: SecIdentity.self)
     }
 
     private func makeSummary(for identity: SecIdentity) throws -> IdentitySummary {
