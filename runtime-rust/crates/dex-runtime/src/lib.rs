@@ -38,6 +38,8 @@ pub mod handler;
 pub mod native_activity;
 pub mod arm64_guest;
 pub mod native_execution;
+pub mod jit;
+pub mod mode;
 pub mod view;
 pub mod layout;
 pub mod resources;
@@ -79,6 +81,8 @@ pub use handler::LooperCoordinator;
 pub use native_activity::NativeActivityLauncher;
 pub use arm64_guest::{run_aarch64, Arm64Cpu, Arm64Error, Arm64Flags, Arm64RunReport, Arm64StopReason, GuestMemory, MemoryProtection};
 pub use native_execution::{plan_guest_native_image, NativeExecutionError, NativeGuestImage, NativeImageReport, NativeLibraryStage, DEFAULT_GUEST_LOAD_BIAS, GUEST_NATIVE_STACK_SIZE};
+pub use jit::{AuthorizedJitBackend, AuthorizedJitHost, CodeRegion, InstalledCode, JitArchitecture, JitArtifact, JitError, JitHostCapabilities};
+pub use mode::{ExecutionMode, ExecutionPlan, ManagedExecutionBackend, ModeError, NativeExecutionBackend, RuntimeCapabilities};
 
 use std::collections::{HashMap, HashSet};
 use stride_dex_inspector::classes::{
