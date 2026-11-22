@@ -21,8 +21,6 @@ struct DeveloperIdentitySettingsView: View {
 
     private static let subjectKey = "stride.developerIdentity.subject"
     private static let fingerprintKey = "stride.developerIdentity.sha256"
-    private static let p12Type = UTType(filenameExtension: "p12") ?? .data
-    private static let pfxType = UTType(filenameExtension: "pfx") ?? .data
 
     var body: some View {
         NavigationView {
@@ -156,7 +154,10 @@ struct DeveloperIdentitySettingsView: View {
         .onAppear { refreshStoredState() }
         .fileImporter(
             isPresented: $showingImporter,
-            allowedContentTypes: [Self.p12Type, Self.pfxType],
+            // Some Files providers do not advertise PKCS#12 UTTypes correctly.
+            // Accept generic data here and validate the selected extension/content
+            // through SecPKCS12Import before anything is stored.
+            allowedContentTypes: [.data],
             allowsMultipleSelection: false,
             onCompletion: handleImport
         )
@@ -173,6 +174,20 @@ struct DeveloperIdentitySettingsView: View {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
             Text(errorMessage ?? "An unexpected error occurred.")
+        }
+    }
+
+    private enum ImportFileError: LocalizedError {
+        case unsupportedType
+        case unreadable
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedType:
+                return "Choose a .p12 or .pfx certificate file."
+            case .unreadable:
+                return "The selected certificate file could not be read. If it is in iCloud Drive, wait for it to finish downloading and try again."
+            }
         }
     }
 
@@ -207,7 +222,23 @@ struct DeveloperIdentitySettingsView: View {
                 if hasAccess { url.stopAccessingSecurityScopedResource() }
             }
             do {
-                let data = try Data(contentsOf: url)
+                let ext = url.pathExtension.lowercased()
+                guard ext == "p12" || ext == "pfx" else {
+                    throw ImportFileError.unsupportedType
+                }
+
+                // Coordinate reads from iCloud Drive and third-party document providers.
+                var coordinatedData: Data?
+                var coordinationError: NSError?
+                let coordinator = NSFileCoordinator()
+                coordinator.coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinationError) { readableURL in
+                    coordinatedData = try? Data(contentsOf: readableURL, options: .mappedIfSafe)
+                }
+                if let coordinationError { throw coordinationError }
+                guard let data = coordinatedData, !data.isEmpty else {
+                    throw ImportFileError.unreadable
+                }
+
                 let summary = try DeveloperIdentityStore.shared.importPKCS12(data, passphrase: passphrase)
                 subject = summary.subject
                 fingerprint = summary.sha256Fingerprint
