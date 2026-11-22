@@ -1900,8 +1900,18 @@ impl AndroidRuntime {
                             array.elements.iter().map(|value| value.as_int() as u32).collect::<Vec<_>>(),
                         _ => return Err("Guest Bitmap pixel array has an invalid shape".into()),
                     };
-                    canvas.draw_image_argb(&pixels, width as u32, height as u32,
-                        number("Arg1")? as i32, number("Arg2")? as i32);
+                    let left = number("Arg1")? as i32;
+                    let top = number("Arg2")? as i32;
+                    // Older recorded commands may not contain Arg3; preserve their
+                    // historical opaque behavior while honoring Paint alpha on new ones.
+                    let alpha = heap.get_instance_field(canvas_id, &format!("{prefix}Arg3"))
+                        .map(|value| value.as_int()).unwrap_or(255).clamp(0, 255) as u8;
+                    canvas.draw_image_argb_scaled_alpha(
+                        &pixels, width as u32, height as u32,
+                        left, top,
+                        left.saturating_add(width), top.saturating_add(height),
+                        alpha,
+                    );
                 }
                 11 => {
                     let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Drawable draw received null bitmap")?;
