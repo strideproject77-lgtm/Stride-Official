@@ -16,11 +16,14 @@ struct DeveloperIdentitySettingsView: View {
     @State private var hasStoredIdentity = false
     @State private var subject = UserDefaults.standard.string(forKey: Self.subjectKey) ?? ""
     @State private var fingerprint = UserDefaults.standard.string(forKey: Self.fingerprintKey) ?? ""
+        teamIdentifier = UserDefaults.standard.string(forKey: Self.teamIdentifierKey) ?? ""
+    @State private var teamIdentifier = UserDefaults.standard.string(forKey: Self.teamIdentifierKey) ?? ""
     @State private var errorMessage: String?
     @State private var statusMessage: String?
 
     private static let subjectKey = "stride.developerIdentity.subject"
     private static let fingerprintKey = "stride.developerIdentity.sha256"
+    private static let teamIdentifierKey = "stride.developerIdentity.teamIdentifier"
 
     var body: some View {
         NavigationView {
@@ -64,6 +67,7 @@ struct DeveloperIdentitySettingsView: View {
                                 .tracking(1.2)
                                 .foregroundStyle(muted)
                             detailRow("Subject", value: subject.isEmpty ? "Imported identity" : subject)
+                            detailRow("Apple Team ID", value: teamIdentifier.isEmpty ? "Unavailable" : teamIdentifier)
                             detailRow("SHA-256", value: fingerprint.isEmpty ? "Fingerprint unavailable" : fingerprint)
                         }
                         .padding(14)
@@ -111,7 +115,7 @@ struct DeveloperIdentitySettingsView: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(muted)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("Storage and certificate validation are implemented. Signing converted native executables is not connected and is not claimed as supported.")
+                        Text("Stride now checks that the P12 Team ID matches the provisioning profile used to install this copy of Stride. Converted-library signing is still a separate implementation step.")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(muted)
                             .fixedSize(horizontal: false, vertical: true)
@@ -242,8 +246,10 @@ struct DeveloperIdentitySettingsView: View {
                 let summary = try DeveloperIdentityStore.shared.importPKCS12(data, passphrase: passphrase)
                 subject = summary.subject
                 fingerprint = summary.sha256Fingerprint
+                teamIdentifier = summary.teamIdentifier
                 UserDefaults.standard.set(subject, forKey: Self.subjectKey)
                 UserDefaults.standard.set(fingerprint, forKey: Self.fingerprintKey)
+                UserDefaults.standard.set(teamIdentifier, forKey: Self.teamIdentifierKey)
                 passphrase = ""
                 statusMessage = "Identity validated and securely stored."
                 refreshStoredState()
@@ -258,6 +264,7 @@ struct DeveloperIdentitySettingsView: View {
             try DeveloperIdentityStore.shared.removeIdentity()
             UserDefaults.standard.removeObject(forKey: Self.subjectKey)
             UserDefaults.standard.removeObject(forKey: Self.fingerprintKey)
+            UserDefaults.standard.removeObject(forKey: Self.teamIdentifierKey)
             passphrase = ""
             statusMessage = "Stored identity removed."
             refreshStoredState()
