@@ -2240,6 +2240,7 @@ impl<'a> ArtVm<'a> {
                             continue;
                         }
                         if let Some(diagnostics) = self.diagnostics {
+                            diagnostics.record_missing_method(target_class, target_name, target_proto);
                             diagnostics.record_detailed(
                                 DiagnosticSeverity::MissingApi, "MethodResolver", "INVOKE_TARGET_UNRESOLVED",
                                 "DEX method reference could not be resolved to app code or a registered framework/JNI bridge",
