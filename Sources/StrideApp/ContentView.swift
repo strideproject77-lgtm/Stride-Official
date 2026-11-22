@@ -17,6 +17,7 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var showingAbout = false
     @State private var showingAppearancePage = false
+    @State private var showingDeveloperIdentityPage = false
     @State private var showingRuntimeStatusPage = false
     @State private var showingOverallLogsPage = false
     @State private var showingOverallLogsShare = false
@@ -88,6 +89,9 @@ struct ContentView: View {
                 }
                 .fullScreenCover(isPresented: $showingAppearancePage) {
                     appearanceSettingsPage
+                }
+                .fullScreenCover(isPresented: $showingDeveloperIdentityPage) {
+                    DeveloperIdentitySettingsView(accent: accent, background: background, panel: panel, muted: muted)
                 }
                 .fullScreenCover(isPresented: $showingRuntimeStatusPage) {
                     runtimeStatusPage
@@ -415,6 +419,9 @@ struct ContentView: View {
 
                 settingsAction("Appearance & Colors", detail: "Accent color and app background", symbol: "paintpalette") {
                     showingAppearancePage = true
+                }
+                settingsAction("Developer Identity", detail: DeveloperIdentityStore.shared.hasStoredIdentity() ? "PKCS#12 identity stored securely" : "Import a .p12 / .pfx certificate", symbol: "checkmark.shield") {
+                    showingDeveloperIdentityPage = true
                 }
 
                 VStack(alignment: .leading, spacing: 9) {
