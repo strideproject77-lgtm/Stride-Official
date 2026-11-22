@@ -16,7 +16,6 @@ struct DeveloperIdentitySettingsView: View {
     @State private var hasStoredIdentity = false
     @State private var subject = UserDefaults.standard.string(forKey: Self.subjectKey) ?? ""
     @State private var fingerprint = UserDefaults.standard.string(forKey: Self.fingerprintKey) ?? ""
-        teamIdentifier = UserDefaults.standard.string(forKey: Self.teamIdentifierKey) ?? ""
     @State private var teamIdentifier = UserDefaults.standard.string(forKey: Self.teamIdentifierKey) ?? ""
     @State private var errorMessage: String?
     @State private var statusMessage: String?
