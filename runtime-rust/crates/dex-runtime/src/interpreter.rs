@@ -1569,6 +1569,38 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // CopyOnWriteArrayList's no-argument constructor creates an empty
+                    // snapshot-backed managed collection. This exact intrinsic is used by
+                    // AndroidX MenuHostHelper during Activity construction.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/concurrent/CopyOnWriteArrayList;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for CopyOnWriteArrayList.<init>()V at PC {}: {:?}",
+                                    pc, error
+                                ))?;
+                                self.heap.set_instance_field(
+                                    *receiver,
+                                    "__stride_copy_on_write_array_list_size",
+                                    Value::Int(0),
+                                ).map_err(|error| format!(
+                                    "CopyOnWriteArrayList size initialization failed: {:?}", error
+                                ))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic CopyOnWriteArrayList.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     // CopyOnWriteArraySet's no-argument constructor creates an empty
                     // backing set. Stride stores managed collection contents in explicit
                     // instance fields, so a zero-initialized receiver is already the correct
@@ -1728,6 +1760,134 @@ impl<'a> ArtVm<'a> {
                         continue;
                     }
 
+                    // Managed CopyOnWriteArrayList operations used by AndroidX lifecycle
+                    // and menu-host helpers. Entries are stored as managed object references;
+                    // iterators receive an immutable snapshot, matching copy-on-write traversal.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/concurrent/CopyOnWriteArrayList;"
+                        && matches!(
+                            (target_name, target_proto),
+                            ("add", "(Ljava/lang/Object;)Z")
+                                | ("addIfAbsent", "(Ljava/lang/Object;)Z")
+                                | ("remove", "(Ljava/lang/Object;)Z")
+                                | ("contains", "(Ljava/lang/Object;)Z")
+                                | ("size", "()I")
+                                | ("isEmpty", "()Z")
+                                | ("clear", "()V")
+                                | ("iterator", "()Ljava/util/Iterator;")
+                        )
+                    {
+                        let receiver = match args.first() {
+                            Some(Value::Object(id)) if *id != 0 => *id,
+                            _ => return Err(format!(
+                                "Invalid null receiver for CopyOnWriteArrayList.{}{} at PC {}",
+                                target_name, target_proto, pc
+                            )),
+                        };
+                        self.heap.get(receiver).map_err(|error| format!(
+                            "Invalid CopyOnWriteArrayList receiver at PC {}: {:?}", pc, error
+                        ))?;
+                        let size_field = "__stride_copy_on_write_array_list_size";
+                        let entry_prefix = "__stride_copy_on_write_array_list_entry_";
+                        let size = match self.heap.get_instance_field(receiver, size_field)
+                            .map_err(|error| format!("CopyOnWriteArrayList size read failed: {:?}", error))? {
+                            Value::Int(value) if value >= 0 => value as usize,
+                            _ => 0,
+                        };
+                        let mut entries = Vec::with_capacity(size);
+                        for index in 0..size {
+                            let value = self.heap.get_instance_field(receiver, &format!("{}{}", entry_prefix, index))
+                                .map_err(|error| format!("CopyOnWriteArrayList entry read failed: {:?}", error))?;
+                            entries.push(value);
+                        }
+                        match target_name {
+                            "size" => pending_result = Some(Value::Int(size.min(i32::MAX as usize) as i32)),
+                            "isEmpty" => pending_result = Some(Value::Int(if size == 0 { 1 } else { 0 })),
+                            "contains" | "add" | "addIfAbsent" | "remove" => {
+                                let candidate = match args.get(1) {
+                                    Some(Value::Object(id)) if *id != 0 => {
+                                        self.heap.get(*id).map_err(|error| format!(
+                                            "Invalid CopyOnWriteArrayList element at PC {}: {:?}", pc, error
+                                        ))?;
+                                        Value::Object(*id)
+                                    }
+                                    Some(Value::Object(0)) | Some(Value::Null) => Value::Null,
+                                    Some(other) => return Err(format!(
+                                        "Unsupported CopyOnWriteArrayList element {:?} at PC {}", other, pc
+                                    )),
+                                    None => return Err(format!(
+                                        "Missing CopyOnWriteArrayList element for {} at PC {}", target_name, pc
+                                    )),
+                                };
+                                let position = entries.iter().position(|value| {
+                                    let normalized = if *value == Value::Object(0) { Value::Null } else { *value };
+                                    normalized == candidate
+                                });
+                                match target_name {
+                                    "contains" => pending_result = Some(Value::Int(if position.is_some() { 1 } else { 0 })),
+                                    "add" | "addIfAbsent" => {
+                                        let should_add = target_name == "add" || position.is_none();
+                                        if should_add {
+                                            self.heap.set_instance_field(
+                                                receiver, &format!("{}{}", entry_prefix, size), candidate
+                                            ).map_err(|error| format!("CopyOnWriteArrayList add failed: {:?}", error))?;
+                                            self.heap.set_instance_field(
+                                                receiver, size_field, Value::Int((size + 1) as i32)
+                                            ).map_err(|error| format!("CopyOnWriteArrayList size update failed: {:?}", error))?;
+                                        }
+                                        pending_result = Some(Value::Int(if should_add { 1 } else { 0 }));
+                                    }
+                                    "remove" => {
+                                        if let Some(index) = position {
+                                            for next in index + 1..size {
+                                                let value = self.heap.get_instance_field(
+                                                    receiver, &format!("{}{}", entry_prefix, next)
+                                                ).map_err(|error| format!("CopyOnWriteArrayList remove read failed: {:?}", error))?;
+                                                self.heap.set_instance_field(
+                                                    receiver, &format!("{}{}", entry_prefix, next - 1), value
+                                                ).map_err(|error| format!("CopyOnWriteArrayList remove shift failed: {:?}", error))?;
+                                            }
+                                            self.heap.remove_instance_field(
+                                                receiver, &format!("{}{}", entry_prefix, size - 1)
+                                            ).map_err(|error| format!("CopyOnWriteArrayList remove cleanup failed: {:?}", error))?;
+                                            self.heap.set_instance_field(
+                                                receiver, size_field, Value::Int((size - 1) as i32)
+                                            ).map_err(|error| format!("CopyOnWriteArrayList size update failed: {:?}", error))?;
+                                        }
+                                        pending_result = Some(Value::Int(if position.is_some() { 1 } else { 0 }));
+                                    }
+                                    _ => unreachable!(),
+                                }
+                            }
+                            "clear" => {
+                                for index in 0..size {
+                                    self.heap.remove_instance_field(receiver, &format!("{}{}", entry_prefix, index))
+                                        .map_err(|error| format!("CopyOnWriteArrayList clear failed: {:?}", error))?;
+                                }
+                                self.heap.set_instance_field(receiver, size_field, Value::Int(0))
+                                    .map_err(|error| format!("CopyOnWriteArrayList clear size update failed: {:?}", error))?;
+                                pending_result = None;
+                            }
+                            "iterator" => {
+                                let iterator = self.heap.allocate_instance(
+                                    "Ljava/util/concurrent/CopyOnWriteArrayList$StrideSnapshotIterator;"
+                                ).map_err(|error| format!("CopyOnWriteArrayList iterator allocation failed: {:?}", error))?;
+                                self.heap.set_instance_field(iterator, "__stride_snapshot_cursor", Value::Int(0))
+                                    .map_err(|error| format!("CopyOnWriteArrayList iterator cursor init failed: {:?}", error))?;
+                                self.heap.set_instance_field(iterator, "__stride_snapshot_size", Value::Int(size as i32))
+                                    .map_err(|error| format!("CopyOnWriteArrayList iterator size init failed: {:?}", error))?;
+                                for (index, value) in entries.iter().enumerate() {
+                                    self.heap.set_instance_field(iterator, &format!("__stride_snapshot_entry_{}", index), *value)
+                                        .map_err(|error| format!("CopyOnWriteArrayList iterator snapshot failed: {:?}", error))?;
+                                }
+                                pending_result = Some(Value::Object(iterator));
+                            }
+                            _ => unreachable!(),
+                        }
+                        pc += 3;
+                        continue;
+                    }
+
                     // Snapshot iterator returned by the managed CopyOnWriteArraySet bridge.
                     if target_method.is_none()
                         && target_class == "Ljava/util/Iterator;"
@@ -1743,9 +1903,13 @@ impl<'a> ArtVm<'a> {
                         let iterator_object = self.heap.get(iterator).map_err(|error| format!(
                             "Invalid snapshot iterator at PC {}: {:?}", pc, error
                         ))?;
-                        if iterator_object.class_descriptor() != "Ljava/util/concurrent/CopyOnWriteArraySet$StrideSnapshotIterator;" {
+                        if !matches!(
+                            iterator_object.class_descriptor(),
+                            "Ljava/util/concurrent/CopyOnWriteArraySet$StrideSnapshotIterator;"
+                                | "Ljava/util/concurrent/CopyOnWriteArrayList$StrideSnapshotIterator;"
+                        ) {
                             return Err(format!(
-                                "Iterator receiver is not a Stride CopyOnWriteArraySet snapshot at PC {}",
+                                "Iterator receiver is not a Stride copy-on-write snapshot at PC {}",
                                 pc
                             ));
                         }
