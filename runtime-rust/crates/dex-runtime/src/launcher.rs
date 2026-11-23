@@ -3,7 +3,7 @@
 //! Integrates Manifest parsing, Multi-DEX loading, runtime initialization,
 //! class linking, Activity lifecycle startup, and actual bytecode execution.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use stride_axml::parse_manifest;
 use crate::loader::AppClassLoader;
@@ -91,6 +91,8 @@ pub struct AndroidRuntime {
     pub initial_render_summary_recorded: bool,
     /// Last laid-out managed View bounds, in guest-surface pixels, used for hit testing.
     pub rendered_view_bounds: Vec<(u32, RectF)>,
+    /// Views that have received their initial WindowInsets callback.
+    pub window_insets_dispatched: HashSet<u32>,
     /// View pressed on ACTION_DOWN; clicks are dispatched only when ACTION_UP lands on it.
     pub pressed_view: Option<u32>,
     /// EditText currently selected by the guest touch surface for native keyboard input.
@@ -571,6 +573,7 @@ impl AndroidRuntime {
             active_activity_class: None,
             initial_render_summary_recorded: false,
             rendered_view_bounds: Vec::new(),
+            window_insets_dispatched: HashSet::new(),
             pressed_view: None,
             focused_edit_text: None,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
@@ -1644,6 +1647,95 @@ impl AndroidRuntime {
     }
 
 
+    /// Dispatches the Android View.OnApplyWindowInsetsListener once per visible
+    /// View after its first layout. Insets default to zero until the host safe-area
+    /// metrics are passed through the runtime boundary.
+    fn dispatch_window_insets(&mut self) -> Result<bool, String> {
+        let candidates = self.rendered_view_bounds.clone();
+        let mut dispatched = false;
+        for (view_id, _) in candidates {
+            if self.window_insets_dispatched.contains(&view_id) { continue; }
+            let listener = self.heap.get_instance_field(view_id, "mWindowInsetsListener")
+                .ok().and_then(|value| value.as_object()).filter(|id| *id != 0);
+            let Some(listener_id) = listener else { continue; };
+            let listener_class = self.heap.get(listener_id)
+                .map_err(|error| format!("WindowInsets listener lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            let signature = "(Landroid/view/View;Landroid/view/WindowInsets;)Landroid/view/WindowInsets;";
+            let Some(method_id) = self.class_loader.find_method_in_hierarchy(
+                &listener_class, "onApplyWindowInsets", signature,
+            ) else {
+                self.diagnostics.record(
+                    DiagnosticSeverity::MissingApi, "WindowInsets",
+                    "WINDOW_INSETS_CALLBACK_MISSING",
+                    Some(&format!("{}->onApplyWindowInsets{}", listener_class, signature)),
+                );
+                self.window_insets_dispatched.insert(view_id);
+                continue;
+            };
+            let insets_id = self.heap.allocate_instance("Landroid/view/WindowInsets;")
+                .map_err(|error| format!("WindowInsets allocation failed: {:?}", error))?;
+            for field in [
+                "mStrideSystemInsetLeft", "mStrideSystemInsetTop",
+                "mStrideSystemInsetRight", "mStrideSystemInsetBottom",
+                "mStrideStableInsetLeft", "mStrideStableInsetTop",
+                "mStrideStableInsetRight", "mStrideStableInsetBottom",
+            ] {
+                self.heap.set_instance_field(insets_id, field, Value::Int(0))
+                    .map_err(|error| format!("WindowInsets field setup failed: {:?}", error))?;
+            }
+            self.heap.set_instance_field(insets_id, "mStrideConsumed", Value::Int(0))
+                .map_err(|error| format!("WindowInsets consumed state setup failed: {:?}", error))?;
+            let methods = self.class_loader.export_method_codes();
+            let metadata = self.class_loader.dex_inventories.first().cloned();
+            let strings = metadata.as_ref()
+                .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &methods, strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(
+                &self.class_loader.dex_inventories,
+                &self.class_loader.method_dex_indices,
+            );
+            if let Some(inventory) = metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            let report = vm.execute_method(
+                method_id,
+                &[Value::Object(listener_id), Value::Object(view_id), Value::Object(insets_id)],
+                100_000,
+            ).map_err(|error| format!("WindowInsets callback interpreter error: {}", error))?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) => return Err(format!(
+                    "WindowInsets listener threw {}: {:?}", exception.class_descriptor, exception.message
+                )),
+                ExecutionStopReason::StepLimitExceeded => return Err(
+                    "WindowInsets listener exceeded its instruction budget".into()
+                ),
+                ExecutionStopReason::ReturnedValue(Value::Object(returned)) if returned != 0 => {
+                    self.heap.set_instance_field(view_id, "mStrideLastWindowInsets", Value::Object(returned))
+                        .map_err(|error| format!("WindowInsets return retention failed: {:?}", error))?;
+                }
+                _ => {}
+            }
+            self.window_insets_dispatched.insert(view_id);
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::Info, "WindowInsets", "WINDOW_INSETS_CALLBACK_EXECUTED",
+                "Guest View received its initial WindowInsets callback",
+                Some(&format!("view_class={} listener_class={} zero_insets=true instructions={}",
+                    self.heap.get(view_id).map(|o| o.class_descriptor()).unwrap_or("<unknown>"),
+                    listener_class, report.steps_executed)),
+                None,
+            );
+            dispatched = true;
+        }
+        Ok(dispatched)
+    }
+
     /// Rebuilds the current Activity's managed View hierarchy into the guest Surface.
     /// This is the first real Activity -> Canvas -> Surface bridge; unsupported custom
     /// drawing callbacks and unresolved layout-resource IDs are deliberately skipped.
@@ -1851,6 +1943,7 @@ impl AndroidRuntime {
         )?;
         drop(canvas);
         self.rendered_view_bounds = rendered_view_bounds;
+        self.dispatch_window_insets()?;
         self.render_guest_custom_view_drawing()?;
 
 
