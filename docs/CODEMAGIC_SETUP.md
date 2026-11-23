@@ -1,6 +1,6 @@
 # Stride CodeMagic builder
 
-Stride has an independent CodeMagic macOS builder. It checks out this repository's `main` branch and builds the same Stride source tree as GitHub Actions.
+Stride has two independently selectable macOS build paths. Both use the same repository and `main` branch source. GitHub Actions can run from its Actions page; CodeMagic is manual-start only from its dashboard, so a normal GitHub build does not automatically start a second CodeMagic build.
 
 ## Isolation from INFINITY
 
@@ -16,12 +16,13 @@ Stride has an independent CodeMagic macOS builder. It checks out this repository
 2. Add the `Stride-Official` repository as a CodeMagic application.
 3. Select `codemagic.yaml` as the workflow configuration file.
 4. Add the environment variable `STRIDE_LOGS_GITHUB_TOKEN` in CodeMagic's secure environment-variable settings. Use a fine-grained token restricted to this repository with Contents: Read and write. Do not reuse INFINITY's token.
-5. Enable the `stride-ios` workflow. Pushes to `main` trigger it automatically.
-6. The first successful log publication creates the isolated `stride-codemagic-logs` branch.
+5. Enable the `stride-ios` workflow. Do not add an automatic push trigger; start a build manually from the CodeMagic dashboard whenever you choose CodeMagic.
+6. Select the `main` branch for each manual build. The first successful log publication creates the isolated `stride-codemagic-logs` branch.
 
 ## Build outputs
 
-- Unsigned iPhone IPA: `build/ios/Stride-unsigned.ipa`
+- Unsigned iPhone IPA: `build/ios/Stride-unsigned.ipa` (CodeMagic manual run)
+- GitHub Actions unsigned IPA: `Stride-unsigned.ipa` (Run workflow; `build_ipa` defaults to true)
 - Full build transcript and step logs: CodeMagic artifacts
 - Latest GitHub log snapshot: `stride-codemagic-logs:latest/`
 
