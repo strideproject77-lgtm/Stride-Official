@@ -120,7 +120,7 @@ A second pass decoded the base APK's binary AndroidManifest.xml and inspected th
 ### Confirmed manifest facts
 
 - Exact launcher: `com.tpcstld.twozerogame.MainActivity`.
-- Launcher is exported and requests landscape orientation (`screenOrientation=1`).
+- Launcher is exported and the static scan recorded `screenOrientation=1`. Android's documented constant value `1` means **portrait** (`0` means landscape); the earlier scan note calling this landscape was incorrect. Runtime now maps the Android constants rather than assuming the raw number is an orientation enum.
 - min SDK 23; target SDK 37; compile SDK 37.
 - Application component factory: `androidx.core.app.CoreComponentFactory`.
 - Manifest marks split delivery as required and declares required split type `base__density`.
@@ -195,3 +195,13 @@ Work started on `feat/dex-class-method-loader`. The following guest-framework pi
 - 2048 remains **Not playable / Not verified** until the real board, swipes, merge/undo/new-game flow and saved state pass end-to-end tests on a physical iPhone.
 
 The repository's iOS workflow was adjusted so intermediate implementation commits do not each queue duplicate IPA builds. The intended final validation is one manually initiated full Rust-test + unsigned-IPA workflow after the implementation batch is ready.
+
+
+## Implementation progress — 2026-11-23
+
+- Guest custom `MainView.onDraw(Canvas)` invocation and command replay are present in the current `main` branch.
+- Offscreen `Canvas(Bitmap)` command queues are flushed into managed Bitmap pixels before the screen Canvas replays `drawBitmap` commands.
+- The Canvas text command now retains the guest Paint Typeface reference. On iOS, the renderer can create a CoreGraphics font directly from the APK-provided font bytes; this supports the bundled `ClearSans-Bold.ttf` path without global font registration. Missing/invalid font bytes still fall back to Helvetica.
+- Paint text advance now uses the same baseline approximation as the iOS Canvas renderer; it is not yet a substitute for exact per-glyph font metrics.
+- Android launcher screen-orientation constants are now mapped to virtual display axes, and ActivityInfo retains the manifest's actual orientation value.
+- These changes have Rust CI coverage; the iOS no-IPA compile and physical iPhone end-to-end tests are still required. The APK has not yet been run in Stride, so compatibility remains **Not verified**.
