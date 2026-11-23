@@ -26,7 +26,7 @@ use crate::resources::ResourceCatalog;
 use crate::unity::UnityPlayerBridge;
 use crate::cocos2dx::Cocos2dxEngineBridge;
 use crate::audio::AudioSession;
-use crate::handler::LooperCoordinator;
+use crate::handler::{LooperCoordinator, RunnableQueue};
 use crate::native_activity::NativeActivityLauncher;
 use crate::native_execution::{NativeGuestImage, NativeLibraryStage};
 use crate::arm64_guest::Arm64Cpu;
@@ -115,6 +115,8 @@ pub struct AndroidRuntime {
     pub audio_session: AudioSession,
     /// Android Handler/Looper/MessageQueue scheduler.
     pub looper_coordinator: LooperCoordinator,
+    /// Guest Handler.post()/postDelayed() callbacks dispatched on the frame pump.
+    pub pending_runnables: RunnableQueue,
     /// NativeActivity launch pipeline for Unity and C++ apps.
     pub native_activity_launcher: NativeActivityLauncher,
     /// Materialized AArch64 guest memory images for loaded native libraries.
@@ -539,11 +541,12 @@ impl AndroidRuntime {
                 let pending_intent_queue = Arc::new(Mutex::new(VecDeque::new()));
         let pending_finish_requested = Arc::new(Mutex::new(false));
         let main_looper_ref = Arc::new(Mutex::new(None));
+        let pending_runnables: RunnableQueue = Arc::new(Mutex::new(Vec::new()));
         Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone(), pending_intent_queue.clone(), pending_finish_requested.clone());
         Self::register_game_jni(&mut jni);
         // Override the old integer-returning Looper stubs with managed object
         // references after generic game JNI registration.
-        crate::handler::register_looper_jni(&mut jni, main_looper_ref);
+        crate::handler::register_looper_jni(&mut jni, main_looper_ref, pending_runnables.clone());
         UnityPlayerBridge::register_unity_jni(&mut jni);
         let mut cocos2dx_bridge = Cocos2dxEngineBridge::new();
         cocos2dx_bridge.register_jni_bridges(&mut jni);
@@ -584,6 +587,7 @@ impl AndroidRuntime {
             cocos2dx_bridge,
             audio_session: AudioSession::new(),
             looper_coordinator: LooperCoordinator::new(),
+            pending_runnables,
             native_activity_launcher: NativeActivityLauncher::new(),
             native_images: HashMap::new(),
             native_cpu: Arm64Cpu::default(),
@@ -2433,6 +2437,70 @@ impl AndroidRuntime {
         }
     }
 
+    /// Executes due Handler Runnable callbacks on the guest main frame pump.
+    fn dispatch_pending_runnables(&mut self, step_budget: usize) -> Result<bool, String> {
+        let due = crate::handler::take_due_runnables(&self.pending_runnables, 64)?;
+        let mut executed = false;
+        for callback in due {
+            if !self.heap.contains(callback.runnable_id) || !self.heap.contains(callback.handler_id) {
+                self.diagnostics.record(
+                    DiagnosticSeverity::Warning, "Looper", "HANDLER_CALLBACK_OBJECT_EXPIRED",
+                    Some("A queued Handler or Runnable object was no longer present in the managed heap"),
+                );
+                continue;
+            }
+            let class = self.heap.get(callback.runnable_id)
+                .map_err(|error| format!("Runnable class lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            let Some(method_id) = self.class_loader.find_method_in_hierarchy(&class, "run", "()V") else {
+                self.diagnostics.record(
+                    DiagnosticSeverity::MissingApi, "Looper", "RUNNABLE_RUN_METHOD_MISSING",
+                    Some(&format!("{}->run()V", class)),
+                );
+                continue;
+            };
+            let methods = self.class_loader.export_method_codes();
+            let metadata = self.class_loader.dex_inventories.first().cloned();
+            let strings = metadata.as_ref()
+                .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &methods, strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(
+                &self.class_loader.dex_inventories,
+                &self.class_loader.method_dex_indices,
+            );
+            if let Some(inventory) = metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            let report = vm.execute_method(
+                method_id, &[Value::Object(callback.runnable_id)], step_budget.max(1),
+            ).map_err(|error| format!("Handler Runnable {}.run interpreter error: {}", class, error))?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) => return Err(format!(
+                    "Handler Runnable {}.run threw {}: {:?}",
+                    class, exception.class_descriptor, exception.message
+                )),
+                ExecutionStopReason::StepLimitExceeded => return Err(format!(
+                    "Handler Runnable {}.run exceeded its frame instruction budget", class
+                )),
+                _ => {}
+            }
+            self.diagnostics.record_detailed(
+                DiagnosticSeverity::Info, "Looper", "HANDLER_RUNNABLE_EXECUTED",
+                "A due guest Handler Runnable callback completed",
+                Some(&format!("class={} instructions={}", class, report.steps_executed)),
+                None,
+            );
+            executed = true;
+        }
+        Ok(executed)
+    }
+
     /// Advances app-owned custom Views that expose a no-argument tick() method.
     /// The iOS CADisplayLink calls pump_guest_events every frame, so this is the
     /// managed frame callback for games such as 2048 that update animation state
@@ -2707,8 +2775,9 @@ impl AndroidRuntime {
         // CADisplayLink invokes this pump every host frame, including frames
         // without touch input. Advance guest animation/game-loop callbacks before
         // redrawing so custom Views such as 2048's MainView can update continuously.
+        let runnable_callbacks_executed = self.dispatch_pending_runnables(step_budget)?;
         let guest_frame_ticked = self.tick_guest_custom_views(step_budget)?;
-        if had_events || guest_frame_ticked {
+        if had_events || guest_frame_ticked || runnable_callbacks_executed {
             self.render_active_activity_surface()
                 .map_err(|error| format!("Guest redraw after input/frame failed: {error}"))?;
             if let Some(enqueued_at) = latest_event_enqueued_at {
