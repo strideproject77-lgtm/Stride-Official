@@ -538,8 +538,12 @@ impl AndroidRuntime {
         let shared_resource_catalog = Arc::new(Mutex::new(ResourceCatalog::default()));
                 let pending_intent_queue = Arc::new(Mutex::new(VecDeque::new()));
         let pending_finish_requested = Arc::new(Mutex::new(false));
+        let main_looper_ref = Arc::new(Mutex::new(None));
         Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone(), pending_intent_queue.clone(), pending_finish_requested.clone());
         Self::register_game_jni(&mut jni);
+        // Override the old integer-returning Looper stubs with managed object
+        // references after generic game JNI registration.
+        crate::handler::register_looper_jni(&mut jni, main_looper_ref);
         UnityPlayerBridge::register_unity_jni(&mut jni);
         let mut cocos2dx_bridge = Cocos2dxEngineBridge::new();
         cocos2dx_bridge.register_jni_bridges(&mut jni);
