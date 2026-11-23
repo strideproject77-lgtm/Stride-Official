@@ -643,6 +643,31 @@ mod tests {
     }
 
     #[test]
+    fn view_padding_and_window_insets_accessors_preserve_guest_values() {
+        let mut jni = JniNativeRegistry::new();
+        register_view_framework(&mut jni);
+        let mut heap = ManagedHeap::default();
+        let view = heap.allocate_instance("Landroid/view/View;").unwrap();
+        invoke(&jni, &mut heap, "Landroid/view/View;", "<init>",
+            "(Landroid/content/Context;)V", &[Value::Object(view), Value::Null]).unwrap();
+        invoke(&jni, &mut heap, "Landroid/view/View;", "setPadding", "(IIII)V",
+            &[Value::Object(view), Value::Int(4), Value::Int(8), Value::Int(12), Value::Int(16)]).unwrap();
+        for (method, expected) in [
+            ("getPaddingLeft", 4), ("getPaddingTop", 8),
+            ("getPaddingRight", 12), ("getPaddingBottom", 16),
+        ] {
+            assert_eq!(invoke(&jni, &mut heap, "Landroid/view/View;", method, "()I",
+                &[Value::Object(view)]).unwrap(), Some(Value::Int(expected)));
+        }
+        let insets = heap.allocate_instance("Landroid/view/WindowInsets;").unwrap();
+        heap.set_instance_field(insets, "mStrideSystemInsetTop", Value::Int(24)).unwrap();
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/WindowInsets;", "getSystemWindowInsetTop", "()I",
+            &[Value::Object(insets)]).unwrap(), Some(Value::Int(24)));
+        assert_eq!(invoke(&jni, &mut heap, "Landroid/view/WindowInsets;", "hasSystemWindowInsets", "()Z",
+            &[Value::Object(insets)]).unwrap(), Some(Value::Int(1)));
+    }
+
+    #[test]
     fn view_background_color_is_stored_for_rendering() {
         let mut jni = JniNativeRegistry::new();
         register_view_framework(&mut jni);
