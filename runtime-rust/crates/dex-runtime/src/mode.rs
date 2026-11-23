@@ -171,7 +171,7 @@ mod tests {
                 ..RuntimeCapabilities::default()
             })
             .unwrap();
-        assert!(!plan.jit_enabled);
+        assert!(!plan.native_jit_enabled);
         assert!(plan.p12_required);
     }
 
@@ -229,7 +229,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(plan.native, NativeExecutionBackend::PrebuiltSignedArtifacts);
-        assert!(!plan.jit_enabled);
+        assert!(!plan.native_jit_enabled);
         assert!(!plan.p12_required);
     }
 }
