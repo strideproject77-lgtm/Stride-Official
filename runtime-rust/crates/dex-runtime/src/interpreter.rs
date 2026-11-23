@@ -989,7 +989,17 @@ impl<'a> ArtVm<'a> {
                     } else if op == 0x62 {
                         rf.write_object(a8, val.as_object().unwrap_or(0)).map_err(|e| format!("Invalid reg {}", e))?;
                     } else {
-                        rf.write_int(a8, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
+                        // DEX boolean/byte/char/short gets must normalize the value
+                        // to the source field width before placing it in a 32-bit register.
+                        let raw = val.as_int();
+                        let normalized = match op {
+                            0x63 => raw & 0x1,                 // sget-boolean
+                            0x64 => (raw as i8) as i32,        // sget-byte (sign extend)
+                            0x65 => (raw as u16) as i32,       // sget-char (zero extend)
+                            0x66 => (raw as i16) as i32,       // sget-short (sign extend)
+                            _ => raw,                         // sget
+                        };
+                        rf.write_int(a8, normalized).map_err(|e| format!("Invalid reg {}", e))?;
                     }
                     pc += 2;
                 }
@@ -1004,7 +1014,15 @@ impl<'a> ArtVm<'a> {
                     } else if op == 0x69 {
                         Value::Object(rf.read_object(a8).map_err(|e| format!("Invalid reg {}", e))?)
                     } else {
-                        Value::Int(rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?)
+                        let raw = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                        let normalized = match op {
+                            0x6a => raw & 0x1,                 // sput-boolean
+                            0x6b => (raw as i8) as i32,        // sput-byte
+                            0x6c => (raw as u16) as i32,       // sput-char
+                            0x6d => (raw as i16) as i32,       // sput-short
+                            _ => raw,                         // sput
+                        };
+                        Value::Int(normalized)
                     };
                     self.write_static_field(key, val);
                     pc += 2;
@@ -3027,6 +3045,64 @@ mod tests {
             other => panic!("new-instance returned an unexpected result: {:?}", other),
         };
         assert_eq!(heap.get(object_id).unwrap().class_descriptor(), "Ltest/Allocated;");
+    }
+
+    #[test]
+    fn static_field_narrow_opcodes_apply_dalvik_sign_and_zero_extension() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([
+            (1u32, MethodCode {
+                class_descriptor: "Ltest/NarrowFields;".into(),
+                name: "byteRoundTrip".into(),
+                prototype: "()I".into(),
+                // const/4 v0, -1; sput-byte v0, field@0; sget-byte v1, field@0; return v1
+                code_units: vec![0xf012, 0x006b, 0x0000, 0x0164, 0x0000, 0x010f],
+                registers_size: 2, ins_size: 0, try_blocks: vec![],
+            }),
+            (2u32, MethodCode {
+                class_descriptor: "Ltest/NarrowFields;".into(),
+                name: "charRoundTrip".into(),
+                prototype: "()I".into(),
+                // const/4 v0, -1; sput-char v0, field@1; sget-char v1, field@1; return v1
+                code_units: vec![0xf012, 0x006c, 0x0001, 0x0165, 0x0001, 0x010f],
+                registers_size: 2, ins_size: 0, try_blocks: vec![],
+            }),
+            (3u32, MethodCode {
+                class_descriptor: "Ltest/NarrowFields;".into(),
+                name: "shortRoundTrip".into(),
+                prototype: "()I".into(),
+                // const/4 v0, -1; sput-short v0, field@2; sget-short v1, field@2; return v1
+                code_units: vec![0xf012, 0x006d, 0x0002, 0x0166, 0x0002, 0x010f],
+                registers_size: 2, ins_size: 0, try_blocks: vec![],
+            }),
+            (4u32, MethodCode {
+                class_descriptor: "Ltest/NarrowFields;".into(),
+                name: "booleanRoundTrip".into(),
+                prototype: "()I".into(),
+                // const/4 v0, -1; sput-boolean v0, field@3; sget-boolean v1, field@3; return v1
+                code_units: vec![0xf012, 0x006a, 0x0003, 0x0163, 0x0003, 0x010f],
+                registers_size: 2, ins_size: 0, try_blocks: vec![],
+            }),
+        ]);
+        let types = Vec::new();
+        let fields = vec![
+            FieldReference { field_index: 0, class_descriptor: "Ltest/NarrowFields;".into(), name: "byteValue".into(), field_type: "B".into() },
+            FieldReference { field_index: 1, class_descriptor: "Ltest/NarrowFields;".into(), name: "charValue".into(), field_type: "C".into() },
+            FieldReference { field_index: 2, class_descriptor: "Ltest/NarrowFields;".into(), name: "shortValue".into(), field_type: "S".into() },
+            FieldReference { field_index: 3, class_descriptor: "Ltest/NarrowFields;".into(), name: "booleanValue".into(), field_type: "Z".into() },
+        ];
+        let mut static_fields = HashMap::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_static_fields(&mut static_fields);
+
+        assert_eq!(vm.execute_method(1, &[], 32).unwrap().stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(-1)));
+        assert_eq!(vm.execute_method(2, &[], 32).unwrap().stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(65535)));
+        assert_eq!(vm.execute_method(3, &[], 32).unwrap().stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(-1)));
+        assert_eq!(vm.execute_method(4, &[], 32).unwrap().stop_reason, ExecutionStopReason::ReturnedValue(Value::Int(1)));
     }
 
     #[test]
