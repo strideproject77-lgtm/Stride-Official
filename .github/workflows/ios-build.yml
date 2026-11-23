@@ -6,7 +6,7 @@ on:
       - main
   push:
     branches:
-      - feat/dex-class-method-loader
+      - main
   workflow_dispatch:
     inputs:
       build_ipa:
