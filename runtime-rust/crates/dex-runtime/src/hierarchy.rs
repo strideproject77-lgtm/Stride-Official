@@ -282,6 +282,29 @@ impl ClassHierarchy {
         };
         self.register_class(set_interface);
 
+        // List is a Collection; ArrayList instances must pass AndroidX casts
+        // to List/Collection/Iterable during Activity construction.
+        let list_interface = RuntimeClass {
+            descriptor: "Ljava/util/List;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec!["Ljava/util/Collection;".into()],
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        };
+        self.register_class(list_interface);
+
+        self.register_class(RuntimeClass {
+            descriptor: "Ljava/util/RandomAccess;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: Vec::new(),
+            access_flags: 0x0601,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        });
+
         for descriptor in ["Ljava/lang/Cloneable;", "Ljava/io/Serializable;"] {
             self.register_class(RuntimeClass {
                 descriptor: descriptor.into(),
@@ -301,6 +324,23 @@ impl ClassHierarchy {
                 "Ljava/util/Set;".into(),
                 "Ljava/lang/Cloneable;".into(),
                 "Ljava/io/Serializable;".into(),
+            ],
+            access_flags: 0x0001,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        });
+
+        // ArrayList is a concrete List, not a Set. The managed ArrayList
+        // intrinsic allocates objects with this exact runtime descriptor.
+        self.register_class(RuntimeClass {
+            descriptor: "Ljava/util/ArrayList;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec![
+                "Ljava/util/List;".into(),
+                "Ljava/lang/Cloneable;".into(),
+                "Ljava/io/Serializable;".into(),
+                "Ljava/util/RandomAccess;".into(),
             ],
             access_flags: 0x0001,
             fields: HashMap::new(),
@@ -384,6 +424,23 @@ mod tests {
 
         assert!(!hierarchy.is_assignable_from("Ljava/util/List;", concrete));
         assert!(!hierarchy.is_assignable_from(concrete, "Ljava/util/Set;"));
+    }
+
+    #[test]
+    fn array_list_is_assignable_to_list_collection_iterable_and_object() {
+        let hierarchy = ClassHierarchy::new();
+        let concrete = "Ljava/util/ArrayList;";
+
+        assert!(hierarchy.is_assignable_from("Ljava/util/List;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/util/Collection;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Iterable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/util/RandomAccess;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Cloneable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/io/Serializable;", concrete));
+        assert!(hierarchy.is_assignable_from("Ljava/lang/Object;", concrete));
+
+        assert!(!hierarchy.is_assignable_from("Ljava/util/Set;", concrete));
+        assert!(!hierarchy.is_assignable_from(concrete, "Ljava/util/List;"));
     }
 
     #[test]
