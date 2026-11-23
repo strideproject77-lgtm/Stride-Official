@@ -201,7 +201,8 @@ mod code_item_tests {
   b[tr+6..tr+8].copy_from_slice(&1u16.to_le_bytes());
   // Handler list: one handler, one typed catch (type 0 -> address 0).
   b[tr+8..tr+12].copy_from_slice(&[1,1,0,0]);
-  assert!(read_code_item(&b,0x70).is_ok());
+  let parsed = read_code_item(&b,0x70).unwrap();
+  assert_eq!(parsed.try_blocks, vec![RawTryBlock { start_pc: 0, end_pc: 2, handlers: vec![RawCatchHandler { type_index: Some(0), target_pc: 0 }] }]);
 
   let mut bad_range=b.clone();
   bad_range[tr..tr+4].copy_from_slice(&1u32.to_le_bytes());
@@ -220,8 +221,23 @@ mod code_item_tests {
   let mut bad_address=b.clone();
   bad_address[tr+11]=2;
   assert_eq!(read_code_item(&bad_address,0x70),Err(CodeItemError::InvalidHandlerAddress));
+  }
+
+  #[test] fn parses_catch_all_handler_entries() {
+   let mut b=vec![0u8;0x70+16+4+8+3];
+   let o=0x70;
+   b[o+6..o+8].copy_from_slice(&1u16.to_le_bytes());
+   b[o+12..o+16].copy_from_slice(&2u32.to_le_bytes());
+   b[o+16..o+18].copy_from_slice(&0x000eu16.to_le_bytes()); // return-void
+   let tr=o+16+4;
+   b[tr..tr+4].copy_from_slice(&0u32.to_le_bytes());
+   b[tr+4..tr+6].copy_from_slice(&2u16.to_le_bytes());
+   b[tr+6..tr+8].copy_from_slice(&1u16.to_le_bytes());
+   b[tr+8..tr+11].copy_from_slice(&[1,0,0]); // one catch-all at code-unit zero
+   let parsed=read_code_item(&b,0x70).unwrap();
+   assert_eq!(parsed.try_blocks[0].handlers, vec![RawCatchHandler { type_index: None, target_pc: 0 }]);
+  }
  }
-}
 
 
 // Dalvik instruction stream decoding. This is structural decoding only: no verifier,
