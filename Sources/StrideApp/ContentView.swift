@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var quickLaunchPackagePath: String?
     @State private var selectedTab = 0
     @AppStorage("stride.homeExperience") private var homeExperience = "ios"
-    @AppStorage("stride.iosHome.wallpaper") private var iosHomeWallpaper = "dusk"
+    @AppStorage("stride.iosHome.wallpaper") private var iosHomeWallpaper = "iphone"
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
     @State private var isImporting = false
