@@ -644,4 +644,20 @@ mod tests {
         assert_eq!(canvas.surface.get_pixel(5, 2), Some(0xff000000));
     }
 
+    #[test]
+    fn canvas_draws_rounded_rect_stroke_without_filling_center() {
+        let mut surface = Surface::new(24, 24);
+        let mut canvas = Canvas::new(&mut surface);
+        let mut paint = Paint::new();
+        paint.color = 0xff12abef;
+        paint.style = PaintStyle::Stroke;
+        paint.stroke_width = 2.0;
+
+        canvas.draw_round_rect(RectF::new(2.0, 2.0, 22.0, 22.0), 6.0, 6.0, &paint);
+
+        assert_eq!(canvas.surface.get_pixel(12, 12), Some(0xff000000));
+        assert_eq!(canvas.surface.get_pixel(12, 2), Some(0xff12abef));
+        assert_eq!(canvas.surface.get_pixel(0, 0), Some(0xff000000));
+    }
+
 }
