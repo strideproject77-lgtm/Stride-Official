@@ -52,6 +52,32 @@ fn register(registry: &mut JniNativeRegistry) {
         append(env, canvas, 1, &[Value::Int(int(args, 1, 0))])?;
         Ok(None)
     });
+    registry.register("Landroid/graphics/Canvas;", "drawRoundRect", "(Landroid/graphics/RectF;FFLandroid/graphics/Paint;)V", |env, args| {
+        let canvas = receiver(args)?;
+        let rect = args.get(1).and_then(Value::as_object).ok_or("Canvas.drawRoundRect RectF is null")?;
+        let paint = args.get(4).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
+        let color = env.get_object_field(paint, "mColor")?;
+        let left = env.get_object_field(rect, "left")?.as_float();
+        let top = env.get_object_field(rect, "top")?.as_float();
+        let right = env.get_object_field(rect, "right")?.as_float();
+        let bottom = env.get_object_field(rect, "bottom")?.as_float();
+        append(env, canvas, 12, &[
+            Value::Float(left), Value::Float(top), Value::Float(right), Value::Float(bottom),
+            Value::Float(float(args, 2)), Value::Float(float(args, 3)), color,
+        ])?;
+        Ok(None)
+    });
+    registry.register("Landroid/graphics/Canvas;", "drawRoundRect", "(FFFFFFLandroid/graphics/Paint;)V", |env, args| {
+        let canvas = receiver(args)?;
+        let paint = args.get(6).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
+        let color = env.get_object_field(paint, "mColor")?;
+        append(env, canvas, 12, &[
+            Value::Float(float(args, 1)), Value::Float(float(args, 2)),
+            Value::Float(float(args, 3)), Value::Float(float(args, 4)),
+            Value::Float(float(args, 5)), Value::Float(float(args, 6)), color,
+        ])?;
+        Ok(None)
+    });
     registry.register("Landroid/graphics/Canvas;", "drawRect", "(FFFFLandroid/graphics/Paint;)V", |env, args| {
         let canvas = receiver(args)?;
         let paint = args.get(5).and_then(Value::as_object).ok_or("Canvas.drawRect Paint is null")?;
@@ -223,4 +249,29 @@ pub(crate) fn record_bitmap_draw_bounds(
 
 pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
     register(registry);
+    #[test]
+    fn records_guest_draw_round_rect_with_rect_and_radii() {
+        let mut registry = JniNativeRegistry::new();
+        register(&mut registry);
+        let mut heap = ManagedHeap::default();
+        let canvas = heap.allocate_instance("Landroid/graphics/Canvas;").unwrap();
+        let rect = heap.allocate_instance("Landroid/graphics/RectF;").unwrap();
+        let paint = heap.allocate_instance("Landroid/graphics/Paint;").unwrap();
+        heap.set_instance_field(rect, "left", Value::Float(1.0)).unwrap();
+        heap.set_instance_field(rect, "top", Value::Float(2.0)).unwrap();
+        heap.set_instance_field(rect, "right", Value::Float(30.0)).unwrap();
+        heap.set_instance_field(rect, "bottom", Value::Float(40.0)).unwrap();
+        heap.set_instance_field(paint, "mColor", Value::Int(0xff123456u32 as i32)).unwrap();
+        let draw = registry.find("Landroid/graphics/Canvas;", "drawRoundRect",
+            "(Landroid/graphics/RectF;FFLandroid/graphics/Paint;)V").unwrap().clone();
+        draw(&mut JniEnv::new(&mut heap), &[
+            Value::Object(canvas), Value::Object(rect), Value::Float(5.0),
+            Value::Float(6.0), Value::Object(paint),
+        ]).unwrap();
+        assert_eq!(recorded_command_count(&heap, canvas).unwrap(), 1);
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Type").unwrap(), Value::Int(12));
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg4").unwrap(), Value::Float(5.0));
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(), Value::Int(0xff123456u32 as i32));
+    }
+
 }
