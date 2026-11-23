@@ -490,6 +490,21 @@ mod tests {
     }
 
     #[test]
+    fn compiles_and_installs_dex_method_through_authorized_host() {
+        let mut host = MockHost {
+            authorized: true,
+            ..MockHost::default()
+        };
+        // const/4 v1, 3; const/4 v2, 4; add-int v0, v1, v2; return v0
+        let installed = AuthorizedJitBackend
+            .compile_and_install(&mut host, &[0x3112, 0x4212, 0x0090, 0x0201, 0x000f], 3)
+            .unwrap();
+        assert_eq!(installed.code.region, CodeRegion(7));
+        assert_eq!(installed.dex_instructions, 4);
+        assert!(host.wrote && host.sealed && host.cache_synced);
+    }
+
+    #[test]
     fn rejects_invalid_artifacts_before_requesting_authorization() {
         let mut host = MockHost::default();
         let empty = AuthorizedJitBackend.install(
