@@ -1865,9 +1865,19 @@ impl AndroidRuntime {
             let count = field("mChildCount")?.as_int().clamp(0, 4096) as usize;
             if count == 0 { return Ok(()); }
 
+            let padding_left = field("mPaddingLeft").map(|value| value.as_int().max(0) as f32).unwrap_or(0.0);
+            let padding_top = field("mPaddingTop").map(|value| value.as_int().max(0) as f32).unwrap_or(0.0);
+            let padding_right = field("mPaddingRight").map(|value| value.as_int().max(0) as f32).unwrap_or(0.0);
+            let padding_bottom = field("mPaddingBottom").map(|value| value.as_int().max(0) as f32).unwrap_or(0.0);
+            let content_bounds = RectF::new(
+                (bounds.left + padding_left).min(bounds.right),
+                (bounds.top + padding_top).min(bounds.bottom),
+                (bounds.right - padding_right).max(bounds.left + padding_left),
+                (bounds.bottom - padding_bottom).max(bounds.top + padding_top),
+            );
             let orientation = field("mOrientation")?.as_int();
             let vertical = orientation != 0;
-            let main_extent = if vertical { bounds.height() } else { bounds.width() };
+            let main_extent = if vertical { content_bounds.height() } else { content_bounds.width() };
             let mut weighted_total = 0.0f32;
             let mut weights = Vec::with_capacity(count);
             for index in 0..count {
@@ -1883,7 +1893,7 @@ impl AndroidRuntime {
                 weights.push((child_id, weight));
             }
 
-            let mut cursor = if vertical { bounds.top } else { bounds.left };
+            let mut cursor = if vertical { content_bounds.top } else { content_bounds.left };
             let mut remaining = main_extent;
             let mut remaining_weight = weighted_total;
             let equal_segment = main_extent / count as f32;
@@ -1906,17 +1916,17 @@ impl AndroidRuntime {
                 let bottom = read_margin("mMarginBottom");
                 let child_bounds = if vertical {
                     RectF::new(
-                        bounds.left + left,
+                        content_bounds.left + left,
                         cursor + top,
-                        (bounds.right - right).max(bounds.left + left),
+                        (content_bounds.right - right).max(content_bounds.left + left),
                         cursor + extent - bottom,
                     )
                 } else {
                     RectF::new(
                         cursor + left,
-                        bounds.top + top,
+                        content_bounds.top + top,
                         cursor + extent - right,
-                        (bounds.bottom - bottom).max(bounds.top + top),
+                        (content_bounds.bottom - bottom).max(content_bounds.top + top),
                     )
                 };
                 draw(heap, resources, images, canvas, child_id, child_bounds, depth + 1, seen, stats, bounds_out)?;
