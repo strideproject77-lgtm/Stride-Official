@@ -95,14 +95,18 @@ workflows:
           echo "Source commit: ${CM_COMMIT:-unknown}"
           echo "Codemagic build: ${CM_BUILD_NUMBER:-unknown}"
 
+          # Install Rust with the official rustup bootstrapper.
+          # Homebrew's current rustup formula is keg-only and no longer ships rustup-init.
+          export PATH="$HOME/.cargo/bin:$PATH"
           if ! command -v rustup >/dev/null 2>&1; then
-            brew install rustup-init
-            rustup-init -y --profile minimal --default-toolchain stable
+            echo "Rustup not found; installing with the official installer."
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
-          export PATH="$HOME/.cargo/bin:$PATH"
-          rustup toolchain install stable
-          rustup target add aarch64-apple-ios
+          command -v rustup
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios --toolchain stable
+          rustup default stable
           rustc --version
           cargo --version
 
