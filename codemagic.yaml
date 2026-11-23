@@ -66,7 +66,7 @@ workflows:
                       text = pattern.sub(replacement, text)
                   parts.append("\n========== " + path.name + " ==========\n" + text + "\n")
           output.write_text("".join(parts))
-PY
+          PY
               git checkout --orphan stride-codemagic-logs >/dev/null 2>&1
               git rm -rf --ignore-unmatch . >/dev/null 2>&1
               cp "$LATEST_TMP" "$ROOT/latest"
