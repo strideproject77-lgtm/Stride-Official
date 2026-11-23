@@ -876,7 +876,15 @@ impl<'a> ArtVm<'a> {
                     let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
                     let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
                     let val = self.heap.get_array_element(arr_id, idx).map_err(|e| format!("{:?}", e))?;
-                    rf.write_int(a8, val.as_int()).map_err(|e| format!("Invalid reg {}", e))?;
+                    let raw = val.as_int();
+                    let normalized = match op {
+                        0x47 => raw & 0x1,          // aget-boolean
+                        0x48 => (raw as i8) as i32, // aget-byte
+                        0x49 => (raw as u16) as i32,// aget-char
+                        0x4a => (raw as i16) as i32,// aget-short
+                        _ => raw,                   // aget
+                    };
+                    rf.write_int(a8, normalized).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
                 0x45 => { // aget-wide
@@ -905,8 +913,15 @@ impl<'a> ArtVm<'a> {
                     let idx_reg = (second >> 8) as u16;
                     let arr_id = rf.read_object(arr_reg).map_err(|e| format!("Invalid reg {}", e))?;
                     let idx = rf.read_int(idx_reg).map_err(|e| format!("Invalid reg {}", e))?;
-                    let val = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
-                    self.heap.set_array_element(arr_id, idx, Value::Int(val)).map_err(|e| format!("{:?}", e))?;
+                    let raw = rf.read_int(a8).map_err(|e| format!("Invalid reg {}", e))?;
+                    let normalized = match op {
+                        0x4e => raw & 0x1,          // aput-boolean
+                        0x4f => (raw as i8) as i32, // aput-byte
+                        0x50 => (raw as u16) as i32,// aput-char
+                        0x51 => (raw as i16) as i32,// aput-short
+                        _ => raw,                   // aput
+                    };
+                    self.heap.set_array_element(arr_id, idx, Value::Int(normalized)).map_err(|e| format!("{:?}", e))?;
                     pc += 2;
                 }
                 0x4c => { // aput-wide
@@ -3802,6 +3817,56 @@ mod tests {
             vm.execute_method(3, &[Value::Object(set), Value::Object(first)], 16).unwrap().stop_reason,
             ExecutionStopReason::ReturnedValue(Value::Int(0))
         );
+    }
+
+    #[test]
+    fn narrow_array_opcodes_apply_dalvik_sign_and_zero_extension() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let mut methods = HashMap::new();
+        let types = vec!["[Z".to_string(), "[B".to_string(), "[C".to_string(), "[S".to_string()];
+        let cases = [
+            (0x4e_u16, 0x47_u16, 1_i32),       // boolean
+            (0x4f, 0x48, -1),                  // byte
+            (0x50, 0x49, 65_535),              // char
+            (0x51, 0x4a, -1),                  // short
+        ];
+
+        for (index, (put_opcode, get_opcode, expected)) in cases.iter().enumerate() {
+            let code = vec![
+                0xf012,                         // const/4 v0, -1
+                0x1112,                         // const/4 v1, 1
+                0x1223, index as u16,           // new-array v2, v1, type@index
+                0x0312,                         // const/4 v3, 0
+                *put_opcode, 0x0302,            // aput-typed v0, v2, v3
+                0x0447 + (*get_opcode - 0x47), 0x0302, // aget-typed v4, v2, v3
+                0x040f,                         // return v4
+            ];
+            methods.insert(index as u32 + 1, MethodCode {
+                class_descriptor: "Ltest/NarrowArray;".into(),
+                name: "roundTrip".into(),
+                prototype: "()I".into(),
+                code_units: code,
+                registers_size: 5,
+                ins_size: 0,
+                try_blocks: Vec::new(),
+            });
+            let _ = expected;
+        }
+
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &[]);
+        for (index, (_, _, expected)) in cases.iter().enumerate() {
+            let report = vm.execute_method(index as u32 + 1, &[], 32).unwrap();
+            assert_eq!(
+                report.stop_reason,
+                ExecutionStopReason::ReturnedValue(Value::Int(*expected)),
+                "narrow array roundtrip case {}",
+                index
+            );
+        }
     }
 
 }
