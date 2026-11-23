@@ -1994,6 +1994,38 @@ impl<'a> ArtVm<'a> {
                         }
                     }
 
+                    // AtomicInteger's no-argument constructor initializes its value to 0.
+                    // Managed allocations are zero-initialized, so this exact signature can
+                    // safely complete without a Java method body. Other constructors/methods
+                    // still require their own implementation.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/concurrent/atomic/AtomicInteger;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for AtomicInteger.<init>()V at PC {}: {:?}",
+                                    pc, error
+                                ))?;
+                                self.heap.set_instance_field(*receiver, "value", Value::Int(0))
+                                    .map_err(|error| format!(
+                                        "AtomicInteger default value initialization failed: {:?}",
+                                        error
+                                    ))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic AtomicInteger.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
+
                     // Minimal managed HashMap operations used by AndroidX's
                     // FastSafeIterableMap. Keys are managed object identities; this
                     // intentionally does not pretend to implement arbitrary Java
@@ -3228,6 +3260,85 @@ mod tests {
 
         let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
         assert!(error.contains("Invalid null receiver for intrinsic AtomicReference.<init>()V"));
+    }
+
+    #[test]
+    fn atomic_integer_no_arg_constructor_intrinsic_initializes_zero() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let receiver = heap.allocate_instance("Ljava/util/concurrent/atomic/AtomicInteger;").unwrap();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/AtomicIntegerCaller;".into(),
+                name: "construct".into(),
+                prototype: "(Ljava/util/concurrent/atomic/AtomicInteger;)V".into(),
+                // invoke-direct {v0}, AtomicInteger.<init>()V; return-void.
+                code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+                registers_size: 1,
+                ins_size: 1,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/util/concurrent/atomic/AtomicInteger;".into(),
+            name: "<init>".into(),
+            prototype: "()V".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[Value::Object(receiver)], 16)
+            .expect("AtomicInteger no-arg constructor should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+        drop(vm);
+        assert_eq!(
+            heap.get_instance_field(receiver, "value").unwrap(),
+            Value::Int(0)
+        );
+    }
+
+    #[test]
+    fn atomic_integer_no_arg_constructor_intrinsic_rejects_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/AtomicIntegerCaller;".into(),
+                name: "construct".into(),
+                prototype: "()V".into(),
+                // invoke-direct {v0}, AtomicInteger.<init>()V; return-void.
+                code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/util/concurrent/atomic/AtomicInteger;".into(),
+            name: "<init>".into(),
+            prototype: "()V".into(),
+        }];
+        let lookup = HashMap::new();
+        let types = Vec::new();
+        let fields = Vec::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &fields);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let error = vm.execute_method(1, &[], 16).expect_err("null constructor receiver must fail");
+        assert!(error.contains("Invalid null receiver for intrinsic AtomicInteger.<init>()V"));
     }
 
     #[test]
