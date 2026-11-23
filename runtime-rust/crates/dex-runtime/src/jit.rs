@@ -120,6 +120,187 @@ impl AuthorizedJitBackend {
     }
 }
 
+/// Result of compiling a restricted, straight-line DEX method to ARM64.
+///
+/// The bytes are compiler output only. They are not executable until an
+/// authorized platform host installs them through AuthorizedJitBackend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledDexMethod {
+    pub architecture: JitArchitecture,
+    pub code: Vec<u8>,
+    pub entry_offset: usize,
+    pub dex_instructions: usize,
+}
+
+impl CompiledDexMethod {
+    pub fn artifact(&self) -> JitArtifact<'_> {
+        JitArtifact {
+            architecture: self.architecture,
+            bytes: &self.code,
+            entry_offset: self.entry_offset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JitCompileError {
+    EmptyMethod,
+    InvalidRegisterCount(usize),
+    TruncatedInstruction { pc: usize },
+    InvalidRegister { pc: usize, register: usize },
+    UnsupportedOpcode { pc: usize, opcode: u8 },
+    MissingReturn,
+}
+
+fn emit_word(code: &mut Vec<u8>, instruction: u32) {
+    code.extend_from_slice(&instruction.to_le_bytes());
+}
+
+fn emit_mov_imm32(code: &mut Vec<u8>, register: u8, value: i32) {
+    let bits = value as u32;
+    emit_word(code, 0x5280_0000 | ((bits & 0xffff) << 5) | register as u32);
+    if bits >> 16 != 0 {
+        emit_word(code, 0x72a0_0000 | (((bits >> 16) & 0xffff) << 5) | register as u32);
+    }
+}
+
+fn emit_mov_register(code: &mut Vec<u8>, destination: u8, source: u8) {
+    // ORR Wd, WZR, Wm (the AArch64 MOV register alias).
+    emit_word(code, 0x2a00_03e0 | ((source as u32) << 16) | destination as u32);
+}
+
+/// Compile a small integer-only DEX method into an AArch64 leaf function.
+///
+/// ABI: int32_t entry(const uint32_t *dex_registers). The entry loads the
+/// method's register file, executes supported const/add/sub/mul/return
+/// instructions, and returns the selected DEX register in W0. Calls, branches,
+/// object operations, and exception edges intentionally fall back to the
+/// interpreter until their semantics have dedicated compiler support.
+pub fn compile_dex_method(
+    code_units: &[u16],
+    registers_size: usize,
+) -> Result<CompiledDexMethod, JitCompileError> {
+    if code_units.is_empty() {
+        return Err(JitCompileError::EmptyMethod);
+    }
+    if registers_size == 0 || registers_size > 16 {
+        return Err(JitCompileError::InvalidRegisterCount(registers_size));
+    }
+
+    let mut code = Vec::new();
+    // Preserve the incoming register-file pointer in X16 before loading W0.
+    emit_word(&mut code, 0xaa00_03f0);
+    for register in 0..registers_size {
+        // LDR Wt, [X16, #register * 4] (unsigned scaled immediate).
+        let byte_offset = register * 4;
+        emit_word(
+            &mut code,
+            0xb940_0000
+                | (((byte_offset / 4) as u32) << 10)
+                | (16 << 5)
+                | register as u32,
+        );
+    }
+
+    let mut pc = 0usize;
+    let mut instruction_count = 0usize;
+    let mut returned = false;
+    while pc < code_units.len() {
+        let first = code_units[pc];
+        let opcode = (first & 0xff) as u8;
+        let a8 = (first >> 8) as u8;
+        let a4 = a8 & 0x0f;
+        let mut width = 1usize;
+
+        let check_register = |register: usize| {
+            if register >= registers_size || register >= 16 {
+                Err(JitCompileError::InvalidRegister { pc, register })
+            } else {
+                Ok(register as u8)
+            }
+        };
+
+        match opcode {
+            0x12 => { // const/4 vA, #+B
+                let register = check_register(a4 as usize)?;
+                let literal = ((first >> 12) & 0x0f) as i8;
+                let literal = if literal & 0x08 != 0 { literal - 16 } else { literal };
+                emit_mov_imm32(&mut code, register, literal as i32);
+            }
+            0x13 => { // const/16 vAA, #+BBBB
+                if pc + 1 >= code_units.len() {
+                    return Err(JitCompileError::TruncatedInstruction { pc });
+                }
+                width = 2;
+                let register = check_register(a8 as usize)?;
+                emit_mov_imm32(&mut code, register, code_units[pc + 1] as i16 as i32);
+            }
+            0x14 => { // const vAA, #+BBBBBBBB
+                if pc + 2 >= code_units.len() {
+                    return Err(JitCompileError::TruncatedInstruction { pc });
+                }
+                width = 3;
+                let register = check_register(a8 as usize)?;
+                let value = (code_units[pc + 1] as u32)
+                    | ((code_units[pc + 2] as u32) << 16);
+                emit_mov_imm32(&mut code, register, value as i32);
+            }
+            0x90 | 0x91 | 0x92 => { // add-int, sub-int, mul-int (23x)
+                if pc + 1 >= code_units.len() {
+                    return Err(JitCompileError::TruncatedInstruction { pc });
+                }
+                width = 2;
+                let destination = check_register(a8 as usize)?;
+                let sources = code_units[pc + 1];
+                let left = check_register((sources & 0xff) as usize)?;
+                let right = check_register((sources >> 8) as usize)?;
+                let base = match opcode {
+                    0x90 => 0x0b00_0000, // ADD Wd, Wn, Wm
+                    0x91 => 0x4b00_0000, // SUB Wd, Wn, Wm
+                    _ => 0x1b00_7c00,    // MUL Wd, Wn, Wm (MADD with WZR)
+                };
+                emit_word(
+                    &mut code,
+                    base | ((right as u32) << 16)
+                        | ((left as u32) << 5)
+                        | destination as u32,
+                );
+            }
+            0x0f => { // return vAA
+                let register = check_register(a8 as usize)?;
+                if register != 0 {
+                    emit_mov_register(&mut code, 0, register);
+                }
+                emit_word(&mut code, 0xd65f_03c0); // RET
+                returned = true;
+                instruction_count += 1;
+                break;
+            }
+            0x0e => { // return-void
+                emit_mov_imm32(&mut code, 0, 0);
+                emit_word(&mut code, 0xd65f_03c0);
+                returned = true;
+                instruction_count += 1;
+                break;
+            }
+            _ => return Err(JitCompileError::UnsupportedOpcode { pc, opcode }),
+        }
+        pc += width;
+        instruction_count += 1;
+    }
+
+    if !returned {
+        return Err(JitCompileError::MissingReturn);
+    }
+
+    Ok(CompiledDexMethod {
+        architecture: JitArchitecture::Arm64,
+        code,
+        entry_offset: 0,
+        dex_instructions: instruction_count,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
