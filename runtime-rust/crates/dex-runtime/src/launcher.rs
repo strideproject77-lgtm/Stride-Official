@@ -2433,6 +2433,64 @@ impl AndroidRuntime {
         }
     }
 
+    /// Advances app-owned custom Views that expose a no-argument tick() method.
+    /// The iOS CADisplayLink calls pump_guest_events every frame, so this is the
+    /// managed frame callback for games such as 2048 that update animation state
+    /// outside onDraw().
+    fn tick_guest_custom_views(&mut self, step_budget: usize) -> Result<bool, String> {
+        let candidates = self.rendered_view_bounds.clone();
+        let method_map = self.class_loader.export_method_codes();
+        let metadata = self.class_loader.dex_inventories.first().cloned();
+        let strings = metadata.as_ref()
+            .map(|inventory| inventory.strings.as_slice()).unwrap_or(&[]);
+        let mut ticked = false;
+
+        for (view_id, _) in candidates {
+            let descriptor = self.heap.get(view_id)
+                .map_err(|error| format!("Guest frame View lookup failed: {:?}", error))?
+                .class_descriptor().to_owned();
+            if descriptor.starts_with("Landroid/") {
+                continue;
+            }
+            let Some(method_id) = self.class_loader.find_method(&descriptor, "tick", "()V") else {
+                continue;
+            };
+            let mut vm = ArtVm::new(
+                &mut self.heap, &mut self.hierarchy, &mut self.monitors,
+                &mut self.jni, &method_map, strings,
+            );
+            vm.attach_diagnostics(&self.diagnostics);
+            vm.attach_static_fields(&mut self.static_fields);
+            vm.attach_multi_dex_metadata(
+                &self.class_loader.dex_inventories,
+                &self.class_loader.method_dex_indices,
+            );
+            if let Some(inventory) = metadata.as_ref() {
+                vm.attach_dex_metadata(&inventory.type_descriptors, &inventory.field_references);
+                vm.attach_method_resolver(&inventory.method_references, &self.class_loader.method_lookup);
+            }
+            let report = vm.execute_method(
+                method_id,
+                &[Value::Object(view_id)],
+                step_budget.max(1),
+            ).map_err(|error| format!("Guest {}.tick interpreter error: {}", descriptor, error))?;
+            match report.stop_reason {
+                ExecutionStopReason::UncaughtException(exception) => {
+                    return Err(format!(
+                        "Guest {}.tick threw {}: {:?}",
+                        descriptor, exception.class_descriptor, exception.message
+                    ));
+                }
+                ExecutionStopReason::StepLimitExceeded => {
+                    return Err(format!("Guest {}.tick exceeded its frame instruction budget", descriptor));
+                }
+                _ => {}
+            }
+            ticked = true;
+        }
+        Ok(ticked)
+    }
+
     /// Pumps queued Android touch events on the host display-link cadence.
     /// Activity touch overrides run first; when they do not consume the gesture,
     /// ordinary View.setOnClickListener callbacks receive matching down/up taps.
@@ -2646,9 +2704,13 @@ impl AndroidRuntime {
                 delivered += 1;
             }
         }
-        if had_events {
+        // CADisplayLink invokes this pump every host frame, including frames
+        // without touch input. Advance guest animation/game-loop callbacks before
+        // redrawing so custom Views such as 2048's MainView can update continuously.
+        let guest_frame_ticked = self.tick_guest_custom_views(step_budget)?;
+        if had_events || guest_frame_ticked {
             self.render_active_activity_surface()
-                .map_err(|error| format!("Guest redraw after input failed: {error}"))?;
+                .map_err(|error| format!("Guest redraw after input/frame failed: {error}"))?;
             if let Some(enqueued_at) = latest_event_enqueued_at {
                 self.last_touch_processing_ms =
                     Some(enqueued_at.elapsed().as_secs_f64() as f32 * 1_000.0);
