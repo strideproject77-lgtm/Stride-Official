@@ -81,7 +81,7 @@ pub use handler::LooperCoordinator;
 pub use native_activity::NativeActivityLauncher;
 pub use arm64_guest::{run_aarch64, Arm64Cpu, Arm64Error, Arm64Flags, Arm64RunReport, Arm64StopReason, GuestMemory, MemoryProtection};
 pub use native_execution::{plan_guest_native_image, NativeExecutionError, NativeGuestImage, NativeImageReport, NativeLibraryStage, DEFAULT_GUEST_LOAD_BIAS, GUEST_NATIVE_STACK_SIZE};
-pub use jit::{compile_dex_method, AuthorizedJitBackend, AuthorizedJitHost, CodeRegion, CompiledDexMethod, InstalledCode, JitArchitecture, JitArtifact, JitCompileError, JitError, JitHostCapabilities};
+pub use jit::{compile_dex_method, AuthorizedJitBackend, AuthorizedJitHost, CodeRegion, CompiledDexMethod, InstalledCode, InstalledDexMethod, JitArchitecture, JitArtifact, JitCompileError, JitError, JitHostCapabilities, JitPipelineError};
 pub use mode::{ExecutionMode, ExecutionPlan, ManagedExecutionBackend, ModeError, NativeExecutionBackend, RuntimeCapabilities};
 
 use std::collections::{HashMap, HashSet};
