@@ -38,20 +38,50 @@ struct StrideIOSHomeScreen: View {
     private var wallpaperColors: [Color] {
         switch wallpaper {
         case "ocean":
-            return [Color(red: 0.025, green: 0.12, blue: 0.24), Color(red: 0.02, green: 0.035, blue: 0.12)]
+            return [Color(red: 0.025, green: 0.20, blue: 0.34), Color(red: 0.025, green: 0.045, blue: 0.19)]
         case "forest":
-            return [Color(red: 0.04, green: 0.19, blue: 0.15), Color(red: 0.015, green: 0.055, blue: 0.06)]
+            return [Color(red: 0.035, green: 0.23, blue: 0.19), Color(red: 0.012, green: 0.045, blue: 0.075)]
         case "black":
-            return [Color.black, Color(red: 0.025, green: 0.025, blue: 0.035)]
+            return [Color(red: 0.035, green: 0.045, blue: 0.085), Color.black]
+        case "dusk":
+            return [Color(red: 0.34, green: 0.17, blue: 0.27), Color(red: 0.055, green: 0.045, blue: 0.16)]
         default:
-            return [Color(red: 0.30, green: 0.14, blue: 0.19), Color(red: 0.055, green: 0.045, blue: 0.13)]
+            return [Color(red: 0.10, green: 0.24, blue: 0.56), Color(red: 0.28, green: 0.12, blue: 0.48)]
         }
+    }
+
+    private var wallpaperBackground: some View {
+        GeometryReader { geometry in
+            ZStack {
+                LinearGradient(colors: wallpaperColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(RadialGradient(colors: [Color(red: 0.38, green: 0.78, blue: 1).opacity(0.78), .clear],
+                                         center: .center, startRadius: 2, endRadius: geometry.size.width * 0.72))
+                    .frame(width: geometry.size.width * 1.15, height: geometry.size.width * 1.15)
+                    .blur(radius: 18)
+                    .offset(x: geometry.size.width * 0.34, y: -geometry.size.height * 0.25)
+                Ellipse()
+                    .fill(RadialGradient(colors: [Color(red: 0.78, green: 0.40, blue: 1).opacity(0.72), .clear],
+                                         center: .center, startRadius: 2, endRadius: geometry.size.width * 0.62))
+                    .frame(width: geometry.size.width * 1.1, height: geometry.size.height * 0.56)
+                    .blur(radius: 24)
+                    .offset(x: -geometry.size.width * 0.30, y: geometry.size.height * 0.23)
+                Ellipse()
+                    .fill(RadialGradient(colors: [Color.white.opacity(0.28), .clear],
+                                         center: .center, startRadius: 1, endRadius: geometry.size.width * 0.44))
+                    .frame(width: geometry.size.width * 0.9, height: geometry.size.height * 0.28)
+                    .blur(radius: 28)
+                    .offset(x: geometry.size.width * 0.12, y: geometry.size.height * 0.02)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+        }
+        .ignoresSafeArea()
     }
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: wallpaperColors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                .ignoresSafeArea()
+            wallpaperBackground
 
             VStack(spacing: 0) {
                 topControls
@@ -86,13 +116,24 @@ struct StrideIOSHomeScreen: View {
                 dock
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 27, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 27, style: .continuous)
-                            .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                    .background {
+                        RoundedRectangle(cornerRadius: 31, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 31, style: .continuous)
+                                    .fill(LinearGradient(
+                                        colors: [Color.white.opacity(0.13), Color.white.opacity(0.035), Color.black.opacity(0.08)],
+                                        startPoint: .topLeading, endPoint: .bottomTrailing
+                                    ))
+                            }
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 31, style: .continuous)
+                                    .stroke(Color.white.opacity(0.22), lineWidth: 0.9)
+                            }
+                            .shadow(color: .black.opacity(0.24), radius: 18, y: 8)
                     }
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, 17)
+                    .padding(.bottom, 7)
             }
         }
         .preferredColorScheme(.dark)
@@ -192,7 +233,7 @@ struct StrideIOSHomeScreen: View {
                         GeometryReader { geometry in
                             let horizontalInset: CGFloat = 17
                             let spacing: CGFloat = 9
-                            let iconSize = min(60, max(45, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
+                            let iconSize = min(62, max(56, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
                             LazyVGrid(columns: columns, alignment: .center, spacing: 19) {
                                 ForEach(entry.element) { item in
                                     appIcon(item, size: iconSize)
@@ -215,7 +256,7 @@ struct StrideIOSHomeScreen: View {
         Button { onSelect(item) } label: {
             VStack(spacing: 5) {
                 StrideLauncherIcon(data: item.iconData, accent: accent, size: size)
-                    .shadow(color: .black.opacity(0.22), radius: 4, y: 2)
+                    .shadow(color: .black.opacity(0.28), radius: 5, y: 2)
                 Text(item.displayName)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white)
@@ -257,8 +298,9 @@ struct StrideIOSHomeScreen: View {
         HStack(spacing: 0) {
             ForEach(dockPackages) { item in
                 Button { onSelect(item) } label: {
-                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 53)
+                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 58)
                         .frame(maxWidth: .infinity)
+                        .shadow(color: .black.opacity(0.26), radius: 5, y: 2)
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -339,9 +381,17 @@ private struct StrideLauncherIcon: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
-            .stroke(Color.white.opacity(0.12), lineWidth: 0.7))
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.235, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
+                .fill(LinearGradient(
+                    colors: [Color.white.opacity(0.10), .clear, Color.black.opacity(0.055)],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                ))
+                .allowsHitTesting(false)
+        }
+        .overlay(RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
+            .stroke(Color.white.opacity(0.14), lineWidth: 0.75))
     }
 }
 
