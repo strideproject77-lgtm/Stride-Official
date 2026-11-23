@@ -14,6 +14,7 @@ use crate::heap::ManagedHeap;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 use crate::types::Value;
+use crate::exceptions::{TryBlock, CatchHandler};
 use crate::diagnostics::{DiagnosticSeverity, RuntimeDiagnostics};
 
 /// Initialization state of a class in the runtime.
@@ -202,6 +203,32 @@ impl AppClassLoader {
                                 for chunk in item.instructions.chunks_exact(2) {
                                     units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
                                 }
+                                let mut try_blocks = Vec::with_capacity(item.try_blocks.len());
+                                for raw_block in &item.try_blocks {
+                                    let mut handlers = Vec::with_capacity(raw_block.handlers.len());
+                                    for raw_handler in &raw_block.handlers {
+                                        let catch_type = match raw_handler.type_index {
+                                            Some(type_index) => Some(
+                                                inventory.type_descriptors.get(type_index as usize)
+                                                    .cloned()
+                                                    .ok_or_else(|| format!(
+                                                        "Invalid catch type index {} in {}->{}{}",
+                                                        type_index, descriptor, m.name, m.prototype
+                                                    ))?
+                                            ),
+                                            None => None,
+                                        };
+                                        handlers.push(CatchHandler {
+                                            catch_type,
+                                            target_pc: raw_handler.target_pc,
+                                        });
+                                    }
+                                    try_blocks.push(TryBlock {
+                                        start_pc: raw_block.start_pc,
+                                        end_pc: raw_block.end_pc,
+                                        handlers,
+                                    });
+                                }
                                 Some(MethodCode {
                                     class_descriptor: descriptor.clone(),
                                     name: m.name.clone(),
@@ -209,7 +236,7 @@ impl AppClassLoader {
                                     code_units: units,
                                     registers_size: item.registers_size as usize,
                                     ins_size: item.ins_size as usize,
-                                    try_blocks: Vec::new(),
+                                    try_blocks,
                                 })
                             }
                         }
