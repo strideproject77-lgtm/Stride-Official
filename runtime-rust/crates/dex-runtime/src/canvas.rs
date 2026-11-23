@@ -639,8 +639,9 @@ mod tests {
         paint.color = 0xffff0000;
         canvas.draw_round_rect(RectF::new(2.0, 2.0, 18.0, 18.0), 6.0, 6.0, &paint);
         assert_eq!(canvas.surface.get_pixel(10, 10), Some(0xffff0000));
-        assert_eq!(canvas.surface.get_pixel(2, 2), Some(0x00000000));
-        assert_eq!(canvas.surface.get_pixel(5, 2), Some(0x00000000));
+        // Surface::new initializes untouched pixels to opaque black.
+        assert_eq!(canvas.surface.get_pixel(2, 2), Some(0xff000000));
+        assert_eq!(canvas.surface.get_pixel(5, 2), Some(0xff000000));
     }
 
 }
