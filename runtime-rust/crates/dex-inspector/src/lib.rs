@@ -19,6 +19,23 @@ pub struct CodeItem<'a> {
     pub insns_size: u32,
     pub instructions: &'a [u8],
     pub tries_offset: Option<usize>,
+    pub try_blocks: Vec<RawTryBlock>,
+}
+
+/// Parsed DEX exception handler. Type indexes are resolved against the owning DEX
+/// inventory by the runtime loader; None represents a catch-all handler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawCatchHandler {
+    pub type_index: Option<u32>,
+    pub target_pc: usize,
+}
+
+/// Parsed DEX try region, expressed in code-unit offsets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawTryBlock {
+    pub start_pc: usize,
+    pub end_pc: usize,
+    pub handlers: Vec<RawCatchHandler>,
 }
 
 fn u16le(b:&[u8], o:usize)->Result<u16,CodeItemError>{
@@ -60,36 +77,49 @@ fn read_sleb128(bytes: &[u8], offset: &mut usize) -> Result<i32, CodeItemError> 
     i32::try_from(value).map_err(|_| CodeItemError::InvalidHandlerList)
 }
 
-fn validate_handler_list(
+fn parse_handler_list(
     bytes: &[u8],
     list_start: usize,
     insns_size: u32,
     instruction_boundaries: &[usize],
-) -> Result<Vec<usize>, CodeItemError> {
+) -> Result<std::collections::HashMap<usize, Vec<RawCatchHandler>>, CodeItemError> {
     let mut cursor = list_start;
     let count = usize::try_from(read_uleb128(bytes, &mut cursor)?)
         .map_err(|_| CodeItemError::InvalidHandlerList)?;
-    if count == 0 { return Err(CodeItemError::InvalidHandlerList); }
-    let mut offsets = Vec::with_capacity(count.min(1024));
+    if count == 0 || count > 65_536 { return Err(CodeItemError::InvalidHandlerList); }
+    let mut handlers_by_offset = std::collections::HashMap::with_capacity(count.min(1024));
     for _ in 0..count {
-        offsets.push(cursor.checked_sub(list_start).ok_or(CodeItemError::InvalidHandlerList)?);
+        let relative_offset = cursor.checked_sub(list_start).ok_or(CodeItemError::InvalidHandlerList)?;
         let signed_count = read_sleb128(bytes, &mut cursor)?;
         let typed_count = signed_count.checked_abs().ok_or(CodeItemError::InvalidHandlerList)?;
+        if typed_count as usize > 65_536 { return Err(CodeItemError::InvalidHandlerList); }
+        let mut handlers = Vec::with_capacity((typed_count as usize).saturating_add(usize::from(signed_count <= 0)));
         for _ in 0..typed_count {
-            let _type_idx = read_uleb128(bytes, &mut cursor)?;
+            let type_index = read_uleb128(bytes, &mut cursor)?;
             let address = read_uleb128(bytes, &mut cursor)?;
             if address >= insns_size || !instruction_boundaries.contains(&(address as usize)) {
                 return Err(CodeItemError::InvalidHandlerAddress);
             }
+            handlers.push(RawCatchHandler {
+                type_index: Some(type_index),
+                target_pc: address as usize,
+            });
         }
         if signed_count <= 0 {
             let catch_all = read_uleb128(bytes, &mut cursor)?;
             if catch_all >= insns_size || !instruction_boundaries.contains(&(catch_all as usize)) {
                 return Err(CodeItemError::InvalidHandlerAddress);
             }
+            handlers.push(RawCatchHandler {
+                type_index: None,
+                target_pc: catch_all as usize,
+            });
+        }
+        if handlers_by_offset.insert(relative_offset, handlers).is_some() {
+            return Err(CodeItemError::InvalidHandlerList);
         }
     }
-    Ok(offsets)
+    Ok(handlers_by_offset)
 }
 
 /// Reads one code_item at a DEX file offset and validates its instruction and try-item ranges.
@@ -111,6 +141,7 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
         .filter(|instruction| instruction.kind == InstructionKind::Opcode)
         .map(|instruction| instruction.code_unit_offset)
         .collect();
+    let mut try_blocks = Vec::new();
     let tries_offset=if tries_size==0 {None} else {
         let aligned=if insns_size%2==1 {insns_end.checked_add(2).ok_or(CodeItemError::TryItemsOutOfBounds)?} else {insns_end};
         if aligned>bytes.len(){return Err(CodeItemError::InvalidTryPadding);}
@@ -118,6 +149,7 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
         let count=usize::from(tries_size);
         let end=aligned.checked_add(count.checked_mul(8).ok_or(CodeItemError::TryItemsOutOfBounds)?).filter(|e|*e<=bytes.len()).ok_or(CodeItemError::TryItemsOutOfBounds)?;
         let mut previous_end = 0u32;
+        let mut raw_ranges = Vec::with_capacity(count);
         for index in 0..count {
             let item = aligned + index * 8;
             let start_addr = u32le(bytes, item)?;
@@ -131,19 +163,18 @@ pub fn read_code_item(bytes:&[u8], offset:u32)->Result<CodeItem<'_>,CodeItemErro
                 return Err(CodeItemError::InvalidTryRange);
             }
             previous_end = range_end;
-            let _ = handler_off;
+            raw_ranges.push((start_addr as usize, range_end as usize, handler_off));
         }
-        let valid_handler_offsets = validate_handler_list(bytes, end, insns_size, &instruction_boundaries)?;
-        for index in 0..count {
-            let item = aligned + index * 8;
-            let handler_off = usize::from(u16le(bytes, item + 6)?);
-            if !valid_handler_offsets.contains(&handler_off) {
-                return Err(CodeItemError::InvalidHandlerOffset);
-            }
+        let handlers = parse_handler_list(bytes, end, insns_size, &instruction_boundaries)?;
+        for (start_pc, end_pc, handler_off) in raw_ranges {
+            let block_handlers = handlers.get(&handler_off)
+                .cloned()
+                .ok_or(CodeItemError::InvalidHandlerOffset)?;
+            try_blocks.push(RawTryBlock { start_pc, end_pc, handlers: block_handlers });
         }
         Some(aligned)
     };
-    Ok(CodeItem{registers_size,ins_size,outs_size,tries_size,debug_info_off,insns_size,instructions:&bytes[insns_start..insns_end],tries_offset})
+    Ok(CodeItem{registers_size,ins_size,outs_size,tries_size,debug_info_off,insns_size,instructions:&bytes[insns_start..insns_end],tries_offset,try_blocks})
 }
 
 #[cfg(test)]
