@@ -2026,6 +2026,33 @@ impl<'a> ArtVm<'a> {
                     }
 
 
+                    // Empty Android Bundle instances are created by AndroidX while
+                    // constructing ActivityResultRegistry. The no-arg constructor has
+                    // no payload to copy; validate the managed receiver and complete it.
+                    // Other Bundle constructors and methods remain unresolved until
+                    // their exact state semantics are implemented.
+                    if target_method.is_none()
+                        && target_class == "Landroid/os/Bundle;"
+                        && target_name == "<init>"
+                        && target_proto == "()V"
+                    {
+                        match args.first() {
+                            Some(Value::Object(receiver)) if *receiver != 0 => {
+                                self.heap.get(*receiver).map_err(|error| format!(
+                                    "Invalid receiver for Bundle.<init>()V at PC {}: {:?}",
+                                    pc, error
+                                ))?;
+                                pending_result = None;
+                                pc += 3;
+                                continue;
+                            }
+                            _ => return Err(format!(
+                                "Invalid null receiver for intrinsic Bundle.<init>()V at PC {}",
+                                pc
+                            )),
+                        }
+                    }
+
                     // Minimal managed HashMap operations used by AndroidX's
                     // FastSafeIterableMap. Keys are managed object identities; this
                     // intentionally does not pretend to implement arbitrary Java
@@ -2470,6 +2497,73 @@ mod tests {
         let error = vm.execute_method(1, &[Value::Object(0)], 16)
             .expect_err("null receiver must not pass Object constructor intrinsic");
         assert!(error.contains("Invalid null receiver for intrinsic Object.<init>()V"));
+    }
+
+    #[test]
+    fn bundle_no_arg_constructor_intrinsic_accepts_non_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let receiver = heap.allocate_instance("Landroid/os/Bundle;").unwrap();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(1u32, MethodCode {
+            class_descriptor: "Ltest/Caller;".into(),
+            name: "constructBundle".into(),
+            prototype: "()V".into(),
+            code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+            registers_size: 1, ins_size: 1, try_blocks: vec![],
+        })]);
+        let inventories = vec![ClassInventory {
+            classes: vec![],
+            method_references: vec![MethodReference {
+                method_index: 0,
+                class_descriptor: "Landroid/os/Bundle;".into(),
+                name: "<init>".into(),
+                prototype: "()V".into(),
+            }],
+            field_references: vec![],
+            strings: vec![],
+            type_descriptors: vec![],
+        }];
+        let method_owners = HashMap::from([(1u32, 0usize)]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_multi_dex_metadata(&inventories, &method_owners);
+        let report = vm.execute_method(1, &[Value::Object(receiver)], 16)
+            .expect("Bundle no-arg constructor should execute");
+        assert_eq!(report.stop_reason, ExecutionStopReason::ReturnedVoid);
+    }
+
+    #[test]
+    fn bundle_no_arg_constructor_intrinsic_rejects_null_receiver() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(1u32, MethodCode {
+            class_descriptor: "Ltest/Caller;".into(),
+            name: "constructBundle".into(),
+            prototype: "()V".into(),
+            code_units: vec![0x1070, 0x0000, 0x0000, 0x000e],
+            registers_size: 1, ins_size: 1, try_blocks: vec![],
+        })]);
+        let inventories = vec![ClassInventory {
+            classes: vec![],
+            method_references: vec![MethodReference {
+                method_index: 0,
+                class_descriptor: "Landroid/os/Bundle;".into(),
+                name: "<init>".into(),
+                prototype: "()V".into(),
+            }],
+            field_references: vec![],
+            strings: vec![],
+            type_descriptors: vec![],
+        }];
+        let method_owners = HashMap::from([(1u32, 0usize)]);
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_multi_dex_metadata(&inventories, &method_owners);
+        let error = vm.execute_method(1, &[Value::Object(0)], 16)
+            .expect_err("null Bundle receiver must be rejected");
+        assert!(error.contains("Invalid null receiver for intrinsic Bundle.<init>()V"));
     }
 
     #[test]
