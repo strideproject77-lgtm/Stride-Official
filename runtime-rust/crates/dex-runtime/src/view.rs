@@ -52,6 +52,10 @@ fn register_view_constructor(
         _env.set_object_field(view, "mMarginTop", Value::Int(0))?;
         _env.set_object_field(view, "mMarginRight", Value::Int(0))?;
         _env.set_object_field(view, "mMarginBottom", Value::Int(0))?;
+        _env.set_object_field(view, "mPaddingLeft", Value::Int(0))?;
+        _env.set_object_field(view, "mPaddingTop", Value::Int(0))?;
+        _env.set_object_field(view, "mPaddingRight", Value::Int(0))?;
+        _env.set_object_field(view, "mPaddingBottom", Value::Int(0))?;
         Ok(None)
     });
 }
@@ -265,6 +269,28 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
         let id = receiver(args)?;
         Ok(Some(env.get_object_field(id, "mBottom")?))
     });
+    jni.register("Landroid/view/View;", "setPadding", "(IIII)V", |env, args| {
+        let id = receiver(args)?;
+        for (field, index) in [
+            ("mPaddingLeft", 1usize), ("mPaddingTop", 2usize),
+            ("mPaddingRight", 3usize), ("mPaddingBottom", 4usize),
+        ] {
+            let value = args.get(index).map(Value::as_int).unwrap_or(0).max(0);
+            env.set_object_field(id, field, Value::Int(value))?;
+        }
+        env.set_object_field(id, "mNeedsLayout", Value::Int(1))?;
+        env.set_object_field(id, "mNeedsDraw", Value::Int(1))?;
+        Ok(None)
+    });
+    for (name, field) in [
+        ("getPaddingLeft", "mPaddingLeft"), ("getPaddingTop", "mPaddingTop"),
+        ("getPaddingRight", "mPaddingRight"), ("getPaddingBottom", "mPaddingBottom"),
+    ] {
+        jni.register("Landroid/view/View;", name, "()I", move |env, args| {
+            let id = receiver(args)?;
+            Ok(Some(env.get_object_field(id, field)?))
+        });
+    }
     jni.register("Landroid/view/View;", "invalidate", "()V", |env, args| {
         let id = receiver(args)?;
         env.set_object_field(id, "mNeedsDraw", Value::Int(1))?;
