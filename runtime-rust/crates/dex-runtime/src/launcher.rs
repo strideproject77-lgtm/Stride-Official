@@ -1834,7 +1834,10 @@ impl AndroidRuntime {
     }
 
     fn replay_guest_canvas_commands(
-        heap: &ManagedHeap, canvas_id: u32, surface: &mut Surface,
+        heap: &ManagedHeap,
+        assets: &HashMap<String, Vec<u8>>,
+        canvas_id: u32,
+        surface: &mut Surface,
     ) -> Result<usize, String> {
         let command_count = crate::canvas_jni::recorded_command_count(heap, canvas_id)?;
         let mut canvas = Canvas::new(surface);
@@ -1865,7 +1868,13 @@ impl AndroidRuntime {
                         2 => measured_width,
                         _ => 0.0,
                     };
-                    canvas.draw_text(&text, anchor_x, number("Arg2")?, &paint);
+                    let font_data = read("Arg6").ok().and_then(|value| value.as_object())
+                        .and_then(|typeface_id| heap.get_instance_field(typeface_id, "mStrideAssetPath").ok())
+                        .and_then(|value| value.as_object())
+                        .and_then(|path_id| heap.get_string(path_id).ok())
+                        .and_then(|path| assets.get(path))
+                        .map(Vec::as_slice);
+                    canvas.draw_text_with_font(&text, anchor_x, number("Arg2")?, &paint, font_data);
                 }
                 4 => {
                     let mut paint = Paint::new();
@@ -1996,7 +2005,9 @@ impl AndroidRuntime {
             };
             let mut surface = Surface::new(width as u32, height as u32);
             surface.pixels.copy_from_slice(&initial);
-            let commands = Self::replay_guest_canvas_commands(&self.heap, canvas_id, &mut surface)?;
+            let commands = Self::replay_guest_canvas_commands(
+                &self.heap, &self.environment.assets.assets, canvas_id, &mut surface,
+            )?;
             for (index, pixel) in surface.pixels.into_iter().enumerate() {
                 self.heap.set_array_element(pixels_id, index as i32, Value::Int(pixel as i32))
                     .map_err(|error| format!("Offscreen Bitmap pixel write failed: {:?}", error))?;
@@ -2120,7 +2131,9 @@ impl AndroidRuntime {
 
             self.flush_guest_bitmap_canvases()?;
             let command_count = crate::canvas_jni::recorded_command_count(&self.heap, canvas_id)?;
-            Self::replay_guest_canvas_commands(&self.heap, canvas_id, &mut self.surface)?;
+            Self::replay_guest_canvas_commands(
+                &self.heap, &self.environment.assets.assets, canvas_id, &mut self.surface,
+            )?;
             self.heap.set_instance_field(canvas_id, "mStrideCommandCount", Value::Int(0))
                 .map_err(|error| format!("Guest Canvas queue reset failed: {:?}", error))?;
             self.diagnostics.record_detailed(
