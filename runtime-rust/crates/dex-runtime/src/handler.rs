@@ -237,6 +237,45 @@ impl LooperCoordinator {
 }
 
 
+/// A Runnable posted by guest code and ready for dispatch on the main runtime pump.
+#[derive(Debug, Clone)]
+pub struct PendingRunnable {
+    pub handler_id: u32,
+    pub runnable_id: u32,
+    pub delivery_at: Instant,
+}
+pub type RunnableQueue = Arc<Mutex<Vec<PendingRunnable>>>;
+
+fn enqueue_runnable(
+    env: &crate::jni::JniEnv<'_>, args: &[Value], queue: &RunnableQueue, delay_ms: u64,
+) -> Result<Option<Value>, String> {
+    let handler = args.first().and_then(Value::as_object).filter(|id| *id != 0)
+        .ok_or("Handler.post receiver is null")?;
+    let runnable = args.get(1).and_then(Value::as_object).filter(|id| *id != 0)
+        .ok_or("Handler.post Runnable is null")?;
+    if !env.heap.contains(handler) || !env.heap.contains(runnable) {
+        return Err("Handler.post received an invalid managed object".into());
+    }
+    queue.lock().map_err(|_| "Runnable queue lock poisoned")?.push(PendingRunnable {
+        handler_id: handler, runnable_id: runnable,
+        delivery_at: Instant::now() + Duration::from_millis(delay_ms),
+    });
+    Ok(Some(Value::Int(1)))
+}
+
+pub fn take_due_runnables(queue: &RunnableQueue, limit: usize) -> Result<Vec<PendingRunnable>, String> {
+    let now = Instant::now();
+    let mut pending = queue.lock().map_err(|_| "Runnable queue lock poisoned")?;
+    let mut due = Vec::new();
+    let mut future = Vec::with_capacity(pending.len());
+    for callback in pending.drain(..) {
+        if callback.delivery_at <= now && due.len() < limit { due.push(callback); }
+        else { future.push(callback); }
+    }
+    *pending = future;
+    Ok(due)
+}
+
 /// Shared identity for the guest process's main Looper object.
 pub type MainLooperRef = Arc<Mutex<Option<u32>>>;
 
@@ -259,7 +298,7 @@ fn get_or_create_main_looper(
 
 /// Registers correctly typed Looper object-returning methods and Handler
 /// constructors. Scheduling remains owned by the runtime event pump.
-pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef) {
+pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef, runnables: RunnableQueue) {
     for name in ["getMainLooper", "myLooper"] {
         let shared = main.clone();
         registry.register(
@@ -299,6 +338,27 @@ pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef
         },
     );
 
+    let queue = runnables.clone();
+    registry.register("Landroid/os/Handler;", "post", "(Ljava/lang/Runnable;)Z",
+        move |env, args| enqueue_runnable(env, args, &queue, 0));
+    let queue = runnables.clone();
+    registry.register("Landroid/os/Handler;", "postDelayed", "(Ljava/lang/Runnable;J)Z",
+        move |env, args| {
+            let delay = args.get(2).map(Value::as_long).unwrap_or(0).clamp(0, 86_400_000) as u64;
+            enqueue_runnable(env, args, &queue, delay)
+        });
+    let queue = runnables.clone();
+    registry.register("Landroid/os/Handler;", "removeCallbacks", "(Ljava/lang/Runnable;)V",
+        move |_env, args| {
+            let handler = args.first().and_then(Value::as_object).filter(|id| *id != 0)
+                .ok_or("Handler.removeCallbacks receiver is null")?;
+            let runnable = args.get(1).and_then(Value::as_object).filter(|id| *id != 0)
+                .ok_or("Handler.removeCallbacks Runnable is null")?;
+            queue.lock().map_err(|_| "Runnable queue lock poisoned")?
+                .retain(|item| item.handler_id != handler || item.runnable_id != runnable);
+            Ok(None)
+        });
+
     registry.register(
         "Landroid/os/Handler;",
         "getLooper",
@@ -320,7 +380,7 @@ mod tests {
     #[test]
     fn main_looper_jni_returns_a_stable_object_reference() {
         let mut registry = JniNativeRegistry::new();
-        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)));
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)), Arc::new(Mutex::new(Vec::new())));
         let mut heap = ManagedHeap::default();
         let main = registry.find("Landroid/os/Looper;", "getMainLooper",
             "()Landroid/os/Looper;").unwrap().clone();
@@ -333,7 +393,7 @@ mod tests {
     #[test]
     fn handler_constructor_retains_main_looper_object() {
         let mut registry = JniNativeRegistry::new();
-        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)));
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)), Arc::new(Mutex::new(Vec::new())));
         let mut heap = ManagedHeap::default();
         let handler = heap.allocate_instance("Landroid/os/Handler;").unwrap();
         let init = registry.find("Landroid/os/Handler;", "<init>", "()V").unwrap().clone();
@@ -343,6 +403,22 @@ mod tests {
         let looper = get(&mut JniEnv::new(&mut heap), &[Value::Object(handler)])
             .unwrap().unwrap().as_object().unwrap();
         assert_eq!(heap.get(looper).unwrap().class_descriptor(), "Landroid/os/Looper;");
+    }
+
+    #[test]
+    fn handler_post_enqueues_and_remove_callbacks_cancels() {
+        let mut registry = JniNativeRegistry::new();
+        let queue = Arc::new(Mutex::new(Vec::new()));
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)), queue.clone());
+        let mut heap = ManagedHeap::default();
+        let handler = heap.allocate_instance("Landroid/os/Handler;").unwrap();
+        let runnable = heap.allocate_instance("Ltest/Callback;").unwrap();
+        let post = registry.find("Landroid/os/Handler;", "post", "(Ljava/lang/Runnable;)Z").unwrap().clone();
+        assert_eq!(post(&mut JniEnv::new(&mut heap), &[Value::Object(handler), Value::Object(runnable)]).unwrap(), Some(Value::Int(1)));
+        assert_eq!(queue.lock().unwrap().len(), 1);
+        let remove = registry.find("Landroid/os/Handler;", "removeCallbacks", "(Ljava/lang/Runnable;)V").unwrap().clone();
+        remove(&mut JniEnv::new(&mut heap), &[Value::Object(handler), Value::Object(runnable)]).unwrap();
+        assert!(queue.lock().unwrap().is_empty());
     }
 
     #[test]
