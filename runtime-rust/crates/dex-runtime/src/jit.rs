@@ -344,7 +344,7 @@ mod tests {
             Err(JitCompileError::TruncatedInstruction { pc: 0 })
         );
         assert_eq!(
-            compile_dex_method(&[0x1012, 0x000f], 1),
+            compile_dex_method(&[0x1112, 0x000f], 1),
             Err(JitCompileError::InvalidRegister { pc: 0, register: 1 })
         );
     }
