@@ -282,6 +282,61 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Draw a rounded rectangle using Android Canvas corner radii semantics.
+    pub fn draw_round_rect(&mut self, rect: RectF, radius_x: f32, radius_y: f32, paint: &Paint) {
+        let left = rect.left.min(rect.right);
+        let top = rect.top.min(rect.bottom);
+        let right = rect.left.max(rect.right);
+        let bottom = rect.top.max(rect.bottom);
+        let rx = radius_x.abs().min((right - left) * 0.5);
+        let ry = radius_y.abs().min((bottom - top) * 0.5);
+        let (x0, y0) = self.apply_transform(left, top);
+        let (x1, y1) = self.apply_transform(right, bottom);
+        let min_x = x0.min(x1).max(0).min(self.surface.width as i32);
+        let max_x = x0.max(x1).max(0).min(self.surface.width as i32);
+        let min_y = y0.min(y1).max(0).min(self.surface.height as i32);
+        let max_y = y0.max(y1).max(0).min(self.surface.height as i32);
+        let scale_x = self.transform.scale_x.abs().max(f32::EPSILON);
+        let scale_y = self.transform.scale_y.abs().max(f32::EPSILON);
+        let rx = rx * scale_x;
+        let ry = ry * scale_y;
+        let stroke = (paint.stroke_width * scale_x).max(1.0);
+        for y in min_y..max_y {
+            for x in min_x..max_x {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let cx = if px < min_x as f32 + rx { min_x as f32 + rx }
+                    else if px > max_x as f32 - rx { max_x as f32 - rx } else { px };
+                let cy = if py < min_y as f32 + ry { min_y as f32 + ry }
+                    else if py > max_y as f32 - ry { max_y as f32 - ry } else { py };
+                let dx = (px - cx) / rx.max(0.5);
+                let dy = (py - cy) / ry.max(0.5);
+                let inside = dx * dx + dy * dy <= 1.0;
+                if !inside { continue; }
+                let draw = match paint.style {
+                    PaintStyle::Fill => true,
+                    PaintStyle::Stroke => {
+                        let inner_rx = (rx - stroke).max(0.0);
+                        let inner_ry = (ry - stroke).max(0.0);
+                        let il = min_x as f32 + stroke;
+                        let ir = max_x as f32 - stroke;
+                        let it = min_y as f32 + stroke;
+                        let ib = max_y as f32 - stroke;
+                        if px < il || px >= ir || py < it || py >= ib { true } else {
+                            let icx = px.clamp(il + inner_rx, ir - inner_rx);
+                            let icy = py.clamp(it + inner_ry, ib - inner_ry);
+                            let ix = (px - icx) / inner_rx.max(0.5);
+                            let iy = (py - icy) / inner_ry.max(0.5);
+                            ix * ix + iy * iy > 1.0
+                        }
+                    }
+                    PaintStyle::FillAndStroke => true,
+                };
+                if draw { self.surface.set_pixel(x as u32, y as u32, paint.color); }
+            }
+        }
+    }
+
     pub fn draw_circle(&mut self, cx: f32, cy: f32, radius: f32, paint: &Paint) {
         if radius <= 0.0 {
             return;
@@ -576,4 +631,16 @@ mod tests {
         assert_eq!(canvas.surface.get_pixel(50, 50), Some(0xff00ff00));
         canvas.restore();
     }
+    #[test]
+    fn canvas_draws_rounded_rect_with_clear_corners() {
+        let mut surface = Surface::new(20, 20);
+        let mut canvas = Canvas::new(&mut surface);
+        let mut paint = Paint::new();
+        paint.color = 0xffff0000;
+        canvas.draw_round_rect(RectF::new(2.0, 2.0, 18.0, 18.0), 6.0, 6.0, &paint);
+        assert_eq!(canvas.surface.get_pixel(10, 10), Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(2, 2), Some(0x00000000));
+        assert_eq!(canvas.surface.get_pixel(5, 2), Some(0x00000000));
+    }
+
 }
