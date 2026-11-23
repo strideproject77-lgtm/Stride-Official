@@ -46,22 +46,41 @@ workflows:
           EOF
             if [ -n "${STRIDE_LOGS_GITHUB_TOKEN:-}" ]; then
               cd "$ROOT"
-              git config user.name "Stride Codemagic Logger"
-              git config user.email "stride-codemagic-logs@users.noreply.github.com"
+              LATEST_TMP="$(mktemp)"
+              python3 - "$LOG_DIR" "$LATEST_TMP" <<'PY'
+import pathlib, re, sys
+log_dir = pathlib.Path(sys.argv[1])
+output = pathlib.Path(sys.argv[2])
+patterns = [
+    (re.compile(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s]+"), r"\1[REDACTED]"),
+    (re.compile(r"(?i)\b(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"), "[REDACTED_GITHUB_TOKEN]"),
+    (re.compile(r"(?i)(\b(?:token|password|passwd|client_secret|api[_-]?key)\b\s*[:=]\s*)[^\s,;]+"), r"\1[REDACTED]"),
+    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_KEY]"),
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[REDACTED_PRIVATE_KEY]"),
+]
+parts = []
+for path in sorted(log_dir.iterdir()):
+    if path.is_file():
+        text = path.read_text(errors="replace")
+        for pattern, replacement in patterns:
+            text = pattern.sub(replacement, text)
+        parts.append("\n========== " + path.name + " ==========\n" + text + "\n")
+output.write_text("".join(parts))
+PY
               git checkout --orphan stride-codemagic-logs >/dev/null 2>&1
               git rm -rf --ignore-unmatch . >/dev/null 2>&1
-              mkdir -p latest
-              cp "$LOG_DIR"/*.log "$LOG_DIR"/metadata.json latest/ 2>/dev/null
+              cp "$LATEST_TMP" "$ROOT/latest"
+              rm -f "$LATEST_TMP"
               git add -f latest
-              git commit -m "chore(logs): Codemagic build ${CM_BUILD_NUMBER:-unknown}" >/dev/null 2>&1
+              git commit -m "chore(logs): replace latest CodeMagic log (${CM_BUILD_NUMBER:-unknown})" >/dev/null 2>&1
               AUTH="$(printf 'x-access-token:%s' "$STRIDE_LOGS_GITHUB_TOKEN" | base64 | tr -d '\n')"
               git -c "http.extraheader=AUTHORIZATION: basic $AUTH" push --force "https://github.com/strideproject77-lgtm/Stride-Official.git" HEAD:refs/heads/stride-codemagic-logs
               push_status=$?
               unset AUTH
               if [ "$push_status" -eq 0 ]; then
-                echo "Stride build logs published to stride-codemagic-logs."
+                echo "Stride latest log published to stride-codemagic-logs/latest."
               else
-                echo "WARNING: Could not publish logs to stride-codemagic-logs; see CodeMagic artifacts."
+                echo "WARNING: Could not publish latest log to stride-codemagic-logs; see CodeMagic artifacts."
               fi
             else
               echo "WARNING: STRIDE_LOGS_GITHUB_TOKEN is not configured; logs remain in CodeMagic artifacts."
