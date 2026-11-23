@@ -8,7 +8,7 @@ struct ContentView: View {
     @State private var selectedPackage: ImportedAPK?
     @State private var quickLaunchPackagePath: String?
     @State private var selectedTab = 0
-    @AppStorage("stride.homeExperience") private var homeExperience = "classic"
+    @AppStorage("stride.homeExperience") private var homeExperience = "ios"
     @AppStorage("stride.iosHome.wallpaper") private var iosHomeWallpaper = "dusk"
     @State private var importError: String?
     @State private var importAlertTitle = "Import failed"
@@ -475,6 +475,7 @@ struct ContentView: View {
                         .font(.system(size: 10, weight: .medium)).foregroundStyle(muted)
                     if homeExperience == "ios" {
                         Picker("Home Screen Wallpaper", selection: $iosHomeWallpaper) {
+                            Text("iPhone Dynamic").tag("iphone")
                             Text("Dusk").tag("dusk")
                             Text("Ocean").tag("ocean")
                             Text("Forest").tag("forest")
