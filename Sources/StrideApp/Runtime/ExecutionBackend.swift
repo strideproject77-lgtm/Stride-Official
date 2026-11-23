@@ -376,7 +376,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             onLog("[INFO] Split package identity verified: \(splitManifest.source) -> \(splitPackageName)")
         }
-        let preferredLanguage = Locale.current.language.languageCode?.identifier ?? "en"
+        let preferredLanguage = Locale.current.languageCode ?? "en"
         let baseResourceTable = resourceTableData.first(where: { $0.source == url.lastPathComponent })
             ?? resourceTableData.first
         let preferredLocaleTable = resourceTableData.first(where: { $0.source.contains("config.\(preferredLanguage)") })
