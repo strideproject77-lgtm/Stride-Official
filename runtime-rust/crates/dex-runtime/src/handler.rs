@@ -273,6 +273,7 @@ pub fn take_due_runnables(queue: &RunnableQueue, limit: usize) -> Result<Vec<Pen
         else { future.push(callback); }
     }
     *pending = future;
+    due.sort_by_key(|callback| callback.delivery_at);
     Ok(due)
 }
 
@@ -419,6 +420,20 @@ mod tests {
         let remove = registry.find("Landroid/os/Handler;", "removeCallbacks", "(Ljava/lang/Runnable;)V").unwrap().clone();
         remove(&mut JniEnv::new(&mut heap), &[Value::Object(handler), Value::Object(runnable)]).unwrap();
         assert!(queue.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn runnable_queue_delivers_due_callbacks_and_retains_delayed_ones() {
+        let queue = Arc::new(Mutex::new(Vec::new()));
+        let now = Instant::now();
+        queue.lock().unwrap().extend([
+            PendingRunnable { handler_id: 1, runnable_id: 11, delivery_at: now + Duration::from_secs(60) },
+            PendingRunnable { handler_id: 1, runnable_id: 12, delivery_at: now },
+        ]);
+        let due = take_due_runnables(&queue, 8).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].runnable_id, 12);
+        assert_eq!(queue.lock().unwrap().len(), 1);
     }
 
     #[test]
