@@ -389,7 +389,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
         let resourceTableBytes = resourceTablesToLoad.reduce(0) { $0 + $1.data.count }
-        onLog("[INFO] Selected Android resource tables: \(resourceTablesToLoad.map(\.source).joined(separator: ", ")) (\(resourceTableBytes) bytes)")
+        onLog("[INFO] Selected Android resource tables: \(resourceTablesToLoad.map { $0.source }.joined(separator: ", ")) (\(resourceTableBytes) bytes)")
         onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
             onLog("[FATAL] Rust runtime creation returned null")
