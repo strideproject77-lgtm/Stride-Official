@@ -126,8 +126,10 @@ fn register(registry: &mut JniNativeRegistry) {
                 .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned)))
             .unwrap_or_else(|| "LEFT".to_owned());
         let align_code = match align.as_str() { "CENTER" => 1, "RIGHT" => 2, _ => 0 };
+        let typeface = env.get_object_field(paint, "mTypeface").unwrap_or(Value::Null);
         append(env, canvas, 3, &[
-            text, Value::Float(float(args, 2)), Value::Float(float(args, 3)), color, size, Value::Int(align_code),
+            text, Value::Float(float(args, 2)), Value::Float(float(args, 3)),
+            color, size, Value::Int(align_code), typeface,
         ])?;
         Ok(None)
     });
@@ -226,6 +228,28 @@ mod tests {
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Type").unwrap(), Value::Int(1));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Type").unwrap(), Value::Int(2));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Arg4").unwrap(), Value::Int(0xff123456u32 as i32));
+    }
+
+    #[test]
+    fn draw_text_records_typeface_reference_for_asset_font_rendering() {
+        let mut registry = JniNativeRegistry::new();
+        register(&mut registry);
+        let mut heap = ManagedHeap::default();
+        let canvas = heap.allocate_instance("Landroid/graphics/Canvas;").unwrap();
+        let paint = heap.allocate_instance("Landroid/graphics/Paint;").unwrap();
+        let typeface = heap.allocate_instance("Landroid/graphics/Typeface;").unwrap();
+        let text = heap.allocate_string("2048").unwrap();
+        heap.set_instance_field(paint, "mColor", Value::Int(0xffffffffu32 as i32)).unwrap();
+        heap.set_instance_field(paint, "mTextSize", Value::Float(24.0)).unwrap();
+        heap.set_instance_field(paint, "mTypeface", Value::Object(typeface)).unwrap();
+        let draw = registry.find("Landroid/graphics/Canvas;", "drawText",
+            "(Ljava/lang/String;FFLandroid/graphics/Paint;)V").unwrap().clone();
+        draw(&mut JniEnv::new(&mut heap), &[
+            Value::Object(canvas), Value::Object(text), Value::Float(20.0),
+            Value::Float(30.0), Value::Object(paint),
+        ]).unwrap();
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(),
+            Value::Object(typeface));
     }
 
     #[test]
