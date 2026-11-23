@@ -453,6 +453,9 @@ impl<'a> Canvas<'a> {
                         ((color >> 24) & 0xff) as f64 / 255.0,
                     );
                     CGContextSetTextDrawingMode(context, 0);
+                    let (draw_x, draw_baseline) = self.apply_transform(x, baseline);
+                    let effective_text_size = paint.text_size.max(1.0)
+                        * self.transform.scale_y.abs().max(f32::EPSILON);
                     let mut custom_font = std::ptr::null_mut();
                     if let Some(data) = font_data.filter(|data| !data.is_empty()) {
                         let cf_data = CFDataCreate(std::ptr::null(), data.as_ptr(), data.len() as isize);
@@ -467,12 +470,12 @@ impl<'a> Canvas<'a> {
                     }
                     if !custom_font.is_null() {
                         CGContextSetFont(context, custom_font);
-                        CGContextSetFontSize(context, paint.text_size.max(1.0) as f64);
+                        CGContextSetFontSize(context, effective_text_size as f64);
                     } else {
                         // ASCII/MacRoman text uses the platform Helvetica fallback.
                         CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
                     }
-                    CGContextShowTextAtPoint(context, x as f64, baseline as f64, bytes.as_ptr().cast(), bytes.len());
+                    CGContextShowTextAtPoint(context, draw_x as f64, draw_baseline as f64, bytes.as_ptr().cast(), bytes.len());
                     CGContextFlush(context);
                     if !custom_font.is_null() {
                         CGFontRelease(custom_font);
@@ -520,6 +523,12 @@ impl<'a> Canvas<'a> {
             || (width as usize).checked_mul(height as usize) != Some(pixels.len()) || alpha == 0 {
             return;
         }
+        let (transformed_left, transformed_top) = self.apply_transform(left as f32, top as f32);
+        let (transformed_right, transformed_bottom) = self.apply_transform(right as f32, bottom as f32);
+        let left = transformed_left.min(transformed_right);
+        let right = transformed_left.max(transformed_right);
+        let top = transformed_top.min(transformed_bottom);
+        let bottom = transformed_top.max(transformed_bottom);
         let dst_width = (right as i64 - left as i64) as u64;
         let dst_height = (bottom as i64 - top as i64) as u64;
         let min_x = left.max(0);
@@ -649,6 +658,20 @@ mod tests {
         canvas.draw_image_argb(&[0xffff0000, 0x8000ff00], 2, 1, 0, 10);
         assert_eq!(canvas.surface.get_pixel(0, 10), Some(0xffff0000));
         assert_eq!(canvas.surface.get_pixel(1, 10), Some(0xff008000));
+    }
+
+    #[test]
+    fn bitmap_draw_respects_canvas_translation_and_scale() {
+        let mut surface = Surface::new(12, 12);
+        let mut canvas = Canvas::new(&mut surface);
+        canvas.save();
+        canvas.translate(2.0, 3.0);
+        canvas.scale(2.0, 2.0);
+        canvas.draw_image_argb(&[0xffff0000], 1, 1, 1, 1);
+        assert_eq!(canvas.surface.get_pixel(4, 5), Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(5, 6), Some(0xffff0000));
+        assert_eq!(canvas.surface.get_pixel(3, 4), Some(0xff000000));
+        canvas.restore();
     }
 
     #[test]
