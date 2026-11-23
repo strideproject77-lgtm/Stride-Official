@@ -1916,6 +1916,15 @@ impl AndroidRuntime {
                 12 => {
                     let mut paint = Paint::new();
                     paint.color = color("Arg6")?;
+                    paint.style = match read("Arg7").map(|value| value.as_int()).unwrap_or(0) {
+                        1 => PaintStyle::Stroke,
+                        2 => PaintStyle::FillAndStroke,
+                        _ => PaintStyle::Fill,
+                    };
+                    paint.stroke_width = read("Arg8")
+                        .map(|value| value.as_float())
+                        .unwrap_or(1.0)
+                        .max(0.0);
                     canvas.draw_round_rect(
                         RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?),
                         number("Arg4")?, number("Arg5")?, &paint,
