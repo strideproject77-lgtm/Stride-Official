@@ -276,6 +276,35 @@ fn register_view_framework(jni: &mut JniNativeRegistry) {
             env.set_object_field(view, "mWindowInsetsListener", args.get(1).copied().unwrap_or(Value::Null))?;
             Ok(None)
         });
+    // Zero-inset WindowInsets are delivered at initial layout until the iOS
+    // host supplies safe-area metrics through the runtime FFI.
+    for (method, field) in [
+        ("getSystemWindowInsetLeft", "mStrideSystemInsetLeft"),
+        ("getSystemWindowInsetTop", "mStrideSystemInsetTop"),
+        ("getSystemWindowInsetRight", "mStrideSystemInsetRight"),
+        ("getSystemWindowInsetBottom", "mStrideSystemInsetBottom"),
+        ("getStableInsetLeft", "mStrideStableInsetLeft"),
+        ("getStableInsetTop", "mStrideStableInsetTop"),
+        ("getStableInsetRight", "mStrideStableInsetRight"),
+        ("getStableInsetBottom", "mStrideStableInsetBottom"),
+    ] {
+        jni.register("Landroid/view/WindowInsets;", method, "()I", move |env, args| {
+            let insets = receiver(args)?;
+            Ok(Some(env.get_object_field(insets, field)?))
+        });
+    }
+    jni.register("Landroid/view/WindowInsets;", "hasSystemWindowInsets", "()Z", |env, args| {
+        let insets = receiver(args)?;
+        let any = ["mStrideSystemInsetLeft", "mStrideSystemInsetTop",
+            "mStrideSystemInsetRight", "mStrideSystemInsetBottom"]
+            .iter().any(|field| env.get_object_field(insets, field).map(|value| value.as_int() != 0).unwrap_or(false));
+        Ok(Some(Value::Int(i32::from(any))))
+    });
+    jni.register("Landroid/view/WindowInsets;", "isConsumed", "()Z", |env, args| {
+        let insets = receiver(args)?;
+        Ok(Some(env.get_object_field(insets, "mStrideConsumed")?))
+    });
+
     jni.register("Landroid/view/View;", "setSystemUiVisibility", "(I)V", |env, args| {
         let view = receiver(args)?;
         env.set_object_field(view, "mSystemUiVisibility", Value::Int(args.get(1).map(Value::as_int).unwrap_or(0)))?;
