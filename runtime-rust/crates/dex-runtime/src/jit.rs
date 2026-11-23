@@ -301,6 +301,37 @@ pub fn compile_dex_method(
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstalledDexMethod {
+    pub code: InstalledCode,
+    pub dex_instructions: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JitPipelineError {
+    Compile(JitCompileError),
+    Install(JitError),
+}
+
+impl AuthorizedJitBackend {
+    /// Compiles a supported DEX method and installs it through the authorized
+    /// platform host. This deliberately does not expose an entry point until
+    /// the host has completed its W^X seal and instruction-cache synchronization.
+    pub fn compile_and_install<H: AuthorizedJitHost>(
+        &self,
+        host: &mut H,
+        code_units: &[u16],
+        registers_size: usize,
+    ) -> Result<InstalledDexMethod, JitPipelineError> {
+        let compiled = compile_dex_method(code_units, registers_size)
+            .map_err(JitPipelineError::Compile)?;
+        let dex_instructions = compiled.dex_instructions;
+        let code = self.install(host, compiled.artifact())
+            .map_err(JitPipelineError::Install)?;
+        Ok(InstalledDexMethod { code, dex_instructions })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
