@@ -1,0 +1,158 @@
+workflows:
+  stride-ios:
+    name: Stride iOS Builder
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+
+    environment:
+      vars:
+        STRIDE_REPOSITORY: strideproject77-lgtm/Stride-Official
+        STRIDE_LOG_BRANCH: stride-codemagic-logs
+        STRIDE_BUNDLE_ID: com.strideproject.stride
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Build Stride for iPhone and package unsigned IPA
+        script: |
+          set -Eeuo pipefail
+          ROOT="$CM_BUILD_DIR"
+          LOG_DIR="$ROOT/.stride-build-logs"
+          DERIVED="$CM_BUILD_DIR/.stride-derived-data"
+          RUST_TARGET="$CM_BUILD_DIR/runtime-rust/target/aarch64-apple-ios"
+          mkdir -p "$LOG_DIR"
+          exec > >(tee -a "$LOG_DIR/build.log") 2>&1
+
+          publish_logs() {
+            build_status=$?
+            trap - EXIT
+            set +e
+            echo "Build exit status: $build_status" >> "$LOG_DIR/build.log"
+            cat > "$LOG_DIR/metadata.json" <<EOF
+          {
+            "project": "Stride",
+            "repository": "strideproject77-lgtm/Stride-Official",
+            "branch": "${CM_BRANCH:-unknown}",
+            "commit": "${CM_COMMIT:-unknown}",
+            "build_id": "${CM_BUILD_ID:-unknown}",
+            "build_number": "${CM_BUILD_NUMBER:-unknown}",
+            "builder": "Codemagic",
+            "exit_status": $build_status,
+            "logs_branch": "stride-codemagic-logs"
+          }
+          EOF
+            if [ -n "${STRIDE_LOGS_GITHUB_TOKEN:-}" ]; then
+              cd "$ROOT"
+              git config user.name "Stride Codemagic Logger"
+              git config user.email "stride-codemagic-logs@users.noreply.github.com"
+              git checkout --orphan stride-codemagic-logs >/dev/null 2>&1
+              git rm -rf --ignore-unmatch . >/dev/null 2>&1
+              mkdir -p latest
+              cp "$LOG_DIR"/*.log "$LOG_DIR"/metadata.json latest/ 2>/dev/null
+              git add -f latest
+              git commit -m "chore(logs): Codemagic build ${CM_BUILD_NUMBER:-unknown}" >/dev/null 2>&1
+              AUTH="$(printf 'x-access-token:%s' "$STRIDE_LOGS_GITHUB_TOKEN" | base64 | tr -d '\n')"
+              git -c "http.extraheader=AUTHORIZATION: basic $AUTH" push --force "https://github.com/strideproject77-lgtm/Stride-Official.git" HEAD:refs/heads/stride-codemagic-logs
+              push_status=$?
+              unset AUTH
+              if [ "$push_status" -eq 0 ]; then
+                echo "Stride build logs published to stride-codemagic-logs."
+              else
+                echo "WARNING: Could not publish logs to stride-codemagic-logs; see CodeMagic artifacts."
+              fi
+            else
+              echo "WARNING: STRIDE_LOGS_GITHUB_TOKEN is not configured; logs remain in CodeMagic artifacts."
+            fi
+            exit "$build_status"
+          }
+          trap publish_logs EXIT
+
+          echo "Project: Stride"
+          echo "Repository: $STRIDE_REPOSITORY"
+          echo "Source branch: ${CM_BRANCH:-unknown}"
+          echo "Source commit: ${CM_COMMIT:-unknown}"
+          echo "Codemagic build: ${CM_BUILD_NUMBER:-unknown}"
+
+          if ! command -v rustup >/dev/null 2>&1; then
+            brew install rustup-init
+            rustup-init -y --profile minimal --default-toolchain stable
+            export PATH="$HOME/.cargo/bin:$PATH"
+          fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          rustup toolchain install stable
+          rustup target add aarch64-apple-ios
+          rustc --version
+          cargo --version
+
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+          xcodebuild -version
+
+          swift Scripts/generate-app-icon.swift
+
+          cargo test --manifest-path runtime-rust/Cargo.toml 2>&1 | tee "$LOG_DIR/rust-tests.log"
+          cargo build --manifest-path runtime-rust/Cargo.toml -p stride-dex-ffi --release --target aarch64-apple-ios 2>&1 | tee "$LOG_DIR/rust-ios-build.log"
+          RUST_LIBRARY="$RUST_TARGET/release/libstride_dex_ffi.a"
+          test -s "$RUST_LIBRARY"
+
+          xcodebuild -create-xcframework \
+            -library "$RUST_LIBRARY" \
+            -headers runtime-rust/crates/dex-ffi/include \
+            -output runtime-rust/target/StrideDexFFI.xcframework 2>&1 | tee "$LOG_DIR/xcframework.log"
+          test -s runtime-rust/target/StrideDexFFI.xcframework/Info.plist
+
+          xcodegen generate 2>&1 | tee "$LOG_DIR/xcodegen.log"
+          xcodebuild -resolvePackageDependencies -project Stride.xcodeproj -scheme Stride 2>&1 | tee "$LOG_DIR/package-resolution.log"
+
+          xcodebuild \
+            -project Stride.xcodeproj \
+            -scheme Stride \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee "$LOG_DIR/xcodebuild.log"
+
+          APP_PATH="$DERIVED/Build/Products/Release-iphoneos/Stride.app"
+          test -d "$APP_PATH"
+          test -s "$APP_PATH/Info.plist"
+          plutil -lint "$APP_PATH/Info.plist"
+          EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP_PATH/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
+          test "$BUNDLE_ID" = "$STRIDE_BUNDLE_ID"
+          test -s "$APP_PATH/$EXECUTABLE_NAME"
+          lipo -archs "$APP_PATH/$EXECUTABLE_NAME" | tr ' ' '\n' | grep -Fxq arm64
+
+          mkdir -p "$CM_BUILD_DIR/build/ios/ipa/Payload"
+          ditto "$APP_PATH" "$CM_BUILD_DIR/build/ios/ipa/Payload/Stride.app"
+          (cd "$CM_BUILD_DIR/build/ios/ipa" && /usr/bin/zip -qry "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa" Payload)
+          test -s "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa"
+          unzip -t "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa" 2>&1 | tee "$LOG_DIR/ipa-validation.log"
+          shasum -a 256 "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa" | tee "$LOG_DIR/ipa-sha256.txt"
+          ls -lh "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa"
+
+    artifacts:
+      - build/ios/Stride-unsigned.ipa
+      - .stride-build-logs/*.log
+      - .stride-build-logs/metadata.json
+
+    publishing:
+      email:
+        recipients:
+          - strideproject77@gmail.com
+        notify:
+          success: true
+          failure: true
