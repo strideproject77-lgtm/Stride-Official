@@ -1885,7 +1885,19 @@ impl AndroidRuntime {
                 2 => {
                     let mut paint = Paint::new();
                     paint.color = color("Arg4")?;
-                    canvas.draw_rect(RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?), &paint);
+                    paint.style = match read("Arg5").map(|value| value.as_int()).unwrap_or(0) {
+                        1 => PaintStyle::Stroke,
+                        2 => PaintStyle::FillAndStroke,
+                        _ => PaintStyle::Fill,
+                    };
+                    paint.stroke_width = read("Arg6")
+                        .map(|value| value.as_float())
+                        .unwrap_or(1.0)
+                        .max(0.0);
+                    canvas.draw_rect(
+                        RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?),
+                        &paint,
+                    );
                 }
                 3 => {
                     let text_id = read("Arg0")?.as_object().ok_or("Guest Canvas drawText received null text")?;
