@@ -17,6 +17,25 @@ fn int(args: &[Value], index: usize, default: i32) -> i32 {
 fn float(args: &[Value], index: usize) -> f32 {
     args.get(index).map(Value::as_float).unwrap_or(0.0)
 }
+
+fn rounded_rect_paint_args(env: &mut JniEnv<'_>, paint: u32) -> Result<[Value; 2], String> {
+    let style_object = env.get_object_field(paint, "mStyleObject")?.as_object();
+    let style_name = style_object
+        .and_then(|id| env.get_object_field(id, "name").ok().and_then(|v| v.as_object()))
+        .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned))
+        .or_else(|| style_object
+            .and_then(|id| env.get_object_field(id, "mName").ok().and_then(|v| v.as_object()))
+            .and_then(|id| env.get_string_utf(id).ok().map(str::to_owned)));
+    let style = match style_name.as_deref() {
+        Some("STROKE") => 1,
+        Some("FILL_AND_STROKE") => 2,
+        _ => 0,
+    };
+    let stroke_width = env.get_object_field(paint, "mStrokeWidth")
+        .map(|value| value.as_float())
+        .unwrap_or(1.0);
+    Ok([Value::Int(style), Value::Float(stroke_width)])
+}
 fn append(env: &mut JniEnv<'_>, canvas: u32, kind: i32, values: &[Value]) -> Result<(), String> {
     let count = env.get_object_field(canvas, "mStrideCommandCount")?.as_int().clamp(0, 16384) as usize;
     let prefix = format!("mStrideCommand{}", count);
@@ -57,6 +76,7 @@ fn register(registry: &mut JniNativeRegistry) {
         let rect = args.get(1).and_then(Value::as_object).ok_or("Canvas.drawRoundRect RectF is null")?;
         let paint = args.get(4).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
         let color = env.get_object_field(paint, "mColor")?;
+        let paint_args = rounded_rect_paint_args(env, paint)?;
         let left = env.get_object_field(rect, "left")?.as_float();
         let top = env.get_object_field(rect, "top")?.as_float();
         let right = env.get_object_field(rect, "right")?.as_float();
@@ -64,6 +84,7 @@ fn register(registry: &mut JniNativeRegistry) {
         append(env, canvas, 12, &[
             Value::Float(left), Value::Float(top), Value::Float(right), Value::Float(bottom),
             Value::Float(float(args, 2)), Value::Float(float(args, 3)), color,
+            paint_args[0], paint_args[1],
         ])?;
         Ok(None)
     });
@@ -71,10 +92,12 @@ fn register(registry: &mut JniNativeRegistry) {
         let canvas = receiver(args)?;
         let paint = args.get(7).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
         let color = env.get_object_field(paint, "mColor")?;
+        let paint_args = rounded_rect_paint_args(env, paint)?;
         append(env, canvas, 12, &[
             Value::Float(float(args, 1)), Value::Float(float(args, 2)),
             Value::Float(float(args, 3)), Value::Float(float(args, 4)),
             Value::Float(float(args, 5)), Value::Float(float(args, 6)), color,
+            paint_args[0], paint_args[1],
         ])?;
         Ok(None)
     });
@@ -242,6 +265,11 @@ mod tests {
         heap.set_instance_field(rect, "right", Value::Float(30.0)).unwrap();
         heap.set_instance_field(rect, "bottom", Value::Float(40.0)).unwrap();
         heap.set_instance_field(paint, "mColor", Value::Int(0xff123456u32 as i32)).unwrap();
+        heap.set_instance_field(paint, "mStrokeWidth", Value::Float(3.5)).unwrap();
+        let style = heap.allocate_instance("Landroid/graphics/Paint$Style;").unwrap();
+        let style_name = heap.allocate_string("STROKE").unwrap();
+        heap.set_instance_field(style, "name", Value::Object(style_name)).unwrap();
+        heap.set_instance_field(paint, "mStyleObject", Value::Object(style)).unwrap();
         let draw = registry.find("Landroid/graphics/Canvas;", "drawRoundRect",
             "(Landroid/graphics/RectF;FFLandroid/graphics/Paint;)V").unwrap().clone();
         draw(&mut JniEnv::new(&mut heap), &[
@@ -252,6 +280,8 @@ mod tests {
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Type").unwrap(), Value::Int(12));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg4").unwrap(), Value::Float(5.0));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(), Value::Int(0xff123456u32 as i32));
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg7").unwrap(), Value::Int(1));
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg8").unwrap(), Value::Float(3.5));
     }
 
     #[test]
