@@ -229,26 +229,6 @@ mod tests {
         ]).unwrap();
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand1Arg3").unwrap(), Value::Int(255));
     }
-}
-
-pub(crate) fn record_bitmap_draw(
-    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32, x: f32, y: f32,
-) -> Result<(), String> {
-    append(env, canvas, 10, &[Value::Object(bitmap), Value::Float(x), Value::Float(y)])
-}
-
-pub(crate) fn record_bitmap_draw_bounds(
-    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32,
-    left: i32, top: i32, right: i32, bottom: i32, alpha: i32,
-) -> Result<(), String> {
-    append(env, canvas, 11, &[
-        Value::Object(bitmap), Value::Int(left), Value::Int(top),
-        Value::Int(right), Value::Int(bottom), Value::Int(alpha.clamp(0, 255)),
-    ])
-}
-
-pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
-    register(registry);
     #[test]
     fn records_guest_draw_round_rect_with_rect_and_radii() {
         let mut registry = JniNativeRegistry::new();
@@ -292,5 +272,26 @@ pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(),
             Value::Int(0xffabcdefu32 as i32));
     }
+}
+
+pub(crate) fn record_bitmap_draw(
+    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32, x: f32, y: f32,
+) -> Result<(), String> {
+    append(env, canvas, 10, &[Value::Object(bitmap), Value::Float(x), Value::Float(y)])
+}
+
+pub(crate) fn record_bitmap_draw_bounds(
+    env: &mut JniEnv<'_>, canvas: u32, bitmap: u32,
+    left: i32, top: i32, right: i32, bottom: i32, alpha: i32,
+) -> Result<(), String> {
+    append(env, canvas, 11, &[
+        Value::Object(bitmap), Value::Int(left), Value::Int(top),
+        Value::Int(right), Value::Int(bottom), Value::Int(alpha.clamp(0, 255)),
+    ])
+}
+
+pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
+    register(registry);
+
 
 }
