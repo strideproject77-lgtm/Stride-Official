@@ -473,7 +473,7 @@ impl<'a> Canvas<'a> {
                         CGContextSetFontSize(context, effective_text_size as f64);
                     } else {
                         // ASCII/MacRoman text uses the platform Helvetica fallback.
-                        CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
+                        CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), effective_text_size as f64, 1);
                     }
                     CGContextShowTextAtPoint(context, draw_x as f64, draw_baseline as f64, bytes.as_ptr().cast(), bytes.len());
                     CGContextFlush(context);
