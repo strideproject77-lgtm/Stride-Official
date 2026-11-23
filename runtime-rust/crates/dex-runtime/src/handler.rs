@@ -7,6 +7,9 @@
 use std::collections::BinaryHeap;
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use crate::jni::JniNativeRegistry;
+use crate::types::Value;
 
 /// A single message in the Android MessageQueue.
 #[derive(Debug, Clone)]
@@ -233,9 +236,114 @@ impl LooperCoordinator {
     }
 }
 
+
+/// Shared identity for the guest process's main Looper object.
+pub type MainLooperRef = Arc<Mutex<Option<u32>>>;
+
+fn get_or_create_main_looper(
+    env: &mut crate::jni::JniEnv<'_>,
+    shared: &MainLooperRef,
+) -> Result<u32, String> {
+    let mut stored = shared.lock().map_err(|_| "main Looper reference lock poisoned")?;
+    if let Some(id) = *stored {
+        if env.heap.get(id).is_ok() {
+            return Ok(id);
+        }
+    }
+    let id = env.heap.allocate_instance("Landroid/os/Looper;")
+        .map_err(|error| format!("main Looper allocation failed: {error:?}"))?;
+    env.set_object_field(id, "mStrideLooperId", Value::Int(1))?;
+    *stored = Some(id);
+    Ok(id)
+}
+
+/// Registers correctly typed Looper object-returning methods and Handler
+/// constructors. Scheduling remains owned by the runtime event pump.
+pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef) {
+    for name in ["getMainLooper", "myLooper"] {
+        let shared = main.clone();
+        registry.register(
+            "Landroid/os/Looper;",
+            name,
+            "()Landroid/os/Looper;",
+            move |env, _args| {
+                let id = get_or_create_main_looper(env, &shared)?;
+                Ok(Some(Value::Object(id)))
+            },
+        );
+    }
+
+    let shared = main.clone();
+    registry.register("Landroid/os/Handler;", "<init>", "()V", move |env, args| {
+        let handler = args.first().and_then(Value::as_object)
+            .filter(|id| *id != 0).ok_or("Handler constructor receiver is null")?;
+        let looper = get_or_create_main_looper(env, &shared)?;
+        env.set_object_field(handler, "mLooper", Value::Object(looper))?;
+        Ok(None)
+    });
+
+    registry.register(
+        "Landroid/os/Handler;",
+        "<init>",
+        "(Landroid/os/Looper;)V",
+        |env, args| {
+            let handler = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("Handler constructor receiver is null")?;
+            let looper = args.get(1).and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("Handler constructor Looper is null")?;
+            if !env.heap.contains(looper) {
+                return Err("Handler constructor received an invalid Looper object".into());
+            }
+            env.set_object_field(handler, "mLooper", Value::Object(looper))?;
+            Ok(None)
+        },
+    );
+
+    registry.register(
+        "Landroid/os/Handler;",
+        "getLooper",
+        "()Landroid/os/Looper;",
+        |env, args| {
+            let handler = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("Handler.getLooper receiver is null")?;
+            Ok(Some(env.get_object_field(handler, "mLooper")?))
+        },
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::heap::ManagedHeap;
+    use crate::jni::JniEnv;
+
+    #[test]
+    fn main_looper_jni_returns_a_stable_object_reference() {
+        let mut registry = JniNativeRegistry::new();
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)));
+        let mut heap = ManagedHeap::default();
+        let main = registry.find("Landroid/os/Looper;", "getMainLooper",
+            "()Landroid/os/Looper;").unwrap().clone();
+        let first = main(&mut JniEnv::new(&mut heap), &[]).unwrap().unwrap().as_object().unwrap();
+        let second = main(&mut JniEnv::new(&mut heap), &[]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(first, second);
+        assert_eq!(heap.get(first).unwrap().class_descriptor(), "Landroid/os/Looper;");
+    }
+
+    #[test]
+    fn handler_constructor_retains_main_looper_object() {
+        let mut registry = JniNativeRegistry::new();
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)));
+        let mut heap = ManagedHeap::default();
+        let handler = heap.allocate_instance("Landroid/os/Handler;").unwrap();
+        let init = registry.find("Landroid/os/Handler;", "<init>", "()V").unwrap().clone();
+        init(&mut JniEnv::new(&mut heap), &[Value::Object(handler)]).unwrap();
+        let get = registry.find("Landroid/os/Handler;", "getLooper",
+            "()Landroid/os/Looper;").unwrap().clone();
+        let looper = get(&mut JniEnv::new(&mut heap), &[Value::Object(handler)])
+            .unwrap().unwrap().as_object().unwrap();
+        assert_eq!(heap.get(looper).unwrap().class_descriptor(), "Landroid/os/Looper;");
+    }
 
     #[test]
     fn message_queue_enqueue_and_drain() {
