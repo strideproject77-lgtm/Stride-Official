@@ -30,6 +30,19 @@ extern "C" {
     fn CGContextShowTextAtPoint(context: *mut c_void, x: f64, y: f64, text: *const c_char, length: usize);
     fn CGContextSetShouldAntialias(context: *mut c_void, should_antialias: bool);
     fn CGContextSetAllowsAntialiasing(context: *mut c_void, allows_antialiasing: bool);
+    fn CGDataProviderCreateWithCFData(data: *const c_void) -> *mut c_void;
+    fn CGDataProviderRelease(provider: *mut c_void);
+    fn CGFontCreateWithDataProvider(provider: *mut c_void) -> *mut c_void;
+    fn CGFontRelease(font: *mut c_void);
+    fn CGContextSetFont(context: *mut c_void, font: *mut c_void);
+    fn CGContextSetFontSize(context: *mut c_void, size: f64);
+}
+
+#[cfg(target_os = "ios")]
+#[link(name = "CoreFoundation", kind = "framework")]
+extern "C" {
+    fn CFDataCreate(allocator: *const c_void, bytes: *const u8, length: isize) -> *mut c_void;
+    fn CFRelease(value: *mut c_void);
 }
 
 #[cfg(target_os = "ios")]
@@ -400,7 +413,20 @@ impl<'a> Canvas<'a> {
     }
 
 
-    pub fn draw_text(&mut self,text:&str,x:f32,baseline:f32,paint:&Paint)->f32 {
+    pub fn draw_text(&mut self, text: &str, x: f32, baseline: f32, paint: &Paint) -> f32 {
+        self.draw_text_with_font(text, x, baseline, paint, None)
+    }
+
+    /// Draw guest text with an optional APK-provided TrueType/OpenType font.
+    /// Font bytes are consumed for this draw and are never registered globally.
+    pub fn draw_text_with_font(
+        &mut self,
+        text: &str,
+        x: f32,
+        baseline: f32,
+        paint: &Paint,
+        font_data: Option<&[u8]>,
+    ) -> f32 {
         #[cfg(target_os = "ios")]
         if let Some(context) = self.native_text_context {
             let mut bytes = Vec::with_capacity(text.len());
@@ -427,27 +453,58 @@ impl<'a> Canvas<'a> {
                         ((color >> 24) & 0xff) as f64 / 255.0,
                     );
                     CGContextSetTextDrawingMode(context, 0);
-                    // The bytes below are ASCII/MacRoman character codes, not font-specific glyph IDs.
-                    // Using kCGEncodingFontSpecific (0) maps letters to unrelated glyphs on device.
-                    CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
+                    let mut custom_font = std::ptr::null_mut();
+                    if let Some(data) = font_data.filter(|data| !data.is_empty()) {
+                        let cf_data = CFDataCreate(std::ptr::null(), data.as_ptr(), data.len() as isize);
+                        if !cf_data.is_null() {
+                            let provider = CGDataProviderCreateWithCFData(cf_data);
+                            if !provider.is_null() {
+                                custom_font = CGFontCreateWithDataProvider(provider);
+                                CGDataProviderRelease(provider);
+                            }
+                            CFRelease(cf_data);
+                        }
+                    }
+                    if !custom_font.is_null() {
+                        CGContextSetFont(context, custom_font);
+                        CGContextSetFontSize(context, paint.text_size.max(1.0) as f64);
+                    } else {
+                        // ASCII/MacRoman text uses the platform Helvetica fallback.
+                        CGContextSelectFont(context, b"Helvetica\0".as_ptr().cast(), paint.text_size.max(1.0) as f64, 1);
+                    }
                     CGContextShowTextAtPoint(context, x as f64, baseline as f64, bytes.as_ptr().cast(), bytes.len());
                     CGContextFlush(context);
+                    if !custom_font.is_null() {
+                        CGFontRelease(custom_font);
+                    }
                 }
             }
             return x + bytes.len() as f32 * paint.text_size.max(1.0) * 0.56;
         }
 
-        // Non-iOS test hosts retain the deterministic fallback rasterizer. Physical
-        // iPhone builds use native Helvetica glyphs instead of enlarged 5x7 pixels.
-        let scale=(paint.text_size/7.0).max(1.0);let mut cursor=x;
-        for ch in text.chars(){if ch=='\n'{continue;}let rows=glyph5x7(ch.to_ascii_uppercase());
-            for(row,bits)in rows.iter().enumerate(){for col in 0..5{if bits&(1<<(4-col))!=0{
-                let left=cursor+col as f32*scale;let top=baseline-7.0*scale+row as f32*scale;
-                self.draw_rect(RectF::new(left,top,left+scale,top+scale),paint);
-            }}}
-            cursor+=6.0*scale;
-        }cursor
+        #[cfg(not(target_os = "ios"))]
+        let _ = font_data;
+
+        // Non-iOS test hosts retain the deterministic fallback rasterizer.
+        let scale = (paint.text_size / 7.0).max(1.0);
+        let mut cursor = x;
+        for ch in text.chars() {
+            if ch == '\n' { continue; }
+            let rows = glyph5x7(ch.to_ascii_uppercase());
+            for (row, bits) in rows.iter().enumerate() {
+                for col in 0..5 {
+                    if bits & (1 << (4 - col)) != 0 {
+                        let left = cursor + col as f32 * scale;
+                        let top = baseline - 7.0 * scale + row as f32 * scale;
+                        self.draw_rect(RectF::new(left, top, left + scale, top + scale), paint);
+                    }
+                }
+            }
+            cursor += 6.0 * scale;
+        }
+        cursor
     }
+
     pub fn draw_image_argb(&mut self,pixels:&[u32],width:u32,height:u32,left:i32,top:i32){
         self.draw_image_argb_scaled_alpha(pixels, width, height, left, top,
             left.saturating_add(width as i32), top.saturating_add(height as i32), 255);
