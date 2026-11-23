@@ -228,6 +228,15 @@ impl ResourceCatalog {
         Ok(catalog)
     }
 
+    /// Merges a selected configuration split into the base resource catalog.
+    /// Values from the later table override matching IDs, while unrelated IDs
+    /// remain available from the base package.
+    pub fn merge(&mut self, other: ResourceCatalog) {
+        self.strings.extend(other.strings);
+        self.colors.extend(other.colors);
+        self.files.extend(other.files);
+    }
+
     pub fn string(&self, id: u32) -> Option<&str> {
         self.strings.get(&id).map(String::as_str)
     }
