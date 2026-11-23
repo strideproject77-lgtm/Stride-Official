@@ -1953,9 +1953,14 @@ impl AndroidRuntime {
         )?;
         drop(canvas);
         self.rendered_view_bounds = rendered_view_bounds;
-        self.dispatch_window_insets()?;
+        let insets_dispatched = self.dispatch_window_insets()?;
         self.render_guest_custom_view_drawing()?;
-
+        // Insets listeners may call setPadding(). Re-run layout once after the
+        // first callback so the very first visible frame uses the adjusted content
+        // bounds; dispatched-view tracking prevents recursive callback delivery.
+        if insets_dispatched {
+            return self.render_active_activity_surface();
+        }
 
         if !self.initial_render_summary_recorded {
             self.diagnostics.record(
