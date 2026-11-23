@@ -12,7 +12,7 @@ use crate::heap::ManagedHeap;
 use crate::sync::MonitorTable;
 use crate::jni::JniNativeRegistry;
 use crate::framework::{AndroidEnvironment, ActivityLifecycleState, Intent, PackageInfo, ActivityInfo, ServiceInfo};
-use crate::graphics::{Surface, InputQueue, DisplayMetrics, ACTION_DOWN, ACTION_UP, ACTION_CANCEL};
+use crate::graphics::{Surface, InputQueue, DisplayMetrics, ScreenOrientation, ACTION_DOWN, ACTION_UP, ACTION_CANCEL};
 use crate::interpreter::{ArtVm, ExecutionStopReason};
 use crate::types::Value;
 use crate::diagnostics::{RuntimeDiagnostics, DiagnosticSeverity};
@@ -30,6 +30,16 @@ use crate::handler::LooperCoordinator;
 use crate::native_activity::NativeActivityLauncher;
 use crate::native_execution::{NativeGuestImage, NativeLibraryStage};
 use crate::arm64_guest::Arm64Cpu;
+
+/// Maps Android ActivityInfo.screenOrientation constants to the virtual display.
+/// Sensor/user modes remain device-driven and do not force a fixed orientation.
+fn android_screen_orientation(value: i32) -> Option<ScreenOrientation> {
+    match value {
+        0 | 6 | 8 | 11 => Some(ScreenOrientation::Landscape),
+        1 | 7 | 9 | 12 => Some(ScreenOrientation::Portrait),
+        _ => None,
+    }
+}
 
 /// Diagnostic execution report returned after launching an APK.
 #[derive(Debug, Clone, PartialEq)]
@@ -1071,6 +1081,29 @@ impl AndroidRuntime {
             }
         };
 
+        let launcher_orientation = manifest.launcher_activity.as_deref()
+            .and_then(|launcher| manifest.components.iter()
+                .find(|component| component.name == launcher && component.kind == "activity"))
+            .and_then(|component| component.screen_orientation);
+        if let Some(raw_orientation) = launcher_orientation {
+            if let Some(orientation) = android_screen_orientation(raw_orientation) {
+                self.display_metrics.set_orientation(orientation);
+                self.surface.resize(
+                    self.display_metrics.width_pixels,
+                    self.display_metrics.height_pixels,
+                );
+                self.diagnostics.record(
+                    DiagnosticSeverity::Info,
+                    "Display",
+                    "MANIFEST_ORIENTATION_APPLIED",
+                    Some(&format!(
+                        "Android screenOrientation={} resolved to {:?} ({}x{})",
+                        raw_orientation, orientation, self.surface.width, self.surface.height
+                    )),
+                );
+            }
+        }
+
         if let Some(pkg) = manifest.package_name {
             self.environment.package_name = pkg.clone();
             self.environment.package_info = Some(PackageInfo {
@@ -1083,7 +1116,7 @@ impl AndroidRuntime {
                 activities: manifest.components.iter().filter(|c| c.kind == "activity").map(|c| ActivityInfo {
                     name: c.name.clone(),
                     exported: c.exported.unwrap_or(false),
-                    screen_orientation: 0,
+                    screen_orientation: c.screen_orientation.unwrap_or(-1),
                 }).collect(),
                 services: manifest.components.iter().filter(|c| c.kind == "service").map(|c| ServiceInfo {
                     name: c.name.clone(),
@@ -2728,6 +2761,20 @@ mod framework_bridge_tests {
 #[cfg(test)]
 mod managed_view_input_tests {
     use super::*;
+
+    #[test]
+    fn android_screen_orientation_constants_map_to_correct_display_axes() {
+        assert_eq!(android_screen_orientation(0), Some(ScreenOrientation::Landscape));
+        assert_eq!(android_screen_orientation(1), Some(ScreenOrientation::Portrait));
+        assert_eq!(android_screen_orientation(6), Some(ScreenOrientation::Landscape));
+        assert_eq!(android_screen_orientation(7), Some(ScreenOrientation::Portrait));
+        assert_eq!(android_screen_orientation(8), Some(ScreenOrientation::Landscape));
+        assert_eq!(android_screen_orientation(9), Some(ScreenOrientation::Portrait));
+        assert_eq!(android_screen_orientation(11), Some(ScreenOrientation::Landscape));
+        assert_eq!(android_screen_orientation(12), Some(ScreenOrientation::Portrait));
+        assert_eq!(android_screen_orientation(4), None);
+        assert_eq!(android_screen_orientation(10), None);
+    }
 
     #[test]
     fn external_activity_intents_are_rejected_without_mutating_backstack() {
