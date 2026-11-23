@@ -69,7 +69,7 @@ fn register(registry: &mut JniNativeRegistry) {
     });
     registry.register("Landroid/graphics/Canvas;", "drawRoundRect", "(FFFFFFLandroid/graphics/Paint;)V", |env, args| {
         let canvas = receiver(args)?;
-        let paint = args.get(6).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
+        let paint = args.get(7).and_then(Value::as_object).ok_or("Canvas.drawRoundRect Paint is null")?;
         let color = env.get_object_field(paint, "mColor")?;
         append(env, canvas, 12, &[
             Value::Float(float(args, 1)), Value::Float(float(args, 2)),
@@ -272,6 +272,25 @@ pub(crate) fn register_core_canvas_methods(registry: &mut JniNativeRegistry) {
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Type").unwrap(), Value::Int(12));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg4").unwrap(), Value::Float(5.0));
         assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(), Value::Int(0xff123456u32 as i32));
+    }
+
+    #[test]
+    fn records_guest_draw_round_rect_float_overload() {
+        let mut registry = JniNativeRegistry::new();
+        register(&mut registry);
+        let mut heap = ManagedHeap::default();
+        let canvas = heap.allocate_instance("Landroid/graphics/Canvas;").unwrap();
+        let paint = heap.allocate_instance("Landroid/graphics/Paint;").unwrap();
+        heap.set_instance_field(paint, "mColor", Value::Int(0xffabcdefu32 as i32)).unwrap();
+        let draw = registry.find("Landroid/graphics/Canvas;", "drawRoundRect",
+            "(FFFFFFLandroid/graphics/Paint;)V").unwrap().clone();
+        draw(&mut JniEnv::new(&mut heap), &[
+            Value::Object(canvas), Value::Float(1.0), Value::Float(2.0),
+            Value::Float(30.0), Value::Float(40.0), Value::Float(4.0),
+            Value::Float(5.0), Value::Object(paint),
+        ]).unwrap();
+        assert_eq!(heap.get_instance_field(canvas, "mStrideCommand0Arg6").unwrap(),
+            Value::Int(0xffabcdefu32 as i32));
     }
 
 }
