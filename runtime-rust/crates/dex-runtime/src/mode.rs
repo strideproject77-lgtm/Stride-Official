@@ -62,7 +62,7 @@ pub struct ExecutionPlan {
     pub mode: ExecutionMode,
     pub managed: ManagedExecutionBackend,
     pub native: NativeExecutionBackend,
-    pub jit_enabled: bool,
+    pub native_jit_enabled: bool,
     pub p12_required: bool,
 }
 
@@ -71,7 +71,7 @@ impl ExecutionMode {
     /// This only builds a truthful execution plan; it does not claim that a
     /// not-yet-implemented native backend can execute an APK.
     pub fn resolve(self, caps: RuntimeCapabilities) -> Result<ExecutionPlan, ModeError> {
-        let (native, jit_enabled, p12_required) = match self {
+        let (native, native_jit_enabled, p12_required) = match self {
             Self::FullyJitLess => (
                 if caps.prebuilt_native_artifacts_available {
                     NativeExecutionBackend::PrebuiltSignedArtifacts
@@ -105,7 +105,7 @@ impl ExecutionMode {
                     } else {
                         NativeExecutionBackend::Unavailable
                     },
-                    true,
+                    caps.jit_native_pipeline_ready,
                     false,
                 )
             }
@@ -115,7 +115,7 @@ impl ExecutionMode {
             mode: self,
             managed: ManagedExecutionBackend::Interpreter,
             native,
-            jit_enabled,
+            native_jit_enabled,
             p12_required,
         })
     }
@@ -154,7 +154,7 @@ mod tests {
         let plan = ExecutionMode::FullyJitLess
             .resolve(RuntimeCapabilities::default())
             .unwrap();
-        assert!(!plan.jit_enabled);
+        assert!(!plan.native_jit_enabled);
         assert!(!plan.p12_required);
         assert_eq!(plan.native, NativeExecutionBackend::Unavailable);
     }
@@ -188,7 +188,7 @@ mod tests {
                 ..RuntimeCapabilities::default()
             })
             .unwrap();
-        assert!(plan.jit_enabled);
+        assert!(!plan.native_jit_enabled);
         assert!(!plan.p12_required);
     }
 
@@ -217,6 +217,7 @@ mod tests {
             jit_plan.native,
             NativeExecutionBackend::AuthorizedJitTranslation
         );
+        assert!(jit_plan.native_jit_enabled);
     }
 
     #[test]
