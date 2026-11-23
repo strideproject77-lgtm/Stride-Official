@@ -177,52 +177,38 @@ final class DeveloperIdentityStore {
         return IdentitySummary(subject: subject, sha256Fingerprint: fingerprint, teamIdentifier: teamIdentifier)
     }
 
-    /// Apple Developer signing certificates carry the Team ID in the subject's
-    /// Organizational Unit (OID 2.5.4.11).
+    /// Extracts the Apple Developer Team ID from the certificate subject's
+    /// Organizational Unit (OID 2.5.4.11) using the X.509 DER structure.
+    /// This avoids platform-specific certificate-display constants.
     private func certificateTeamIdentifier(for identity: SecIdentity) throws -> String {
         var certificate: SecCertificate?
         let status = SecIdentityCopyCertificate(identity, &certificate)
         guard status == errSecSuccess, let certificate else {
             throw StoreError.certificateMissing
         }
-        var error: Unmanaged<CFError>?
-        guard let values = SecCertificateCopyValues(
-            certificate,
-            [kSecOIDX509V1SubjectName] as CFArray,
-            &error
-        ) as? [String: Any] else {
-            throw StoreError.certificateTeamMissing
-        }
-        let organizationalUnits = valuesForOID("2.5.4.11", in: values)
-        guard let team = organizationalUnits.first(where: {
-            $0.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil
-        }) else {
+        let der = SecCertificateCopyData(certificate) as Data
+        guard let team = organizationalUnitValues(inX509Certificate: der).first(where: isValidTeamIdentifier) else {
             throw StoreError.certificateTeamMissing
         }
         return team
     }
 
-    /// Reads TeamIdentifier from the CMS-wrapped embedded.mobileprovision file.
+    /// Reads the XML plist embedded in Apple's CMS-wrapped mobileprovision.
+    /// Provisioning profiles are CMS SignedData; the encapsulated plist is
+    /// present as an XML payload and can be parsed without CMS private APIs.
     private func installedAppTeamIdentifier() throws -> String {
         guard let profileURL = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
               let profileData = try? Data(contentsOf: profileURL) else {
             throw StoreError.provisioningProfileMissing
         }
 
-        var decoder: CMSDecoder?
-        guard CMSDecoderCreate(&decoder) == errSecSuccess, let decoder else {
+        let opening = Data("<?xml".utf8)
+        let closing = Data("</plist>".utf8)
+        guard let xmlStart = profileData.range(of: opening)?.lowerBound,
+              let plistEnd = profileData.range(of: closing, in: xmlStart..<profileData.endIndex)?.upperBound else {
             throw StoreError.invalidProvisioningProfile
         }
-        guard CMSDecoderUpdateMessage(decoder, profileData as CFData) == errSecSuccess,
-              CMSDecoderFinalizeMessage(decoder) == errSecSuccess else {
-            throw StoreError.invalidProvisioningProfile
-        }
-        var decodedContent: CFData?
-        guard CMSDecoderCopyContent(decoder, &decodedContent) == errSecSuccess,
-              let decodedContent else {
-            throw StoreError.invalidProvisioningProfile
-        }
-        let plistData = decodedContent as Data
+        let plistData = profileData.subdata(in: xmlStart..<plistEnd)
         guard let plist = try? PropertyListSerialization.propertyList(
             from: plistData,
             options: [],
@@ -230,38 +216,85 @@ final class DeveloperIdentityStore {
         ) as? [String: Any],
         let identifiers = plist["TeamIdentifier"] as? [String],
         let team = identifiers.first,
-        team.range(of: "^[A-Z0-9]{10}$", options: .regularExpression) != nil else {
+        isValidTeamIdentifier(team) else {
             throw StoreError.invalidProvisioningProfile
         }
         return team
     }
 
-    private func valuesForOID(_ oid: String, in value: Any) -> [String] {
-        if let dictionary = value as? [String: Any] {
-            var matches: [String] = []
-            for (key, nested) in dictionary {
-                if key == oid {
-                    matches.append(contentsOf: stringLeaves(in: nested))
-                } else {
-                    matches.append(contentsOf: valuesForOID(oid, in: nested))
-                }
-            }
-            return matches
+    private func isValidTeamIdentifier(_ value: String) -> Bool {
+        value.count == 10 && value.unicodeScalars.allSatisfy {
+            CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789").contains($0)
         }
-        if let array = value as? [Any] {
-            return array.flatMap { valuesForOID(oid, in: $0) }
-        }
-        return []
     }
 
-    private func stringLeaves(in value: Any) -> [String] {
-        if let string = value as? String { return [string] }
-        if let dictionary = value as? [String: Any] {
-            return dictionary.values.flatMap { stringLeaves(in: $0) }
+    /// Minimal bounds-checked DER reader. Returns tag, content range and next offset.
+    private func derElement(_ data: Data, at offset: Int) -> (tag: UInt8, content: Range<Int>, next: Int)? {
+        guard offset >= 0, offset + 2 <= data.count else { return nil }
+        let tag = data[offset]
+        var cursor = offset + 1
+        let firstLength = Int(data[cursor])
+        cursor += 1
+        let length: Int
+        if firstLength & 0x80 == 0 {
+            length = firstLength
+        } else {
+            let byteCount = firstLength & 0x7f
+            guard byteCount > 0, byteCount <= 4, cursor + byteCount <= data.count else { return nil }
+            var parsed = 0
+            for _ in 0..<byteCount {
+                parsed = (parsed << 8) | Int(data[cursor])
+                cursor += 1
+            }
+            length = parsed
         }
-        if let array = value as? [Any] {
-            return array.flatMap { stringLeaves(in: $0) }
-        }
-        return []
+        guard length >= 0, cursor <= data.count, length <= data.count - cursor else { return nil }
+        return (tag, cursor..<(cursor + length), cursor + length)
     }
-}
+
+    private func organizationalUnitValues(inX509Certificate data: Data) -> [String] {
+        guard let certificate = derElement(data, at: 0), certificate.tag == 0x30,
+              let tbs = derElement(data, at: certificate.content.lowerBound), tbs.tag == 0x30 else {
+            return []
+        }
+        var cursor = tbs.content.lowerBound
+        guard cursor < tbs.content.upperBound else { return [] }
+
+        // TBSCertificate: optional version [0], serial, signature, issuer, validity, subject.
+        if let first = derElement(data, at: cursor), first.tag == 0xA0 {
+            cursor = first.next
+        }
+        for _ in 0..<4 {
+            guard let field = derElement(data, at: cursor) else { return [] }
+            cursor = field.next
+        }
+        guard let subject = derElement(data, at: cursor), subject.tag == 0x30 else { return [] }
+
+        var values: [String] = []
+        var setCursor = subject.content.lowerBound
+        while setCursor < subject.content.upperBound {
+            guard let rdnSet = derElement(data, at: setCursor), rdnSet.tag == 0x31 else { break }
+            var attributeCursor = rdnSet.content.lowerBound
+            while attributeCursor < rdnSet.content.upperBound {
+                guard let attribute = derElement(data, at: attributeCursor), attribute.tag == 0x30 else { break }
+                var partCursor = attribute.content.lowerBound
+                guard let oid = derElement(data, at: partCursor), oid.tag == 0x06 else {
+                    attributeCursor = attribute.next
+                    continue
+                }
+                partCursor = oid.next
+                if Array(data[oid.content]) == [0x55, 0x04, 0x0B],
+                   let value = derElement(data, at: partCursor) {
+                    let raw = data.subdata(in: value.content)
+                    let decoded = String(data: raw, encoding: .utf8)
+                        ?? String(data: raw, encoding: .utf16BigEndian)
+                    if let decoded { values.append(decoded) }
+                }
+                attributeCursor = attribute.next
+            }
+            setCursor = rdnSet.next
+        }
+        return values
+    }
+
+}\n
