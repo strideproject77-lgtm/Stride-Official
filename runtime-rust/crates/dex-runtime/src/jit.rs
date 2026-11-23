@@ -305,6 +305,50 @@ pub fn compile_dex_method(
 mod tests {
     use super::*;
 
+    #[test]
+    fn compiles_straight_line_dex_integer_add_to_arm64() {
+        // const/4 v1, 3; const/4 v2, 4; add-int v0, v1, v2; return v0
+        let method = compile_dex_method(&[0x3112, 0x4212, 0x0090, 0x0201, 0x000f], 3).unwrap();
+        assert_eq!(method.architecture, JitArchitecture::Arm64);
+        assert_eq!(method.entry_offset, 0);
+        assert_eq!(method.dex_instructions, 4);
+        assert_eq!(method.code.len() % 4, 0);
+        assert_eq!(&method.code[method.code.len() - 4..], &[0xc0, 0x03, 0x5f, 0xd6]);
+        assert_eq!(method.artifact().bytes, method.code.as_slice());
+    }
+
+    #[test]
+    fn compiler_sign_extends_negative_const4_values() {
+        // const/4 v1, -1; return v1
+        let method = compile_dex_method(&[0xf112, 0x010f], 2).unwrap();
+        let words = method.code.chunks_exact(4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(words[3], 0x529f_ffe1); // MOVZ W1, #0xffff
+        assert_eq!(words[4], 0x72bf_ffe1); // MOVK W1, #0xffff, LSL #16
+        assert_eq!(*words.last().unwrap(), 0xd65f_03c0); // RET
+    }
+
+    #[test]
+    fn compiler_rejects_unimplemented_control_flow_instructions() {
+        assert_eq!(
+            compile_dex_method(&[0x0028], 1),
+            Err(JitCompileError::UnsupportedOpcode { pc: 0, opcode: 0x28 })
+        );
+    }
+
+    #[test]
+    fn compiler_rejects_truncated_const_and_invalid_registers() {
+        assert_eq!(
+            compile_dex_method(&[0x0013], 1),
+            Err(JitCompileError::TruncatedInstruction { pc: 0 })
+        );
+        assert_eq!(
+            compile_dex_method(&[0x1012, 0x000f], 1),
+            Err(JitCompileError::InvalidRegister { pc: 0, register: 1 })
+        );
+    }
+
     #[derive(Default)]
     struct MockHost {
         authorized: bool,
