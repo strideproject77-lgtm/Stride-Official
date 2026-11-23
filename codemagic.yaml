@@ -8,6 +8,8 @@ workflows:
     # GitHub Actions remains independently available for normal CI and manual IPA builds.
 
     environment:
+      groups:
+        - stride-ios
       vars:
         STRIDE_REPOSITORY: strideproject77-lgtm/Stride-Official
         STRIDE_LOG_BRANCH: stride-codemagic-logs
