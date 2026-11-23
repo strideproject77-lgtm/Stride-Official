@@ -44,6 +44,40 @@ workflows:
             "logs_branch": "stride-codemagic-logs"
           }
           EOF
+            # Build one downloadable ZIP containing the IPA (when available) and diagnostics.
+            PACKAGE_NAME="Stride-Complete-Artifacts"
+            PACKAGE_STAGE="$(mktemp -d)"
+            PACKAGE_ROOT="$PACKAGE_STAGE/$PACKAGE_NAME"
+            mkdir -p "$PACKAGE_ROOT/build-logs"
+            if [ -s "$ROOT/build/ios/Stride-unsigned.ipa" ]; then
+              cp -p "$ROOT/build/ios/Stride-unsigned.ipa" "$PACKAGE_ROOT/"
+            fi
+            for file in "$LOG_DIR"/*; do
+              if [ -f "$file" ]; then cp -p "$file" "$PACKAGE_ROOT/build-logs/"; fi
+            done
+            {
+              echo "Stride complete build artifacts"
+              echo "Build ID: ${CM_BUILD_ID:-unknown}"
+              echo "Build number: ${CM_BUILD_NUMBER:-unknown}"
+              echo "Source branch: ${CM_BRANCH:-unknown}"
+              echo "Source commit: ${CM_COMMIT:-unknown}"
+              echo "Build exit status: $build_status"
+              echo "Created UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo
+              echo "Contents:"
+              echo "- Stride-unsigned.ipa (included when build succeeded)"
+              echo "- build-logs/ (available build logs and metadata)"
+            } > "$PACKAGE_ROOT/BUILD-INFO.txt"
+            rm -f "$ROOT/Stride-Complete-Artifacts.zip"
+            (cd "$PACKAGE_STAGE" && ditto -c -k --sequesterRsrc --keepParent "$PACKAGE_NAME" "$ROOT/Stride-Complete-Artifacts.zip")
+            rm -rf "$PACKAGE_STAGE"
+            if [ -s "$ROOT/Stride-Complete-Artifacts.zip" ]; then
+              unzip -t "$ROOT/Stride-Complete-Artifacts.zip" >/dev/null
+              echo "Created and validated Stride-Complete-Artifacts.zip."
+            else
+              echo "WARNING: Could not create Stride-Complete-Artifacts.zip."
+            fi
+
             if [ -n "${STRIDE_LOGS_GITHUB_TOKEN:-}" ]; then
               cd "$ROOT"
               LATEST_TMP="$(mktemp)"
@@ -163,7 +197,7 @@ workflows:
           ls -lh "$CM_BUILD_DIR/build/ios/Stride-unsigned.ipa"
 
     artifacts:
-      - build/ios/Stride-unsigned.ipa
+      - Stride-Complete-Artifacts.zip
       - .stride-build-logs/*.log
       - .stride-build-logs/metadata.json
 
