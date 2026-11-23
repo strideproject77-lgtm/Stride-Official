@@ -393,8 +393,9 @@ pub unsafe extern "C" fn stride_runtime_pump_guest_events(
     let rt = unsafe { &mut *runtime };
     rt.last_touch_processing_ms = None;
     let result = catch_unwind(AssertUnwindSafe(|| {
-        // AndroidRuntime pumps callbacks and redraws only when queued guest input exists.
-        // Do not synthesize a render on every host display-link tick.
+        // The iOS display-link calls this once per frame. The runtime dispatches
+        // queued input, advances app-owned custom View tick() callbacks, and redraws
+        // only when input or a guest frame callback actually changed guest state.
         rt.pump_guest_events(max_events as usize,step_budget)
     }));
     match result {
