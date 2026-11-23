@@ -1913,6 +1913,14 @@ impl AndroidRuntime {
                         alpha,
                     );
                 }
+                12 => {
+                    let mut paint = Paint::new();
+                    paint.color = color("Arg6")?;
+                    canvas.draw_round_rect(
+                        RectF::new(number("Arg0")?, number("Arg1")?, number("Arg2")?, number("Arg3")?),
+                        number("Arg4")?, number("Arg5")?, &paint,
+                    );
+                }
                 11 => {
                     let bitmap_id = read("Arg0")?.as_object().ok_or("Guest Drawable draw received null bitmap")?;
                     let width = heap.get_instance_field(bitmap_id, "mStrideWidth")
