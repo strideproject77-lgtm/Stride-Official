@@ -297,4 +297,4 @@ final class DeveloperIdentityStore {
         return values
     }
 
-}\n
+}}
