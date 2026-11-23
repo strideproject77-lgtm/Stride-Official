@@ -259,6 +259,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn selected_split_catalog_overrides_matching_base_resource_ids() {
+        let mut base = ResourceCatalog::default();
+        base.strings.insert(0x7f010001, "Base".into());
+        base.strings.insert(0x7f010002, "Keep".into());
+        base.files.insert(0x7f020001, "res/drawable/base.png".into());
+        let mut split = ResourceCatalog::default();
+        split.strings.insert(0x7f010001, "Localized".into());
+        split.colors.insert(0x7f030001, 0xff123456);
+        base.merge(split);
+        assert_eq!(base.string(0x7f010001), Some("Localized"));
+        assert_eq!(base.string(0x7f010002), Some("Keep"));
+        assert_eq!(base.color(0x7f030001), Some(0xff123456));
+        assert_eq!(base.file(0x7f020001), Some("res/drawable/base.png"));
+    }
+
+    #[test]
     fn rejects_truncated_table() {
         assert!(ResourceCatalog::parse(&[2, 0, 12, 0, 12, 0, 0, 0]).is_err());
     }
