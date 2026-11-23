@@ -223,7 +223,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         let maxPackageAssetBytes = 256 * 1024 * 1024
         let maxSingleAssetBytes = 64 * 1024 * 1024
         let maxPackageAssetCount = 20_000
-        var resourceTableData = Data()
+        var resourceTableData: [(source: String, data: Data)] = []
         var splitManifestData: [(source: String, data: Data)] = []
 
         // XAPK/APKS/APKM imports are normalized to <package>/base.apk and
@@ -266,10 +266,12 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             for entry in packageArchive {
                 try Task.checkCancellation()
                 if entry.path == "resources.arsc" {
-                    // ResourceCatalog currently accepts one table. Prefer the base table.
-                    if resourceTableData.isEmpty {
-                        _ = try packageArchive.extract(entry) { chunk in resourceTableData.append(chunk) }
-                    }
+                    var table = Data()
+                    _ = try packageArchive.extract(entry) { chunk in table.append(chunk) }
+                    let sourceName = packageArchiveNames.indices.contains(archiveIndex)
+                        ? packageArchiveNames[archiveIndex]
+                        : "package-component-\(archiveIndex)"
+                    resourceTableData.append((source: sourceName, data: table))
                 } else if entry.path == "AndroidManifest.xml" {
                     if archiveIndex == 0 && manifestData.isEmpty {
                         _ = try packageArchive.extract(entry) { chunk in manifestData.append(chunk) }
@@ -374,7 +376,20 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             onLog("[INFO] Split package identity verified: \(splitManifest.source) -> \(splitPackageName)")
         }
-        onLog("[INFO] Resource table: \(resourceTableData.count) bytes")
+        let preferredLanguage = Locale.current.language.languageCode?.identifier ?? "en"
+        let baseResourceTable = resourceTableData.first(where: { $0.source == url.lastPathComponent })
+            ?? resourceTableData.first
+        let preferredLocaleTable = resourceTableData.first(where: { $0.source.contains("config.\(preferredLanguage)") })
+            ?? resourceTableData.first(where: { $0.source.contains("config.en") })
+        let densityTable = resourceTableData.first(where: { $0.source.contains("config.xxhdpi") })
+        var resourceTablesToLoad: [(source: String, data: Data)] = []
+        for candidate in [baseResourceTable, preferredLocaleTable, densityTable].compactMap({ $0 }) {
+            if !resourceTablesToLoad.contains(where: { $0.source == candidate.source }) {
+                resourceTablesToLoad.append(candidate)
+            }
+        }
+        let resourceTableBytes = resourceTablesToLoad.reduce(0) { $0 + $1.data.count }
+        onLog("[INFO] Selected Android resource tables: \(resourceTablesToLoad.map(\.source).joined(separator: ", ")) (\(resourceTableBytes) bytes)")
         onLog("[INFO] Initializing ART-compatible runtime")
         guard let runtime = packageName.withCString({ stride_runtime_create($0) }) else {
             onLog("[FATAL] Rust runtime creation returned null")
@@ -409,12 +424,16 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
         }
         onLog("[INFO] Registered \(registeredAssets)/\(assetDataList.count) package assets for Android AssetManager (\(assetTotalBytes) bytes scanned)")
-        if !resourceTableData.isEmpty {
-            let resourceStatus = resourceTableData.withUnsafeBytes { raw in
-                stride_runtime_load_resource_table(runtime, raw.bindMemory(to: UInt8.self).baseAddress, resourceTableData.count)
+        for table in resourceTablesToLoad {
+            try Task.checkCancellation()
+            let resourceStatus = table.data.withUnsafeBytes { raw in
+                stride_runtime_load_resource_table(runtime, raw.bindMemory(to: UInt8.self).baseAddress, table.data.count)
             }
-            if resourceStatus == 0 { onLog("[INFO] Android resource table decoded") }
-            else { onLog("[WARN] Resource table decode unavailable (status \(resourceStatus)); literal UI text remains available") }
+            if resourceStatus == 0 {
+                onLog("[INFO] Android resource table merged: \(table.source)")
+            } else {
+                onLog("[WARN] Resource table decode unavailable for \(table.source) (status \(resourceStatus))")
+            }
         }
         // Native game packages already carry their own engine assets and native
         // libraries. Eagerly decoding hundreds of Android UI drawable entries before
@@ -422,7 +441,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
         // guest engine performs through AssetManager. Keep this optional predecode for
         // managed-only apps; native/asset-heavy packages proceed directly to DEX load.
         let shouldPredecodeResourceImages = !(soDataList.count > 0 && assetDataList.count > 128)
-        if !resourceTableData.isEmpty && shouldPredecodeResourceImages {
+        if !resourceTablesToLoad.isEmpty && shouldPredecodeResourceImages {
             let fileCount = stride_runtime_resource_file_count(runtime)
             let maxResourceFilesToScan = 1_024
             let maxDecodedResourceImages = 128
@@ -485,7 +504,7 @@ struct StrideArtExecutionBackend: AndroidExecutionBackend {
             }
             let skippedEntries = fileCount - scanCount
             onLog("[INFO] Decoded \(decodedImages) Android image resources (\(decodedImagePixels) pixels); scanned \(scannedResourceFiles)/\(fileCount), deferred \(skippedEntries) entries")
-        } else if !resourceTableData.isEmpty {
+        } else if !resourceTablesToLoad.isEmpty {
             onLog("[INFO] Deferred eager Android image predecode for native/asset-heavy package (native libraries=\(soDataList.count), assets=\(assetDataList.count)); proceeding to DEX initialization")
         }
         // A manifest without executable DEX code cannot enter the managed runtime.
