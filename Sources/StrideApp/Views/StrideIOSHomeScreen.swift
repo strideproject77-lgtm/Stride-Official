@@ -18,7 +18,7 @@ struct StrideIOSHomeScreen: View {
     @State private var selectedPage = 0
     @FocusState private var searchFocused: Bool
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 9), count: 4)
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 18), count: 4)
 
     private var filteredPackages: [ImportedAPK] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -84,11 +84,8 @@ struct StrideIOSHomeScreen: View {
             wallpaperBackground
 
             VStack(spacing: 0) {
-                topControls
-                    .padding(.horizontal, 22)
-                    .padding(.top, 5)
-
                 launcherPages
+                    .padding(.top, 18)
                     .frame(maxHeight: .infinity)
 
                 if isSearchPresented {
@@ -231,10 +228,10 @@ struct StrideIOSHomeScreen: View {
                 TabView(selection: $selectedPage) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { entry in
                         GeometryReader { geometry in
-                            let horizontalInset: CGFloat = 17
-                            let spacing: CGFloat = 9
-                            let iconSize = min(62, max(56, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
-                            LazyVGrid(columns: columns, alignment: .center, spacing: 19) {
+                            let horizontalInset: CGFloat = 18
+                            let spacing: CGFloat = 18
+                            let iconSize = min(60, max(48, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
+                            LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
                                 ForEach(entry.element) { item in
                                     appIcon(item, size: iconSize)
                                 }
@@ -298,7 +295,7 @@ struct StrideIOSHomeScreen: View {
         HStack(spacing: 0) {
             ForEach(dockPackages) { item in
                 Button { onSelect(item) } label: {
-                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 58)
+                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 60)
                         .frame(maxWidth: .infinity)
                         .shadow(color: .black.opacity(0.26), radius: 5, y: 2)
                 }
@@ -357,20 +354,73 @@ private struct StrideLauncherIcon: View {
     let accent: Color
     let size: CGFloat
 
+    /// Removes transparent padding from APK launcher images before placing them
+    /// into the fixed iOS icon cell. This keeps artwork optically consistent even
+    /// when Android resources include oversized transparent canvases.
+    private var normalizedImage: UIImage? {
+        guard let data, let source = UIImage(data: data), let cgImage = source.cgImage else { return nil }
+        let width = cgImage.width
+        let height = cgImage.height
+        let (pixelCount, overflow) = width.multipliedReportingOverflow(by: height)
+        guard width > 0, height > 0, !overflow, pixelCount <= 16_777_216 else { return source }
+
+        var pixels = [UInt8](repeating: 0, count: pixelCount * 4)
+        let rendered = pixels.withUnsafeMutableBytes { raw -> Bool in
+            guard let context = CGContext(
+                data: raw.baseAddress,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return false }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard rendered else { return source }
+
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 12 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else { return source }
+        let visibleWidth = maxX - minX + 1
+        let visibleHeight = maxY - minY + 1
+        guard visibleWidth < width || visibleHeight < height else { return source }
+
+        let padX = max(1, Int(Double(visibleWidth) * 0.015))
+        let padY = max(1, Int(Double(visibleHeight) * 0.015))
+        let crop = CGRect(
+            x: max(0, minX - padX),
+            y: max(0, minY - padY),
+            width: min(width, maxX + padX + 1) - max(0, minX - padX),
+            height: min(height, maxY + padY + 1) - max(0, minY - padY)
+        )
+        guard let trimmed = cgImage.cropping(to: crop) else { return source }
+        return UIImage(cgImage: trimmed, scale: source.scale, orientation: .up)
+    }
+
     var body: some View {
         Group {
-            if let data, let image = UIImage(data: data) {
+            if let image = normalizedImage {
                 Image(uiImage: image)
                     .resizable()
                     .interpolation(.high)
-                    // Preserve the complete APK icon. Fill+clipped crops artwork and is
-                    // intentionally avoided; fit keeps the original aspect ratio visible.
-                    .scaledToFit()
+                    .scaledToFill()
                     .frame(width: size, height: size)
-                    .background(Color.black.opacity(0.08))
+                    .clipped()
             } else {
                 ZStack {
-                    RoundedRectangle(cornerRadius: size * 0.23, style: .continuous)
+                    RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
                         .fill(LinearGradient(colors: [accent.opacity(0.85), accent.opacity(0.42)],
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
                     Image(systemName: "app.fill")
@@ -381,17 +431,7 @@ private struct StrideLauncherIcon: View {
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.235, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
-                .fill(LinearGradient(
-                    colors: [Color.white.opacity(0.10), .clear, Color.black.opacity(0.055)],
-                    startPoint: .topLeading, endPoint: .bottomTrailing
-                ))
-                .allowsHitTesting(false)
-        }
-        .overlay(RoundedRectangle(cornerRadius: size * 0.235, style: .continuous)
-            .stroke(Color.white.opacity(0.14), lineWidth: 0.75))
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.225, style: .continuous))
     }
 }
 
