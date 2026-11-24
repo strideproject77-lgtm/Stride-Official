@@ -326,6 +326,10 @@ fn get_or_create_looper_thread(
     }
     let thread = env.heap.allocate_instance("Ljava/lang/Thread;")
         .map_err(|error| format!("guest Thread allocation failed: {error:?}"))?;
+    // This runtime currently models a single managed UI thread. Give every
+    // Looper-created thread object a deterministic identity and keep the main
+    // Looper/currentThread object stable across calls.
+    env.set_object_field(thread, "mStrideThreadId", Value::Long(1))?;
     env.set_object_field(looper_id, "mThread", Value::Object(thread))?;
     Ok(thread)
 }
@@ -374,27 +378,6 @@ pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef
             let looper = get_or_create_main_looper(env, &shared_main)?;
             let thread = get_or_create_looper_thread(env, looper)?;
             Ok(Some(Value::Object(thread)))
-        },
-    );
-
-    let shared = main.clone();
-    registry.register(
-        "Landroid/os/Looper;",
-        "getThread",
-        "()Ljava/lang/Thread;",
-        move |env, args| {
-            let looper_id = args.first().and_then(Value::as_object)
-                .filter(|id| *id != 0).ok_or("Looper.getThread receiver is null")?;
-            env.heap.get(looper_id)
-                .map_err(|error| format!("Looper.getThread receiver is invalid: {error:?}"))?;
-            if let Value::Object(thread_id) = env.get_object_field(looper_id, "mThread")? {
-                if env.heap.contains(thread_id) {
-                    return Ok(Some(Value::Object(thread_id)));
-                }
-            }
-            let thread_id = get_or_create_main_thread(env, &shared)?;
-            env.set_object_field(looper_id, "mThread", Value::Object(thread_id))?;
-            Ok(Some(Value::Object(thread_id)))
         },
     );
 
