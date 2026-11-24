@@ -1,13 +1,13 @@
 //! Bounded, low-overhead runtime diagnostics and session event history.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum retained diagnostic events per runtime session.
-pub const DEFAULT_EVENT_CAPACITY: usize = 2048;
+pub const DEFAULT_EVENT_CAPACITY: usize = 8192;
 /// Maximum unique unresolved symbols retained in each summary list.
-pub const DEFAULT_MISSING_SYMBOL_CAPACITY: usize = 512;
+pub const DEFAULT_MISSING_SYMBOL_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
@@ -232,6 +232,47 @@ impl RuntimeDiagnostics {
             count(DiagnosticSeverity::FatalCrash),
             classes.len(), methods.len()
         ));
+        let mut by_component = BTreeMap::<String, (usize, usize, usize, usize)>::new();
+        for event in &records {
+            let counts = by_component.entry(event.component.clone()).or_default();
+            counts.0 += 1;
+            match event.severity {
+                DiagnosticSeverity::Warning => counts.1 += 1,
+                DiagnosticSeverity::MissingApi => counts.2 += 1,
+                DiagnosticSeverity::RuntimeError | DiagnosticSeverity::FatalCrash => counts.3 += 1,
+                DiagnosticSeverity::Info => {}
+            }
+        }
+        output.push_str("\nDIAGNOSTICS BY COMPONENT\n");
+        output.push_str("Component | Events | Warnings | Missing API | Errors/Fatal\n");
+        for (component, (events, warnings, missing, errors)) in by_component {
+            output.push_str(&format!(
+                "{} | {} | {} | {} | {}\n",
+                component, events, warnings, missing, errors
+            ));
+        }
+
+        output.push_str("\nFIRST FAILURE SIGNALS\n");
+        let first_failure = records.iter().find(|event| matches!(
+            event.severity, DiagnosticSeverity::RuntimeError | DiagnosticSeverity::FatalCrash
+        ));
+        match first_failure {
+            Some(event) => output.push_str(&format!(
+                "First runtime failure: [{}] {} [{}] {}\n",
+                event.timestamp_ms, event.component,
+                event.code.as_deref().unwrap_or("NO_CODE"), event.message
+            )),
+            None => output.push_str("No runtime error/fatal event was retained.\n"),
+        }
+        let first_missing = records.iter().find(|event| event.severity == DiagnosticSeverity::MissingApi);
+        if let Some(event) = first_missing {
+            output.push_str(&format!(
+                "First missing API: [{}] {} [{}] {}\n",
+                event.timestamp_ms, event.component,
+                event.code.as_deref().unwrap_or("NO_CODE"), event.message
+            ));
+        }
+
         output.push_str("\nEVENT TIMELINE\n");
         for event in records {
             let code = event.code.as_deref()
