@@ -1450,6 +1450,47 @@ impl<'a> ArtVm<'a> {
                     if native_handler.is_none() {
                         native_handler = self.jni.find_unique_framework_signature(target_name, target_proto).cloned();
                     }
+                    // Executors.newFixedThreadPool(int, ThreadFactory) is part of the
+                    // Java boot-library surface used by AndroidX ArchTaskExecutor during
+                    // Activity construction. Represent the pool as a managed guest object;
+                    // execution is intentionally not claimed to be parallel until the
+                    // scheduler can safely dispatch guest Runnable callbacks.
+                    if target_method.is_none()
+                        && target_class == "Ljava/util/concurrent/Executors;"
+                        && target_name == "newFixedThreadPool"
+                        && target_proto == "(ILjava/util/concurrent/ThreadFactory;)Ljava/util/concurrent/ExecutorService;"
+                    {
+                        let pool_size = match args.first() {
+                            Some(Value::Int(size)) if *size > 0 => *size,
+                            _ => return Err(format!(
+                                "Invalid pool size for Executors.newFixedThreadPool at PC {}",
+                                pc
+                            )),
+                        };
+                        if !matches!(args.get(1), Some(Value::Object(id)) if *id != 0) {
+                            return Err(format!(
+                                "Invalid ThreadFactory for Executors.newFixedThreadPool at PC {}",
+                                pc
+                            ));
+                        }
+                        let executor = self.heap.allocate_instance(
+                            "Ljava/util/concurrent/ThreadPoolExecutor;"
+                        ).map_err(|error| format!(
+                            "ThreadPoolExecutor allocation failed at PC {}: {:?}", pc, error
+                        ))?;
+                        self.heap.set_instance_field(executor, "__stride_core_pool_size", Value::Int(pool_size))
+                            .map_err(|error| format!("ThreadPoolExecutor core size initialization failed: {:?}", error))?;
+                        self.heap.set_instance_field(executor, "__stride_max_pool_size", Value::Int(pool_size))
+                            .map_err(|error| format!("ThreadPoolExecutor max size initialization failed: {:?}", error))?;
+                        self.heap.set_instance_field(executor, "__stride_thread_factory", args[1])
+                            .map_err(|error| format!("ThreadPoolExecutor factory initialization failed: {:?}", error))?;
+                        self.heap.set_instance_field(executor, "__stride_shutdown", Value::Int(0))
+                            .map_err(|error| format!("ThreadPoolExecutor state initialization failed: {:?}", error))?;
+                        pending_result = Some(Value::Object(executor));
+                        pc += 3;
+                        continue;
+                    }
+
                     // java.lang.Object.<init>()V is a VM intrinsic: every Java
                     // object ultimately invokes it, but it has no DEX body or JNI
                     // implementation. Resolve this exact boot method as a no-op.
