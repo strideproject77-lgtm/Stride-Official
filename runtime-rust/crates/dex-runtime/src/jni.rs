@@ -3441,4 +3441,31 @@ mod tests {
     }
 
 
+    #[test]
+    fn stack_trace_element_accessors_read_guest_frame_fields() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let frame = env.heap.allocate_instance("Ljava/lang/StackTraceElement;").unwrap();
+        let class_name = env.new_string_utf("example.MainActivity").unwrap();
+        let method_name = env.new_string_utf("onCreate").unwrap();
+        env.set_object_field(frame, "declaringClass", Value::Object(class_name)).unwrap();
+        env.set_object_field(frame, "methodName", Value::Object(method_name)).unwrap();
+        env.set_object_field(frame, "fileName", Value::Null).unwrap();
+        env.set_object_field(frame, "lineNumber", Value::Int(-1)).unwrap();
+
+        let get_class = registry.find(
+            "Ljava/lang/StackTraceElement;", "getClassName", "()Ljava/lang/String;"
+        ).unwrap().clone();
+        let get_method = registry.find(
+            "Ljava/lang/StackTraceElement;", "getMethodName", "()Ljava/lang/String;"
+        ).unwrap().clone();
+        let get_line = registry.find(
+            "Ljava/lang/StackTraceElement;", "getLineNumber", "()I"
+        ).unwrap().clone();
+        assert_eq!(get_class(&mut env, &[Value::Object(frame)]).unwrap(), Some(Value::Object(class_name)));
+        assert_eq!(get_method(&mut env, &[Value::Object(frame)]).unwrap(), Some(Value::Object(method_name)));
+        assert_eq!(get_line(&mut env, &[Value::Object(frame)]).unwrap(), Some(Value::Int(-1)));
+    }
+
 }
