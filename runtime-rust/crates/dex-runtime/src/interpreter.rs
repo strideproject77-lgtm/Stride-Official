@@ -106,6 +106,8 @@ pub struct ArtVm<'a> {
     pub field_references: Option<&'a [FieldReference]>,
     dex_inventories: Option<&'a [ClassInventory]>,
     method_dex_indices: Option<&'a HashMap<u32, usize>>,
+    /// Stable managed java.lang.Class mirrors keyed by the represented DEX descriptor.
+    class_mirrors: HashMap<String, u32>,
 }
 
 fn decode_invoke_arguments(
@@ -183,6 +185,7 @@ impl<'a> ArtVm<'a> {
             field_references: None,
             dex_inventories: None,
             method_dex_indices: None,
+            class_mirrors: HashMap::new(),
         }
     }
 
@@ -541,6 +544,38 @@ impl<'a> ArtVm<'a> {
                 0x19 => { // const-wide/high16 vAA, #+BBBB000000000000
                     let bits = (code_units[pc + 1] as u64) << 48;
                     rf.write_long(a8, bits as i64).map_err(|e| format!("Invalid reg {}", e))?;
+                    pc += 2;
+                }
+                0x1c => { // const-class vAA, type@BBBB (21c)
+                    let type_index = *code_units.get(pc + 1)
+                        .ok_or_else(|| format!("Truncated const-class operand at PC {}", pc))? as usize;
+                    let descriptor = self.type_descriptors
+                        .and_then(|types| types.get(type_index))
+                        .cloned()
+                        .filter(|descriptor| !descriptor.is_empty())
+                        .ok_or_else(|| format!(
+                            "Invalid const-class type index {} at PC {} in {}->{}{}",
+                            type_index, pc, method_class, method_name, method_proto
+                        ))?;
+
+                    let mirror_id = match self.class_mirrors.get(&descriptor).copied() {
+                        Some(id) if self.heap.contains(id) => id,
+                        _ => {
+                            // A Class mirror is a real managed java.lang.Class instance.
+                            // Keep the represented DEX descriptor in a managed String field
+                            // so reflection bridges can consume it without guessing.
+                            let mirror = self.heap.allocate_instance("Ljava/lang/Class;")
+                                .map_err(|error| format!("Class mirror allocation failed: {:?}", error))?;
+                            let represented = self.heap.allocate_string(&descriptor)
+                                .map_err(|error| format!("Class descriptor allocation failed: {:?}", error))?;
+                            self.heap.set_instance_field(
+                                mirror, "__stride_represented_class_descriptor", Value::Object(represented)
+                            ).map_err(|error| format!("Class mirror initialization failed: {:?}", error))?;
+                            self.class_mirrors.insert(descriptor, mirror);
+                            mirror
+                        }
+                    };
+                    rf.write_object(a8, mirror_id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
                 0x1a | 0x1b => { // const-string, const-string/jumbo
@@ -4072,6 +4107,82 @@ mod tests {
                 index
             );
         }
+    }
+
+
+    #[test]
+    fn const_class_materializes_and_reuses_managed_class_mirror() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "getClassMirror".into(),
+                prototype: "()Ljava/lang/Class;".into(),
+                code_units: vec![0x001c, 0x0000, 0x0011],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let types = vec!["Landroidx/arch/core/executor/ArchTaskExecutor;".to_string()];
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &[]);
+
+        let first = vm.execute_method(1, &[], 8).expect("const-class should execute");
+        let first_id = match first.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(id)) => id,
+            other => panic!("Expected Class mirror, got {:?}", other),
+        };
+        assert_eq!(first.steps_executed, 2);
+        assert_eq!(vm.heap.get(first_id).unwrap().class_descriptor(), "Ljava/lang/Class;");
+        let descriptor_string = match vm.heap.get_instance_field(
+            first_id, "__stride_represented_class_descriptor"
+        ).unwrap() {
+            Value::Object(id) => id,
+            other => panic!("Expected managed descriptor string, got {:?}", other),
+        };
+        match vm.heap.get(descriptor_string).unwrap() {
+            crate::heap::HeapObject::String(value) => {
+                assert_eq!(value.content, "Landroidx/arch/core/executor/ArchTaskExecutor;");
+            }
+            other => panic!("Expected String object, got {:?}", other),
+        }
+
+        let second = vm.execute_method(1, &[], 8).expect("repeated const-class should execute");
+        assert_eq!(
+            second.stop_reason,
+            ExecutionStopReason::ReturnedValue(Value::Object(first_id)),
+            "the same descriptor must resolve to the same live Class mirror"
+        );
+    }
+
+    #[test]
+    fn const_class_rejects_out_of_range_type_index() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "badTypeIndex".into(),
+                prototype: "()Ljava/lang/Class;".into(),
+                code_units: vec![0x001c, 0x0001, 0x0011],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let types = vec!["Ltest/OnlyType;".to_string()];
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_dex_metadata(&types, &[]);
+        let error = vm.execute_method(1, &[], 8).expect_err("invalid type index must fail");
+        assert!(error.contains("Invalid const-class type index 1"), "{}", error);
     }
 
 }
