@@ -1986,6 +1986,81 @@ impl JniNativeRegistry {
             env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(updated))?;
             Ok(Some(Value::Object(receiver)))
         });
+        self.register("Ljava/lang/StringBuilder;", "append", "(I)Ljava/lang/StringBuilder;", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or("StringBuilder.append receiver is null")?;
+            let current = env.get_object_field(receiver, "mStrideBuilderValue")
+                .ok().and_then(|value| value.as_object())
+                .and_then(|id| env.get_string_utf(id).ok()).unwrap_or("").to_owned();
+            let suffix = match args.get(1) {
+                Some(Value::Int(value)) => value.to_string(),
+                _ => return Err("StringBuilder.append(int) requires an integer argument".to_owned()),
+            };
+            let updated = env.new_string_utf(&format!("{current}{suffix}"))?;
+            env.set_object_field(receiver, "mStrideBuilderValue", Value::Object(updated))?;
+            Ok(Some(Value::Object(receiver)))
+        });
+
+        // java.util.Random's specified 48-bit linear-congruential generator.
+        self.register("Ljava/util/Random;", "<init>", "()V", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or("Random constructor receiver is null")?;
+            let seed = (monotonic_uptime_millis() as u64).wrapping_mul(1_000_000)
+                ^ u64::from(receiver);
+            let scrambled = (seed ^ 0x5DEECE66D) & ((1u64 << 48) - 1);
+            env.set_object_field(receiver, "__stride_random_seed", Value::Long(scrambled as i64))?;
+            Ok(None)
+        });
+        self.register("Ljava/util/Random;", "<init>", "(J)V", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or("Random constructor receiver is null")?;
+            let seed = match args.get(1) {
+                Some(Value::Long(value)) => *value as u64,
+                _ => return Err("Random(long) requires a long seed".to_owned()),
+            };
+            let scrambled = (seed ^ 0x5DEECE66D) & ((1u64 << 48) - 1);
+            env.set_object_field(receiver, "__stride_random_seed", Value::Long(scrambled as i64))?;
+            Ok(None)
+        });
+        self.register("Ljava/util/Random;", "nextInt", "()I", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or("Random.nextInt receiver is null")?;
+            let stored = env.get_object_field(receiver, "__stride_random_seed")?;
+            let seed = match stored {
+                Value::Long(value) => value as u64,
+                _ => return Err("Random instance has not been initialized".to_owned()),
+            };
+            let next = (seed.wrapping_mul(0x5DEECE66D).wrapping_add(0xB)) & ((1u64 << 48) - 1);
+            env.set_object_field(receiver, "__stride_random_seed", Value::Long(next as i64))?;
+            Ok(Some(Value::Int((next >> 16) as u32 as i32)))
+        });
+        self.register("Ljava/util/Random;", "nextInt", "(I)I", |env, args| {
+            let receiver = args.first().and_then(|value| value.as_object())
+                .ok_or("Random.nextInt(bound) receiver is null")?;
+            let bound = match args.get(1) {
+                Some(Value::Int(value)) if *value > 0 => *value,
+                Some(Value::Int(_)) => return Err("Random.nextInt(bound) requires a positive bound".to_owned()),
+                _ => return Err("Random.nextInt(bound) requires an integer bound".to_owned()),
+            };
+            let stored = env.get_object_field(receiver, "__stride_random_seed")?;
+            let mut seed = match stored {
+                Value::Long(value) => value as u64,
+                _ => return Err("Random instance has not been initialized".to_owned()),
+            };
+            let result = if (bound & -bound) == bound {
+                seed = (seed.wrapping_mul(0x5DEECE66D).wrapping_add(0xB)) & ((1u64 << 48) - 1);
+                ((bound as i64 * (seed >> 17) as i64) >> 31) as i32
+            } else {
+                loop {
+                    seed = (seed.wrapping_mul(0x5DEECE66D).wrapping_add(0xB)) & ((1u64 << 48) - 1);
+                    let bits = (seed >> 17) as i32;
+                    let value = bits % bound;
+                    if bits.wrapping_sub(value).wrapping_add(bound - 1) >= 0 { break value; }
+                }
+            };
+            env.set_object_field(receiver, "__stride_random_seed", Value::Long(seed as i64))?;
+            Ok(Some(Value::Int(result)))
+        });
         self.register("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;", |env, args| {
             let receiver = args.first().and_then(|value| value.as_object())
                 .ok_or("StringBuilder.toString receiver is null")?;
@@ -2178,6 +2253,29 @@ impl JniNativeRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn string_builder_append_int_and_java_random_constructor_are_registered() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+
+        let builder = env.heap.allocate_instance("Ljava/lang/StringBuilder;").unwrap();
+        let constructor = registry.find("Ljava/lang/StringBuilder;", "<init>", "()V").unwrap().clone();
+        constructor(&mut env, &[Value::Object(builder)]).unwrap();
+        let append = registry.find("Ljava/lang/StringBuilder;", "append", "(I)Ljava/lang/StringBuilder;").unwrap().clone();
+        assert_eq!(append(&mut env, &[Value::Object(builder), Value::Int(42)]).unwrap(), Some(Value::Object(builder)));
+        let to_string = registry.find("Ljava/lang/StringBuilder;", "toString", "()Ljava/lang/String;").unwrap().clone();
+        let rendered = to_string(&mut env, &[Value::Object(builder)]).unwrap().and_then(|value| value.as_object()).unwrap();
+        assert_eq!(env.get_string_utf(rendered).unwrap(), "42");
+
+        let random = env.heap.allocate_instance("Ljava/util/Random;").unwrap();
+        let random_constructor = registry.find("Ljava/util/Random;", "<init>", "()V").unwrap().clone();
+        random_constructor(&mut env, &[Value::Object(random)]).unwrap();
+        let next_int = registry.find("Ljava/util/Random;", "nextInt", "(I)I").unwrap().clone();
+        let result = next_int(&mut env, &[Value::Object(random), Value::Int(17)]).unwrap();
+        assert!(matches!(result, Some(Value::Int(value)) if (0..17).contains(&value)));
+    }
 
     #[test]
     fn jni_native_registry_invokes_registered_handler() {
