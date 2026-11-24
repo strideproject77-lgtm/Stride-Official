@@ -4,7 +4,7 @@ import SwiftUI
 import UIKit
 
 struct DeveloperBatchTestRow: Identifiable {
-    enum State: String {
+    enum State: String, Codable {
         case queued = "Queued"
         case testing = "Testing"
         case readyForManualCheck = "Ready for manual check"
@@ -36,6 +36,22 @@ struct DeveloperBatchTestRow: Identifiable {
 /// foregrounded while the queue is active.
 @MainActor
 final class DeveloperBatchTestRunner: ObservableObject {
+    private struct PersistedRow: Codable {
+        let packagePath: String
+        let displayName: String
+        let progress: Int
+        let state: DeveloperBatchTestRow.State
+        let detail: String
+        let logLines: [String]
+    }
+
+    private struct PersistedSnapshot: Codable {
+        let savedAt: Date
+        let rows: [PersistedRow]
+        let finishedCount: Int
+        let overallLog: [String]
+        let reportParts: [String]
+    }
     @Published private(set) var rows: [DeveloperBatchTestRow] = []
     @Published private(set) var isRunning = false
     @Published private(set) var activeAppName: String?
@@ -47,6 +63,8 @@ final class DeveloperBatchTestRunner: ObservableObject {
     @Published private(set) var overallLog: [String] = []
 
     private var runTask: Task<Void, Never>?
+    private var lastSnapshotWrite = Date.distantPast
+    private var didAttemptRestore = false
     private let observationWindowNanoseconds: UInt64 = 30_000_000_000
     private let pollIntervalNanoseconds: UInt64 = 300_000_000
     private let promptFriendlyPartCharacterLimit = 9_000
@@ -54,6 +72,80 @@ final class DeveloperBatchTestRunner: ObservableObject {
     var overallProgress: Int {
         guard !rows.isEmpty else { return 0 }
         return Int((Double(finishedCount) / Double(rows.count) * 100).rounded())
+    }
+
+    private var reportsFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("StrideDeveloperTests", isDirectory: true)
+    }
+
+    private var latestSnapshotURL: URL {
+        reportsFolder.appendingPathComponent("Latest-Batch-Test-State.json")
+    }
+
+    func restoreIfAvailable(packages: [ImportedAPK]) {
+        guard !didAttemptRestore else { return }
+        didAttemptRestore = true
+        guard let data = try? Data(contentsOf: latestSnapshotURL),
+              let snapshot = try? JSONDecoder().decode(PersistedSnapshot.self, from: data),
+              !snapshot.rows.isEmpty else { return }
+
+        let packagesByPath = Dictionary(uniqueKeysWithValues: packages.map {
+            ($0.packageDirectoryURL.standardizedFileURL.path, $0)
+        })
+        rows = snapshot.rows.compactMap { saved in
+            guard let package = packagesByPath[saved.packagePath] else { return nil }
+            var row = DeveloperBatchTestRow(package: package)
+            row.progress = saved.progress
+            row.state = saved.state
+            row.detail = saved.detail
+            row.logLines = saved.logLines
+            if row.state == .testing {
+                row.state = .partial
+                row.detail = "App was interrupted while testing; captured evidence was restored. Start a new run to retest."
+            } else if row.state == .queued {
+                row.state = .cancelled
+                row.detail = "Not started before the previous run was interrupted."
+            }
+            return row
+        }
+        guard !rows.isEmpty else { return }
+        finishedCount = rows.filter { $0.state != .queued && $0.state != .testing }.count
+        overallLog = snapshot.overallLog
+        reportParts = snapshot.reportParts
+        activeAppName = nil
+        previewImage = nil
+        isRunning = false
+        appendOverall("[RECOVERY] Restored the latest saved developer test after app restart. A new Test All run will replace this report.")
+        buildReportFiles()
+    }
+
+    private func persistSnapshot(force: Bool = false) {
+        guard force || Date().timeIntervalSince(lastSnapshotWrite) >= 1 else { return }
+        do {
+            try FileManager.default.createDirectory(at: reportsFolder, withIntermediateDirectories: true)
+            let snapshot = PersistedSnapshot(
+                savedAt: Date(),
+                rows: rows.map {
+                    PersistedRow(
+                        packagePath: $0.package.packageDirectoryURL.standardizedFileURL.path,
+                        displayName: $0.package.displayName,
+                        progress: $0.progress,
+                        state: $0.state,
+                        detail: $0.detail,
+                        logLines: $0.logLines
+                    )
+                },
+                finishedCount: finishedCount,
+                overallLog: overallLog,
+                reportParts: reportParts
+            )
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(to: latestSnapshotURL, options: .atomic)
+            lastSnapshotWrite = Date()
+        } catch {
+            overallLog.append("[REPORT ERROR] Could not persist latest test state: \(error.localizedDescription)")
+        }
     }
 
     func start(packages: [ImportedAPK]) {
@@ -75,6 +167,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
             ""
         ]
         isRunning = true
+        persistSnapshot(force: true)
         runTask = Task { [weak self] in
             guard let self else { return }
             await self.runQueue()
@@ -94,6 +187,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
             activeAppName = nil
             previewImage = nil
             buildReportFiles()
+            persistSnapshot(force: true)
         }
     }
 
@@ -217,6 +311,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
                     hasFramebuffer: sawFramebuffer,
                     fatal: sawFatalSignal
                 )
+                persistSnapshot()
 
                 if sawFatalSignal {
                     appendAppLog(index, "[TEST] Terminal runtime failure marker detected; ending this app's observation.")
@@ -275,6 +370,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
         rows[index].progress = finalProgress
         rows[index].state = finalState
         rows[index].detail = runtimeSummary
+        persistSnapshot(force: true)
         appendAppLog(index, "RESULT: \(finalState.rawValue)")
         appendAppLog(index, "RUNTIME READINESS SCORE: \(finalProgress)%")
         appendOverall("")
@@ -356,20 +452,20 @@ final class DeveloperBatchTestRunner: ObservableObject {
     private func appendAppLog(_ index: Int, _ line: String) {
         guard rows.indices.contains(index) else { return }
         rows[index].logLines.append(line)
+        persistSnapshot()
     }
 
     private func appendOverall(_ line: String) {
         overallLog.append(line)
+        persistSnapshot()
     }
 
     private func buildReportFiles() {
-        let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("StrideDeveloperTests", isDirectory: true)
+        let folder = reportsFolder
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
             let reportText = overallLog.joined(separator: "\n")
-            let fullURL = folder.appendingPathComponent("Stride-Batch-Test-\(stamp)-FULL.txt")
+            let fullURL = folder.appendingPathComponent("Stride-Batch-Test-LATEST-FULL.txt")
             try reportText.write(to: fullURL, atomically: true, encoding: .utf8)
             fullReportURL = fullURL
 
@@ -397,20 +493,24 @@ final class DeveloperBatchTestRunner: ObservableObject {
             }
             if !currentBody.isEmpty || partBodies.isEmpty { partBodies.append(currentBody) }
 
+            let existingParts = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            for url in existingParts where url.lastPathComponent.hasPrefix("Stride-Batch-Test-LATEST-PART-") {
+                try? FileManager.default.removeItem(at: url)
+            }
             var parts: [String] = []
             var urls: [URL] = []
             for (partIndex, body) in partBodies.enumerated() {
                 let partNumber = partIndex + 1
                 let header = "STRIDE BATCH TEST LOG — PART \(partNumber)\nTotal apps: \(rows.count)\nPart size target: \(promptFriendlyPartCharacterLimit) characters\n\n"
                 let part = header + body
-                let url = folder.appendingPathComponent("Stride-Batch-Test-\(stamp)-PART-\(String(format: "%03d", partNumber)).txt")
+                let url = folder.appendingPathComponent("Stride-Batch-Test-LATEST-PART-\(String(format: "%03d", partNumber)).txt")
                 try part.write(to: url, atomically: true, encoding: .utf8)
                 parts.append(part)
                 urls.append(url)
             }
             if reportText.isEmpty {
                 let emptyPart = "STRIDE BATCH TEST LOG — PART 1\nNo log content was captured."
-                let url = folder.appendingPathComponent("Stride-Batch-Test-\(stamp)-PART-001.txt")
+                let url = folder.appendingPathComponent("Stride-Batch-Test-LATEST-PART-001.txt")
                 try emptyPart.write(to: url, atomically: true, encoding: .utf8)
                 parts = [emptyPart]
                 urls = [url]
@@ -419,6 +519,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
             reportPartURLs = urls
             appendOverall("[REPORT] Full report: \(fullURL.lastPathComponent)")
             appendOverall("[REPORT] Prompt-friendly parts generated: \(parts.count)")
+            persistSnapshot(force: true)
         } catch {
             appendOverall("[REPORT ERROR] Could not save combined report: \(error.localizedDescription)")
         }
