@@ -99,6 +99,8 @@ pub struct AndroidRuntime {
     pub focused_edit_text: Option<u32>,
     pub diagnostics: Arc<RuntimeDiagnostics>,
     pub native_linker: NativeLinker,
+    /// Libraries whose dependencies, relocations, constructors, and JNI_OnLoad passed.
+    native_library_ready: Arc<Mutex<HashSet<String>>>,
     pub gl_engine: OpenGlEsEngine,
     pub activity_manager: ActivityManager,
     /// Guest Activity launches queued by JNI callbacks until the runtime pump handles them.
@@ -203,6 +205,9 @@ impl AndroidRuntime {
     /// Call once after every package .so has been offered to the linker, so
     /// dependencies loaded later in archive order are not reported as missing.
     pub fn finish_native_loading(&mut self) -> usize {
+        if let Ok(mut ready) = self.native_library_ready.lock() {
+            ready.clear();
+        }
         let relocation_issues = self.native_linker.apply_relocations();
         if !relocation_issues.is_empty() {
             self.diagnostics.record_detailed(
@@ -387,6 +392,9 @@ impl AndroidRuntime {
                                 });
                             }
                         }
+                        if let Ok(mut ready) = self.native_library_ready.lock() {
+                            ready.insert(soname.clone());
+                        }
                     }
                 }
             }
@@ -542,9 +550,10 @@ impl AndroidRuntime {
         let shared_resource_catalog = Arc::new(Mutex::new(ResourceCatalog::default()));
                 let pending_intent_queue = Arc::new(Mutex::new(VecDeque::new()));
         let pending_finish_requested = Arc::new(Mutex::new(false));
+        let native_library_ready = Arc::new(Mutex::new(HashSet::new()));
         let main_looper_ref = Arc::new(Mutex::new(None));
         let pending_runnables: RunnableQueue = Arc::new(Mutex::new(Vec::new()));
-        Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone(), pending_intent_queue.clone(), pending_finish_requested.clone());
+        Self::register_core_jni(&mut jni, shared_preferences_store.clone(), shared_resource_catalog.clone(), pending_intent_queue.clone(), pending_finish_requested.clone(), native_library_ready.clone());
         Self::register_game_jni(&mut jni);
         // Override the old integer-returning Looper stubs with managed object
         // references after generic game JNI registration.
@@ -578,6 +587,7 @@ impl AndroidRuntime {
             focused_edit_text: None,
             diagnostics: Arc::new(RuntimeDiagnostics::new()),
             native_linker: NativeLinker::new(),
+            native_library_ready,
             gl_engine: OpenGlEsEngine::new(),
             activity_manager: ActivityManager::new(),
             pending_intent_queue,
@@ -741,6 +751,7 @@ impl AndroidRuntime {
         shared_resource_catalog: crate::resource_jni::SharedResourceCatalog,
         pending_intent_queue: Arc<Mutex<VecDeque<Intent>>>,
         pending_finish_requested: Arc<Mutex<bool>>,
+        native_library_ready: Arc<Mutex<HashSet<String>>>,
     ) {
         // Register guest Context.startActivity and Activity.startActivity JNI routing
         for class_name in [
@@ -950,6 +961,37 @@ impl AndroidRuntime {
                 .as_int();
             Ok(Some(Value::Int(action & 0xff)))
         });
+
+        let ready_libraries = native_library_ready.clone();
+        jni.register(
+            "Ljava/lang/System;",
+            "loadLibrary",
+            "(Ljava/lang/String;)V",
+            move |env, args| {
+                let name_id = args.first().and_then(Value::as_object)
+                    .filter(|id| *id != 0)
+                    .ok_or_else(|| "UnsatisfiedLinkError: loadLibrary name is null".to_string())?;
+                let requested = env.get_string_utf(name_id)?.to_owned();
+                if requested.is_empty() || requested.contains('/') || requested.contains('\\') {
+                    return Err(format!("UnsatisfiedLinkError: invalid library name '{}'", requested));
+                }
+                let soname = if requested.ends_with(".so") {
+                    requested
+                } else {
+                    format!("lib{}.so", requested)
+                };
+                let ready = ready_libraries.lock()
+                    .map_err(|_| "native library registry lock poisoned".to_string())?;
+                if ready.contains(&soname) {
+                    Ok(None)
+                } else {
+                    Err(format!(
+                        "UnsatisfiedLinkError: {} is not fully linked and initialized",
+                        soname
+                    ))
+                }
+            },
+        );
 
         jni.register(
             "Ljava/lang/System;",
