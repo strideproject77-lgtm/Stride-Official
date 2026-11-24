@@ -246,6 +246,18 @@ impl ClassHierarchy {
         };
         self.register_class(string_class);
 
+        // java.util.Random is part of the core Java framework and must be
+        // resolvable before an app's Activity static initializer invokes its constructor.
+        self.register_class(RuntimeClass {
+            descriptor: "Ljava/util/Random;".into(),
+            superclass_descriptor: Some("Ljava/lang/Object;".into()),
+            interface_descriptors: vec!["Ljava/io/Serializable;".into()],
+            access_flags: 0x0001,
+            fields: HashMap::new(),
+            methods: HashMap::new(),
+            is_initialized: true,
+        });
+
         // Bootstrap the Java collection interface graph needed by framework
         // objects that are created by runtime intrinsics rather than DEX class loading.
         // CopyOnWriteArraySet is a concrete Set, which is also a Collection and Iterable.
