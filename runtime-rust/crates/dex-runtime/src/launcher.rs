@@ -327,7 +327,7 @@ impl AndroidRuntime {
                         }
 
                         // Run JNI_OnLoad if exported
-                        if image.report.entry_point != 0 && !image.jni_onload_executed {
+                        if image.resolve_export("JNI_OnLoad").is_some() && !image.jni_onload_executed {
                             let (java_vm, reserved) = match image.setup_guest_jni_environment() {
                                 Ok(pair) => pair,
                                 Err(error) => {
@@ -368,27 +368,31 @@ impl AndroidRuntime {
                             }
                         }
 
-                        // Register native methods into self.jni
+                        // Preserve the native method table, but do not install a
+                        // success-shaped placeholder. The current JNI boundary cannot
+                        // marshal managed references/strings/arrays into guest JNIEnv
+                        // handles, so invocation must fail explicitly until that bridge
+                        // is implemented rather than silently returning a default value.
                         if !image.registered_natives.is_empty() {
                             let count = image.registered_natives.len();
                             self.diagnostics.record_detailed(
-                                DiagnosticSeverity::Info,
+                                DiagnosticSeverity::MissingApi,
                                 "NativeExecution",
-                                "NATIVE_METHODS_REGISTERED",
-                                &format!("Registered {} JNI method(s) for {} (stage: Native methods registered)", count, soname),
+                                "NATIVE_METHOD_DISPATCH_UNAVAILABLE",
+                                &format!("Parsed {} JNI native method(s) for {}, but guest JNIEnv argument/handle dispatch is not connected", count, soname),
                                 None,
-                                None,
+                                Some("Implement managed-object to guest JNI handle marshalling before invoking these methods"),
                             );
 
                             for ((class_desc, method_name, proto), _) in image.registered_natives.clone() {
-                                let target_image = image_arc.clone();
                                 let target_class = class_desc.clone();
                                 let target_method = method_name.clone();
                                 let target_proto = proto.clone();
                                 self.jni.register(&target_class, &target_method, &target_proto, move |_env, _args| {
-                                    let mut locked_image = target_image.lock().map_err(|e| format!("Lock poisoned: {:?}", e))?;
-                                    locked_image.stage = crate::native_execution::NativeLibraryStage::NativeMethodInvoked;
-                                    Ok(None)
+                                    Err(format!(
+                                        "Native method {}->{}{} is registered, but guest JNI argument/handle dispatch is unavailable",
+                                        target_class, target_method, target_proto
+                                    ))
                                 });
                             }
                         }
