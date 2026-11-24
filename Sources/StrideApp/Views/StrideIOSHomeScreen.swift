@@ -84,8 +84,33 @@ struct StrideIOSHomeScreen: View {
             wallpaperBackground
 
             VStack(spacing: 0) {
+                // Keep a persistent escape hatch from the iPhone-style launcher.
+                // Users can return to the regular Stride interface or open Settings.
+                HStack {
+                    Spacer()
+                    Menu {
+                        Button(action: onImport) {
+                            Label("Add App", systemImage: "plus")
+                        }
+                        Button(action: onSettings) {
+                            Label("Stride Settings", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
+                            .contentShape(Circle())
+                    }
+                    .accessibilityLabel("Home Screen options")
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+
                 launcherPages
-                    .padding(.top, 18)
+                    .padding(.top, 4)
                     .frame(maxHeight: .infinity)
 
                 if isSearchPresented {
