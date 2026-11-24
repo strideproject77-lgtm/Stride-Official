@@ -644,13 +644,17 @@ impl NativeLinker {
                 if let Some(width) = width {
                     let write_end = offset.checked_add(width)
                         .ok_or_else(|| format!("Relocation write overflow in {}", soname))?;
-                    let in_segment = plan.segment_copies.iter().any(|segment| {
-                        segment.image_offset.checked_add(segment.memory_size)
-                            .map(|segment_end| offset >= segment.image_offset && write_end <= segment_end)
-                            .unwrap_or(false)
+                    let in_writable_segment = plan.segment_copies.iter().any(|segment| {
+                        segment.protection.writable
+                            && segment.image_offset.checked_add(segment.memory_size)
+                                .map(|segment_end| offset >= segment.image_offset && write_end <= segment_end)
+                                .unwrap_or(false)
                     });
-                    if !in_segment {
-                        return Err(format!("Relocation write at {:#x} in {} crosses a PT_LOAD boundary", relocation.offset, soname));
+                    if !in_writable_segment {
+                        return Err(format!(
+                            "Relocation write at {:#x} in {} is outside a writable PT_LOAD segment",
+                            relocation.offset, soname
+                        ));
                     }
                     let first_page = (offset / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
                     let last_page = ((write_end - 1) / IOS_PAGE_SIZE) * IOS_PAGE_SIZE;
