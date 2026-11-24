@@ -270,7 +270,7 @@ impl NativeGuestImage {
     }
 
     /// Validate the version returned by JNI_OnLoad against versions supported
-    /// by this compatibility layer (JNI 1.1, 1.2 and 1.4).
+    /// by this compatibility layer (JNI 1.1, 1.2, 1.4 and 1.6).
     pub fn validate_jni_version(version: i32) -> Result<u32, NativeExecutionError> {
         const JNI_VERSION_1_1: u32 = 0x0001_0001;
         const JNI_VERSION_1_2: u32 = 0x0001_0002;
