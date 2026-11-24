@@ -5,11 +5,12 @@ workflows:
     instance_type: mac_mini_m2
 
     # Reuse Rust downloads/toolchains and build outputs between Codemagic runs.
-    cache_paths:
-      - $HOME/.cargo/registry
-      - $HOME/.cargo/git
-      - $HOME/.rustup/toolchains
-      - runtime-rust/target
+    cache:
+      cache_paths:
+        - $HOME/.cargo/registry
+        - $HOME/.cargo/git
+        - $HOME/.rustup/toolchains
+        - runtime-rust/target
 
     # Manual-only: choose CodeMagic from its dashboard when you want this builder.
     # GitHub Actions remains independently available for normal CI and manual IPA builds.
