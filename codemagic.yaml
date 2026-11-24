@@ -43,7 +43,7 @@ workflows:
             "build_number": "${CM_BUILD_NUMBER:-unknown}",
             "builder": "Codemagic",
             "exit_status": $build_status,
-            "logs_branch": "stride-codemagic-logs"
+            "logs_branch": "${STRIDE_LOG_BRANCH}"
           }
           EOF
             # Build one downloadable ZIP containing the IPA (when available) and diagnostics.
@@ -83,6 +83,7 @@ workflows:
             if [ -n "${STRIDE_LOGS_GITHUB_TOKEN:-}" ]; then
               cd "$ROOT"
               LATEST_TMP="$(mktemp)"
+              PUBLISH_DIR="$(mktemp -d)"
               python3 - "$LOG_DIR" "$LATEST_TMP" <<'PY'
           import pathlib, re, sys
           log_dir = pathlib.Path(sys.argv[1])
@@ -94,29 +95,33 @@ workflows:
               (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[REDACTED_AWS_KEY]"),
               (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[REDACTED_PRIVATE_KEY]"),
           ]
-          parts = []
+          sections = []
           for path in sorted(log_dir.iterdir()):
               if path.is_file():
                   text = path.read_text(errors="replace")
                   for pattern, replacement in patterns:
                       text = pattern.sub(replacement, text)
-                  parts.append("\n========== " + path.name + " ==========\n" + text + "\n")
-          output.write_text("".join(parts))
+                  sections.append("\n========== " + path.name + " ==========\n" + text + "\n")
+          output.write_text("".join(sections))
           PY
-              git checkout --orphan stride-codemagic-logs >/dev/null 2>&1
+              python3 "$ROOT/scripts/codemagic_log_chunks.py" "$LATEST_TMP" "$PUBLISH_DIR"
+              git checkout --orphan "$STRIDE_LOG_BRANCH" >/dev/null 2>&1
               git rm -rf --ignore-unmatch . >/dev/null 2>&1
-              cp "$LATEST_TMP" "$ROOT/latest"
-              rm -f "$LATEST_TMP"
-              git add -f latest
+              cp "$PUBLISH_DIR"/latest* "$ROOT/"
+              rm -rf "$PUBLISH_DIR" "$LATEST_TMP"
+              git add -f latest latest.metadata.json
+              for part in "$ROOT"/latest.part*; do
+                if [ -f "$part" ]; then git add -f "$part"; fi
+              done
               git commit -m "chore(logs): replace latest CodeMagic log (${CM_BUILD_NUMBER:-unknown})" >/dev/null 2>&1
               AUTH="$(printf 'x-access-token:%s' "$STRIDE_LOGS_GITHUB_TOKEN" | base64 | tr -d '\n')"
-              git -c "http.extraheader=AUTHORIZATION: basic $AUTH" push --force "https://github.com/strideproject77-lgtm/Stride-Official.git" HEAD:refs/heads/stride-codemagic-logs
+              git -c "http.extraheader=AUTHORIZATION: basic $AUTH" push --force "https://github.com/strideproject77-lgtm/Stride-Official.git" "HEAD:refs/heads/$STRIDE_LOG_BRANCH"
               push_status=$?
               unset AUTH
               if [ "$push_status" -eq 0 ]; then
-                echo "Stride latest log published to stride-codemagic-logs/latest."
+                echo "Stride latest log and all numbered parts published to $STRIDE_LOG_BRANCH."
               else
-                echo "WARNING: Could not publish latest log to stride-codemagic-logs; see CodeMagic artifacts."
+                echo "WARNING: Could not publish latest log parts to $STRIDE_LOG_BRANCH; see CodeMagic artifacts."
               fi
             else
               echo "WARNING: STRIDE_LOGS_GITHUB_TOKEN is not configured; logs remain in CodeMagic artifacts."
@@ -124,6 +129,8 @@ workflows:
             exit "$build_status"
           }
           trap publish_logs EXIT
+
+          python3 -m unittest discover -s tests -p 'test_codemagic_log_chunks.py' -v 2>&1 | tee "$LOG_DIR/log-chunk-tests.log"
 
           echo "Project: Stride"
           echo "Repository: $STRIDE_REPOSITORY"
