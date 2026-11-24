@@ -445,6 +445,27 @@ struct StrideIOSHomeScreen: View {
             }
         }
         .frame(height: 64)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
+        // Native SwiftUI material samples the wallpaper behind the dock and
+        // automatically adjusts blur, luminance and tint instead of using a
+        // fixed glass color. This keeps the dock visually adaptive per wallpaper.
+        .background {
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(Color.primary.opacity(wallpaper == "black" ? 0.055 : 0.025))
+                        .blendMode(.softLight)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .strokeBorder(.white.opacity(wallpaper == "black" ? 0.14 : 0.23), lineWidth: 0.8)
+                }
+                .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
+        }
+        .padding(.horizontal, 17)
+        .padding(.bottom, 7)
     }
 
     private var emptyState: some View {
