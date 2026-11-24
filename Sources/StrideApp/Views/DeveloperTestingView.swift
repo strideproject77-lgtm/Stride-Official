@@ -170,7 +170,7 @@ struct DeveloperTestingView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onDisappear { runner.stop() }
+        .onAppear { runner.restoreIfAvailable(packages: packages) }
     }
 
     private func iconName(for state: DeveloperBatchTestRow.State) -> String {
