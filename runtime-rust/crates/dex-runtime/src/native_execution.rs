@@ -730,7 +730,7 @@ mod tests {
             jni_onload_address: None,
         };
 
-        let image = NativeGuestImage::from_linked_module(&module).unwrap();
+        let mut image = NativeGuestImage::from_linked_module(&module).unwrap();
         assert!(image.is_executable_address(load_bias));
         assert!(!image.is_executable_address(load_bias + 0x1000));
         assert!(image.memory.read_u32(load_bias).is_ok());
