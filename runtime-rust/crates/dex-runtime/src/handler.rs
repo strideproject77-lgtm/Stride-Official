@@ -605,19 +605,19 @@ mod tests {
         ).unwrap().clone();
         let looper = get_main(
             &mut crate::jni::JniEnv::new(&mut heap), &[]
-        ).unwrap().and_then(Value::as_object).unwrap();
+        ).unwrap().and_then(|value| value.as_object()).unwrap();
         let get_thread = registry.find(
             "Landroid/os/Looper;", "getThread", "()Ljava/lang/Thread;"
         ).unwrap().clone();
         let looper_thread = get_thread(
             &mut crate::jni::JniEnv::new(&mut heap), &[Value::Object(looper)]
-        ).unwrap().and_then(Value::as_object).unwrap();
+        ).unwrap().and_then(|value| value.as_object()).unwrap();
         let current_thread = registry.find(
             "Ljava/lang/Thread;", "currentThread", "()Ljava/lang/Thread;"
         ).unwrap().clone();
         let current = current_thread(
             &mut crate::jni::JniEnv::new(&mut heap), &[]
-        ).unwrap().and_then(Value::as_object).unwrap();
+        ).unwrap().and_then(|value| value.as_object()).unwrap();
         assert_eq!(looper_thread, current);
         assert_eq!(heap.get(current).unwrap().class_descriptor(), "Ljava/lang/Thread;");
     }
