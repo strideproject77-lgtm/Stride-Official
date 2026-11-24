@@ -369,18 +369,6 @@ pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef
         },
     );
 
-    let shared_main = main.clone();
-    registry.register(
-        "Ljava/lang/Thread;",
-        "currentThread",
-        "()Ljava/lang/Thread;",
-        move |env, _args| {
-            let looper = get_or_create_main_looper(env, &shared_main)?;
-            let thread = get_or_create_looper_thread(env, looper)?;
-            Ok(Some(Value::Object(thread)))
-        },
-    );
-
     let shared = main.clone();
     registry.register(
         "Ljava/lang/Thread;",
