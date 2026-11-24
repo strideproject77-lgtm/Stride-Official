@@ -3074,6 +3074,22 @@ mod managed_view_input_tests {
     }
 
     #[test]
+    fn system_load_library_only_succeeds_for_fully_initialized_modules() {
+        let mut runtime = AndroidRuntime::new("com.stride.test");
+        let handler = runtime.jni.find(
+            "Ljava/lang/System;", "loadLibrary", "(Ljava/lang/String;)V"
+        ).unwrap().clone();
+        let library_name = runtime.heap.allocate_string("agent").unwrap();
+        let mut env = crate::jni::JniEnv::new(&mut runtime.heap);
+        assert!(handler(&mut env, &[Value::Object(library_name)]).is_err());
+        drop(env);
+
+        runtime.native_library_ready.lock().unwrap().insert("libagent.so".into());
+        let mut env = crate::jni::JniEnv::new(&mut runtime.heap);
+        assert_eq!(handler(&mut env, &[Value::Object(library_name)]).unwrap(), None);
+    }
+
+    #[test]
     fn external_activity_intents_are_rejected_without_mutating_backstack() {
         let mut runtime = AndroidRuntime::new("com.stride.test");
         let intent = Intent::new(Some(Intent::ACTION_VIEW))
