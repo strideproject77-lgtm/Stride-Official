@@ -81,17 +81,7 @@ struct ContentView: View {
                             home
                         }
                     } else if selectedTab == 1 {
-                        StrideAppLibraryScreen(
-                            packages: library.packages,
-                            accent: accent,
-                            onSelect: { selectedPackage = $0 },
-                            onQuickLaunch: {
-                                quickLaunchPackagePath = $0.packageDirectoryURL.standardizedFileURL.path
-                                selectedPackage = $0
-                            },
-                            onDelete: { pendingDelete = $0 },
-                            onImport: { showingImporter = true }
-                        )
+                        libraryView
                     } else {
                         settingsView
                     }
@@ -1108,6 +1098,7 @@ private struct APKDetailSheet: View {
     @State private var guestInputText = ""
     @FocusState private var guestKeyboardFocused: Bool
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var diagnostics = StrideDiagnostics.shared
     let item: ImportedAPK
     @State private var isExecuting = false
@@ -1496,22 +1487,18 @@ private struct APKDetailSheet: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { startGame() }
             }
         }
-        .onDisappear {
-            launchTask?.cancel()
-            launchTask = nil
-            frameScheduler?.stop()
-            frameScheduler = nil
-            StrideOrientationController.shared.reset()
-            let dismissalStatus = isExecuting
-                ? "view dismissed while launch was active"
-                : (executionError.map { "view dismissed after launch failure: \($0)" } ?? "runtime released by user")
-            if hasStartedDiagnosticSession {
-                finalizeDiagnosticReport(status: dismissalStatus)
+        .onChange(of: scenePhase) { phase in
+            guard showingExecutionScreen else { return }
+            switch phase {
+            case .active:
+                appendSessionLog("[HOST] Stride returned to foreground; retaining the existing guest runtime session")
+            case .inactive:
+                appendSessionLog("[HOST] Stride became inactive; guest session is retained")
+            case .background:
+                appendSessionLog("[HOST] Stride entered background; iOS may suspend guest execution, but Stride will not close or relaunch the session on return")
+            @unknown default:
+                appendSessionLog("[HOST] Host scene phase changed; guest session remains retained")
             }
-            touchResponseMilliseconds = nil
-            liveGuestFPS = nil
-            executionResult?.session.close()
-            executionResult = nil
         }
     }
 
