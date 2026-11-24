@@ -943,6 +943,35 @@ impl JniNativeRegistry {
     }
 
     fn register_builtins(&mut self) {
+        // Activity.requestWindowFeature(int) is inherited by Unity's launcher
+        // Activity classes. Keep the requested feature mask on the guest Activity
+        // so this bridge has observable state instead of returning a blind stub.
+        self.register(
+            "Landroid/app/Activity;",
+            "requestWindowFeature",
+            "(I)Z",
+            |env, args| {
+                let activity_id = args.first().and_then(Value::as_object)
+                    .filter(|id| *id != 0)
+                    .ok_or("Activity.requestWindowFeature receiver is null")?;
+                let activity_class = env.heap.get(activity_id)
+                    .map_err(|error| format!("Activity.requestWindowFeature receiver lookup failed: {error:?}"))?
+                    .class_descriptor();
+                if !activity_class.starts_with('L') || !activity_class.ends_with(';') {
+                    return Err(format!("Activity.requestWindowFeature received invalid receiver class {activity_class}"));
+                }
+                let feature_id = args.get(1).map(Value::as_int)
+                    .ok_or("Activity.requestWindowFeature featureId is missing")?;
+                if !(0..32).contains(&feature_id) {
+                    return Ok(Some(Value::Int(0)));
+                }
+                let current = env.get_object_field(activity_id, "__stride_window_feature_mask")?.as_int();
+                let updated = current | (1i32.wrapping_shl(feature_id as u32));
+                env.set_object_field(activity_id, "__stride_window_feature_mask", Value::Int(updated))?;
+                Ok(Some(Value::Int(1)))
+            },
+        );
+
         // java.lang.System.currentTimeMillis()J
         self.register(
             "Ljava/lang/System;",
@@ -3467,5 +3496,35 @@ mod tests {
         assert_eq!(get_method(&mut env, &[Value::Object(frame)]).unwrap(), Some(Value::Object(method_name)));
         assert_eq!(get_line(&mut env, &[Value::Object(frame)]).unwrap(), Some(Value::Int(-1)));
     }
+
+
+    #[test]
+    fn activity_request_window_feature_resolves_and_tracks_guest_state() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let activity = env.heap.allocate_instance("Lcom/unity3d/player/UnityPlayerActivity;").unwrap();
+
+        let request = registry.find_unique_framework_signature(
+            "requestWindowFeature", "(I)Z",
+        ).unwrap().clone();
+        assert_eq!(
+            request(&mut env, &[Value::Object(activity), Value::Int(1)]).unwrap(),
+            Some(Value::Int(1)),
+        );
+        assert_eq!(
+            env.get_object_field(activity, "__stride_window_feature_mask").unwrap(),
+            Value::Int(1 << 1),
+        );
+        assert_eq!(
+            request(&mut env, &[Value::Object(activity), Value::Int(8)]).unwrap(),
+            Some(Value::Int(1)),
+        );
+        assert_eq!(
+            env.get_object_field(activity, "__stride_window_feature_mask").unwrap(),
+            Value::Int((1 << 1) | (1 << 8)),
+        );
+    }
+
 
 }
