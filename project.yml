@@ -7,6 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
+    SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) STRIDE_DEVELOPER_MODE"
     IPHONEOS_DEPLOYMENT_TARGET: "15.0"
     TARGETED_DEVICE_FAMILY: "1"
 packages:
