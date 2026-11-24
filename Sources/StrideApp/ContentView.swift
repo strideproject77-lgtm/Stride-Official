@@ -21,6 +21,9 @@ struct ContentView: View {
     @State private var showingRuntimeStatusPage = false
     @State private var showingOverallLogsPage = false
     @State private var showingOverallLogsShare = false
+    #if STRIDE_DEVELOPER_MODE
+    @State private var showingDeveloperTestingPage = false
+    #endif
     @State private var overallLogsShareText = ""
     @State private var showingWelcome = !UserDefaults.standard.bool(forKey: "stride.onboarding.completed")
     @AppStorage("stride.execution.defaultMode") private var defaultExecutionModeRaw = StrideExecutionMode.jitless.rawValue
@@ -101,6 +104,12 @@ struct ContentView: View {
                 .fullScreenCover(isPresented: $showingOverallLogsPage) {
                     overallLogsPage
                 }
+                #if STRIDE_DEVELOPER_MODE
+                .fullScreenCover(isPresented: $showingDeveloperTestingPage) {
+                    DeveloperTestingView(packages: library.packages, accent: accent, background: background, panel: panel, muted: muted)
+                        .environmentObject(library)
+                }
+                #endif
                 .fullScreenCover(isPresented: $showingWelcome) {
                     StrideWelcomeView(
                         selectedModeRaw: $defaultExecutionModeRaw,
@@ -494,6 +503,11 @@ struct ContentView: View {
                 settingsAction("Runtime Status", detail: "Implemented components and work in progress", symbol: "cpu") {
                     showingRuntimeStatusPage = true
                 }
+                #if STRIDE_DEVELOPER_MODE
+                settingsAction("Developer Mode", detail: "Batch-test imported APKs, view live guest output and copy diagnostic parts", symbol: "hammer") {
+                    showingDeveloperTestingPage = true
+                }
+                #endif
 
                 Divider().overlay(line)
 
