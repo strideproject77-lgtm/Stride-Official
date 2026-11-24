@@ -430,7 +430,7 @@ impl AndroidRuntime {
                                 let target_class = class_desc.clone();
                                 let target_method = method_name.clone();
                                 let target_proto = proto.clone();
-                                self.jni.register(&target_class, &target_method, &target_proto, move |_env, _args| {
+                                self.jni.register(&class_desc, &method_name, &proto, move |_env, _args| {
                                     Err(format!(
                                         "Native method {}->{}{} is registered, but guest JNI argument/handle dispatch is unavailable",
                                         target_class, target_method, target_proto
