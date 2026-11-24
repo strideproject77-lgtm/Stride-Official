@@ -163,10 +163,10 @@ fn collect_native_initializers(
     const MAX_INIT_ARRAY_BYTES: u64 = 32 * 1024;
 
     let tag = |kind| dynamic_tags.iter().find(|(key, _)| *key == kind).map(|(_, value)| *value);
-    let is_executable = |address: u64| plan.pages.iter().any(|page| {
-        if !page.protection.executable { return false; }
-        let start = image_base.saturating_add(page.image_offset);
-        let end = start.saturating_add(stride_native_loader::IOS_PAGE_SIZE);
+    let is_executable = |address: u64| plan.segment_copies.iter().any(|segment| {
+        if !segment.protection.executable { return false; }
+        let start = image_base.saturating_add(segment.image_offset);
+        let end = start.saturating_add(segment.memory_size);
         address >= start && address < end
     });
 
@@ -237,13 +237,19 @@ impl NativeGuestImage {
         let mut memory = GuestMemory::from_bytes(image_base, image)
             .map_err(NativeExecutionError::GuestMemory)?;
         memory.enable_strict_protections();
-        for page in &module.plan.pages {
-            let address = image_base.checked_add(page.image_offset)
+        // Enforce the original ELF PT_LOAD permissions on each exact guest
+        // segment range. A coarse 16 KiB iOS page may contain adjacent Android
+        // RX and RW 4 KiB segments; mapping the page-wide union would create
+        // guest RWX memory. Segment-granular ranges preserve W^X.
+        for segment in &module.plan.segment_copies {
+            let address = image_base.checked_add(segment.image_offset)
                 .ok_or(NativeExecutionError::EntryAddressOverflow)?;
-            memory.map_protection(address, stride_native_loader::IOS_PAGE_SIZE as usize, MemoryProtection {
-                readable: page.protection.readable,
-                writable: page.protection.writable,
-                executable: page.protection.executable,
+            let length = usize::try_from(segment.memory_size)
+                .map_err(|_| NativeExecutionError::GuestMemory(Arm64Error::MemoryLimit))?;
+            memory.map_protection(address, length, MemoryProtection {
+                readable: segment.protection.readable,
+                writable: segment.protection.writable,
+                executable: segment.protection.executable,
             }).map_err(NativeExecutionError::GuestMemory)?;
         }
         memory.map_protection(stack_base, GUEST_NATIVE_STACK_SIZE, MemoryProtection {
