@@ -88,6 +88,18 @@ final class APKInspectionTests: XCTestCase {
         XCTAssertEqual(report.iconData, gameIcon, "The game icon should be selected instead of a notification glyph.")
     }
 
+    func testTwentyFortyEightDeclaredLauncherLogoOutranksAdaptiveForeground() {
+        let declaredIcon = "res/drawable-xxxhdpi/logo_2048.png"
+        let adaptiveForeground = "res/mipmap-xxxhdpi/icon_foreground.png"
+
+        XCTAssertTrue(APKArchiveInspector.isLauncherIconCandidate(declaredIcon))
+        XCTAssertGreaterThan(
+            APKArchiveInspector.iconScore(declaredIcon),
+            APKArchiveInspector.iconScore(adaptiveForeground),
+            "The declared @drawable/logo_2048 artwork must be selected ahead of the adaptive foreground-only layer."
+        )
+    }
+
     func testMultidexSequenceGapIsReported() {
         XCTAssertEqual(
             APKArchiveInspector.multidexSequenceGaps(["classes.dex", "classes3.dex"]),
