@@ -147,7 +147,8 @@ struct StrideAppLibraryScreen: View {
                         VStack(alignment: .leading, spacing: 12) {
                             sectionTitle("CATEGORIES", trailing: "Automatically organized")
                             LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(categories, id: \.0) { category in
+                                ForEach(categories.indices, id: \.self) { index in
+                                    let category = categories[index]
                                     categoryCard(category.0, symbol: category.1, apps: category.2)
                                 }
                             }
