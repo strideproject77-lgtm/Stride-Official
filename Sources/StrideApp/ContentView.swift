@@ -81,7 +81,17 @@ struct ContentView: View {
                             home
                         }
                     } else if selectedTab == 1 {
-                        libraryView
+                        StrideAppLibraryScreen(
+                            packages: library.packages,
+                            accent: accent,
+                            onSelect: { selectedPackage = $0 },
+                            onQuickLaunch: {
+                                quickLaunchPackagePath = $0.packageDirectoryURL.standardizedFileURL.path
+                                selectedPackage = $0
+                            },
+                            onDelete: { pendingDelete = $0 },
+                            onImport: { showingImporter = true }
+                        )
                     } else {
                         settingsView
                     }
