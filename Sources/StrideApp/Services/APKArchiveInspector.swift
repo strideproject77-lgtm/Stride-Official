@@ -245,7 +245,11 @@ struct APKArchiveInspector: Sendable {
     private func extractIcon(from entries: [Entry], in archive: Archive) -> Data? {
         let candidates = entries
             .filter { UInt64($0.uncompressedSize) <= maxIconEntryBytes }
-            .sorted { Self.iconScore($0.path) > Self.iconScore($1.path) }
+            .sorted {
+                let left = Self.iconScore($0.path)
+                let right = Self.iconScore($1.path)
+                return left == right ? $0.path < $1.path : left > right
+            }
 
         // Adaptive launcher icons often store foreground and background as
         // separate transparent raster assets. Composite them before displaying.
@@ -278,7 +282,14 @@ struct APKArchiveInspector: Sendable {
         }
 
         for entry in candidates {
-            if let data = readIconImage(entry, in: archive) { return data }
+            if let data = readIconImage(entry, in: archive) {
+                let dimensions = UIImage(data: data)?.cgImage.map { "\($0.width)x\($0.height)" } ?? "unknown dimensions"
+                StrideDiagnostics.recordAsync(
+                    severity: "INFO", stage: "ICON", code: "LAUNCHER_ICON_SELECTED",
+                    message: "Selected APK launcher artwork: \(entry.path) (\(dimensions), score=\(Self.iconScore(entry.path)))"
+                )
+                return data
+            }
         }
         return nil
     }
@@ -302,7 +313,7 @@ struct APKArchiveInspector: Sendable {
         return data
     }
 
-    private static func isLauncherIconCandidate(_ path: String) -> Bool {
+    static func isLauncherIconCandidate(_ path: String) -> Bool {
         let lower = path.lowercased()
         guard lower.hasPrefix("res/"),
               ["png", "webp", "jpg", "jpeg"].contains(URL(fileURLWithPath: lower).pathExtension) else {
@@ -321,13 +332,20 @@ struct APKArchiveInspector: Sendable {
             || name.contains("launcher")
             || name.hasSuffix("_icon")
             || name.hasPrefix("icon_")
+            || name.hasPrefix("logo_")
     }
 
-    private static func iconScore(_ path: String) -> Int {
+    static func iconScore(_ path: String) -> Int {
         let lower = path.lowercased()
         let name = URL(fileURLWithPath: lower).deletingPathExtension().lastPathComponent
         let nameScore: Int
-        switch name {
+        if name == "logo_2048" {
+            // The upstream tpcstld 2048 manifest explicitly declares
+            // @drawable/logo_2048 as its launcher icon. Its separate
+            // mipmap/icon_foreground asset is only the adaptive foreground.
+            nameScore = 700
+        } else {
+            switch name {
         case "ic_launcher": nameScore = 600
         case "ic_launcher_round": nameScore = 560
         case "ic_launcher_foreground": nameScore = 540
@@ -338,6 +356,7 @@ struct APKArchiveInspector: Sendable {
         case "icon": nameScore = 440
         case "logo": nameScore = 400
         default: nameScore = 320
+            }
         }
         let densityScore: Int
         if lower.contains("xxxhdpi") { densityScore = 80 }
