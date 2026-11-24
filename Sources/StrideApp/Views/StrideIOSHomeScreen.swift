@@ -13,7 +13,7 @@ struct StrideIOSHomeScreen: View {
     let onSettings: () -> Void
     let onExitHomeScreen: () -> Void
 
-    @AppStorage("stride.iosHome.wallpaper") private var wallpaper = "dusk"
+    @AppStorage("stride.iosHome.wallpaper") private var wallpaper = "black"
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var selectedPage = 0
@@ -29,7 +29,11 @@ struct StrideIOSHomeScreen: View {
 
     // A 4 × 6 page mirrors the standard iPhone Home Screen grid.
     private var pages: [[ImportedAPK]] {
-        stridePages(filteredPackages, size: 24)
+        let populated = stridePages(filteredPackages, size: 24)
+        // Keep three real swipe pages available, even when the library has fewer
+        // than 49 apps. This mirrors the three-page Home Screen requested.
+        let requiredPageCount = max(3, populated.count)
+        return populated + Array(repeating: [], count: requiredPageCount - populated.count)
     }
 
     private var dockPackages: [ImportedAPK] {
@@ -43,7 +47,7 @@ struct StrideIOSHomeScreen: View {
         case "forest":
             return [Color(red: 0.035, green: 0.23, blue: 0.19), Color(red: 0.012, green: 0.045, blue: 0.075)]
         case "black":
-            return [Color(red: 0.035, green: 0.045, blue: 0.085), Color.black]
+            return [Color.black, Color.black]
         case "dusk":
             return [Color(red: 0.34, green: 0.17, blue: 0.27), Color(red: 0.055, green: 0.045, blue: 0.16)]
         default:
@@ -141,7 +145,7 @@ struct StrideIOSHomeScreen: View {
 
                 dock
                     .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 18)
                     .background {
                         RoundedRectangle(cornerRadius: 31, style: .continuous)
                             .fill(.ultraThinMaterial)
@@ -259,7 +263,7 @@ struct StrideIOSHomeScreen: View {
                         GeometryReader { geometry in
                             let horizontalInset: CGFloat = 18
                             let spacing: CGFloat = 18
-                            let iconSize = min(60, max(48, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
+                            let iconSize = min(64, max(52, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
                             LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
                                 ForEach(entry.element) { item in
                                     appIcon(item, size: iconSize)
@@ -324,7 +328,7 @@ struct StrideIOSHomeScreen: View {
         HStack(spacing: 0) {
             ForEach(dockPackages) { item in
                 Button { onSelect(item) } label: {
-                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 60)
+                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 64)
                         .frame(maxWidth: .infinity)
                         .shadow(color: .black.opacity(0.26), radius: 5, y: 2)
                 }
@@ -346,7 +350,7 @@ struct StrideIOSHomeScreen: View {
                 .accessibilityLabel("Import your first app")
             }
         }
-        .frame(height: 58)
+        .frame(height: 64)
     }
 
     private var emptyState: some View {
