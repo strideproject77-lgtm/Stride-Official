@@ -99,7 +99,7 @@ struct StrideAppLibraryScreen: View {
                                 ForEach(suggested) { item in
                                     Button { onSelect(item) } label: {
                                         VStack(spacing: 7) {
-                                            StrideLauncherIcon(data: item.iconData, accent: accent, size: 54)
+                                            StrideAppLibraryIcon(data: item.iconData, accent: accent, size: 54)
                                             Text(item.displayName)
                                                 .font(.system(size: 10, weight: .medium))
                                                 .foregroundStyle(.white)
@@ -192,7 +192,7 @@ struct StrideAppLibraryScreen: View {
                 }
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 7) {
                     ForEach(Array(apps.prefix(6))) { item in
-                        StrideLauncherIcon(data: item.iconData, accent: accent, size: 34)
+                        StrideAppLibraryIcon(data: item.iconData, accent: accent, size: 34)
                     }
                     ForEach(0..<max(0, 6 - min(6, apps.count)), id: \.self) { _ in
                         RoundedRectangle(cornerRadius: 8).fill(.white.opacity(0.07)).frame(width: 34, height: 34)
@@ -214,7 +214,7 @@ struct StrideAppLibraryScreen: View {
             ForEach(items) { item in
                 Button { onSelect(item) } label: {
                     VStack(spacing: 6) {
-                        StrideLauncherIcon(data: item.iconData, accent: accent, size: 54)
+                        StrideAppLibraryIcon(data: item.iconData, accent: accent, size: 54)
                         Text(item.displayName).font(.system(size: 10, weight: .medium)).foregroundStyle(.white).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity)
@@ -226,5 +226,35 @@ struct StrideAppLibraryScreen: View {
                 }
             }
         }
+    }
+}
+
+
+private struct StrideAppLibraryIcon: View {
+    let data: Data?
+    let accent: Color
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let data, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .padding(size * 0.04)
+                    .background(Color.white.opacity(0.035))
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                        .fill(LinearGradient(colors: [accent.opacity(0.85), accent.opacity(0.4)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "app.fill")
+                        .font(.system(size: size * 0.42))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
     }
 }
