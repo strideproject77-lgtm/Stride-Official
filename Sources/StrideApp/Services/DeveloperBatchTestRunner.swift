@@ -179,7 +179,9 @@ final class DeveloperBatchTestRunner: ObservableObject {
             while Date() < deadline && !Task.isCancelled {
                 let pump = result.session.pumpGuestEvents(maxEvents: 12, instructionBudget: 30_000)
                 if pump.status != 0 {
-                    appendAppLog(index, "[ERROR] Guest event pump returned status \(pump.status)")
+                    appendAppLog(index, "[FATAL] Guest event pump returned terminal status \(pump.status)")
+                    sawFatalSignal = true
+                    break
                 }
 
                 let stats = result.session.guestFrameStats()
@@ -371,22 +373,42 @@ final class DeveloperBatchTestRunner: ObservableObject {
             try reportText.write(to: fullURL, atomically: true, encoding: .utf8)
             fullReportURL = fullURL
 
-            let characters = Array(reportText)
+            var partBodies: [String] = []
+            var currentBody = ""
+            for line in reportText.components(separatedBy: .newlines) {
+                let lineCharacters = Array(line)
+                let segments: [String]
+                if lineCharacters.count > promptFriendlyPartCharacterLimit {
+                    segments = stride(from: 0, to: lineCharacters.count, by: promptFriendlyPartCharacterLimit).map { start in
+                        String(lineCharacters[start..<min(start + promptFriendlyPartCharacterLimit, lineCharacters.count)])
+                    }
+                } else {
+                    segments = [line]
+                }
+                for segment in segments {
+                    let addition = (currentBody.isEmpty ? 0 : 1) + segment.count
+                    if !currentBody.isEmpty && currentBody.count + addition > promptFriendlyPartCharacterLimit {
+                        partBodies.append(currentBody)
+                        currentBody = ""
+                    }
+                    if !currentBody.isEmpty { currentBody += "\n" }
+                    currentBody += segment
+                }
+            }
+            if !currentBody.isEmpty || partBodies.isEmpty { partBodies.append(currentBody) }
+
             var parts: [String] = []
             var urls: [URL] = []
-            var start = 0
-            while start < characters.count {
-                let end = min(start + promptFriendlyPartCharacterLimit, characters.count)
-                let partNumber = parts.count + 1
+            for (partIndex, body) in partBodies.enumerated() {
+                let partNumber = partIndex + 1
                 let header = "STRIDE BATCH TEST LOG — PART \(partNumber)\nTotal apps: \(rows.count)\nPart size target: \(promptFriendlyPartCharacterLimit) characters\n\n"
-                let part = header + String(characters[start..<end])
+                let part = header + body
                 let url = folder.appendingPathComponent("Stride-Batch-Test-\(stamp)-PART-\(String(format: "%03d", partNumber)).txt")
                 try part.write(to: url, atomically: true, encoding: .utf8)
                 parts.append(part)
                 urls.append(url)
-                start = end
             }
-            if characters.isEmpty {
+            if reportText.isEmpty {
                 let emptyPart = "STRIDE BATCH TEST LOG — PART 1\nNo log content was captured."
                 let url = folder.appendingPathComponent("Stride-Batch-Test-\(stamp)-PART-001.txt")
                 try emptyPart.write(to: url, atomically: true, encoding: .utf8)
