@@ -392,6 +392,10 @@ struct StrideIOSHomeScreen: View {
                         .frame(width: index == selectedPage ? 17 : 6, height: 6)
                         .contentShape(Rectangle().inset(by: -8))
                         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { selectedPage = index } }
+                        .onDrop(of: ["public.text"], delegate: StrideHomeItemDropDelegate(
+                            destinationIndex: index * 24,
+                            onDrop: movePackage
+                        ))
                 }
             }
             .accessibilityLabel("Home Screen page \(selectedPage + 1) of \(pages.count)")
