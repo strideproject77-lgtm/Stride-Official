@@ -23,7 +23,7 @@ workflows:
         STRIDE_LOG_BRANCH: stride-codemagic-logs
         STRIDE_BUNDLE_ID: com.strideproject.stride
       # Match the known-good Infinity runner image to avoid moving Xcode versions.
-      xcode: 26.2
+      xcode: "26.2"
       cocoapods: default
 
     scripts:
