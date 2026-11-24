@@ -175,10 +175,11 @@ fn dex_string(
         if units.len() > utf16_length { return Err(ClassReadError::InvalidClassData); }
     }
     if units.len() != utf16_length { return Err(ClassReadError::InvalidClassData); }
-    // DEX Modified UTF-8 stores UTF-16 code units. Valid surrogate pairs must
-    // decode together, while isolated surrogates are malformed input and must
-    // not silently become U+FFFD (which corrupts resource/class identifiers).
-    String::from_utf16(&units).map_err(|_| ClassReadError::InvalidClassData)
+    // DEX Modified UTF-8 stores UTF-16 code units. Java strings may contain
+    // isolated surrogate code units; Rust strings cannot represent those values,
+    // so preserve the string table entry with U+FFFD rather than rejecting the
+    // entire class inventory. Valid surrogate pairs still decode losslessly.
+    Ok(String::from_utf16_lossy(&units))
 }
 
 fn type_descriptor(
@@ -602,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_isolated_high_surrogate_instead_of_replacing_it() {
+    fn preserves_isolated_high_surrogate_as_replacement_character() {
         let string_table_start = HEADER;
         let data_offset = HEADER + 4;
         let mut bytes = vec![0u8; data_offset];
@@ -610,13 +611,13 @@ mod tests {
             .copy_from_slice(&(data_offset as u32).to_le_bytes());
         bytes.extend_from_slice(&[3, 0xed, 0xa0, 0x80, 0]);
         assert_eq!(
-            dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0),
-            Err(ClassReadError::InvalidClassData)
+            dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0).unwrap(),
+            "\u{fffd}"
         );
     }
 
     #[test]
-    fn rejects_isolated_low_surrogate_instead_of_replacing_it() {
+    fn preserves_isolated_low_surrogate_as_replacement_character() {
         let string_table_start = HEADER;
         let data_offset = HEADER + 4;
         let mut bytes = vec![0u8; data_offset];
@@ -624,8 +625,8 @@ mod tests {
             .copy_from_slice(&(data_offset as u32).to_le_bytes());
         bytes.extend_from_slice(&[3, 0xed, 0xb0, 0x80, 0]);
         assert_eq!(
-            dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0),
-            Err(ClassReadError::InvalidClassData)
+            dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0).unwrap(),
+            "\u{fffd}"
         );
     }
 
