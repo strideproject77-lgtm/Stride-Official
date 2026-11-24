@@ -47,7 +47,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
     @Published private(set) var overallLog: [String] = []
 
     private var runTask: Task<Void, Never>?
-    private let observationWindowNanoseconds: UInt64 = 20_000_000_000
+    private let observationWindowNanoseconds: UInt64 = 30_000_000_000
     private let pollIntervalNanoseconds: UInt64 = 300_000_000
     private let promptFriendlyPartCharacterLimit = 9_000
 
@@ -70,7 +70,7 @@ final class DeveloperBatchTestRunner: ObservableObject {
             "Started: \(ISO8601DateFormatter().string(from: Date()))",
             "Imported apps: \(packages.count)",
             "Execution policy: sequential guest sessions; one runtime at a time",
-            "Observation window per app: 20 seconds unless a fatal runtime signal is observed",
+            "Observation window per app: up to 30 seconds unless a fatal runtime signal is observed",
             "Interpretation: a completed observation window is not proof of playable gameplay.",
             ""
         ]
