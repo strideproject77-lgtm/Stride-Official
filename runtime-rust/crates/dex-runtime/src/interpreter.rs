@@ -4479,4 +4479,98 @@ mod tests {
         assert!(error.contains("Invalid const-class type index 1"), "{}", error);
     }
 
+    #[test]
+    fn class_for_name_resolves_dex_types_to_stable_class_mirrors() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "loadClass".into(),
+                prototype: "()Ljava/lang/Class;".into(),
+                // const-string v0, "java.lang.String"; invoke-static {v0}, Class.forName;
+                // move-result-object v0; return-object v0
+                code_units: vec![0x001a, 0x0000, 0x1071, 0x0000, 0x0000, 0x000c, 0x0011],
+                registers_size: 1,
+                ins_size: 0,
+                try_blocks: vec![],
+            },
+        )]);
+        let strings = vec!["java.lang.String".to_string()];
+        let types = vec!["Ljava/lang/String;".to_string()];
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/lang/Class;".into(),
+            name: "forName".into(),
+            prototype: "(Ljava/lang/String;)Ljava/lang/Class;".into(),
+        }];
+        let lookup = HashMap::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &strings);
+        vm.attach_dex_metadata(&types, &[]);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let first = vm.execute_method(1, &[], 16).expect("Class.forName should resolve known DEX type");
+        let first_id = match first.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(id)) => id,
+            other => panic!("Expected Class mirror, got {:?}", other),
+        };
+        assert_eq!(vm.heap.get(first_id).unwrap().class_descriptor(), "Ljava/lang/Class;");
+        let second = vm.execute_method(1, &[], 16).expect("repeated Class.forName should resolve");
+        assert_eq!(second.stop_reason, ExecutionStopReason::ReturnedValue(Value::Object(first_id)));
+    }
+
+    #[test]
+    fn thread_get_stack_trace_returns_current_guest_frame() {
+        let mut heap = ManagedHeap::default();
+        let thread = heap.allocate_instance("Ljava/lang/Thread;").unwrap();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/Caller;".into(),
+                name: "capture".into(),
+                prototype: "(Ljava/lang/Thread;)[Ljava/lang/StackTraceElement;".into(),
+                // invoke-virtual {v0}, Thread.getStackTrace; move-result-object v0; return-object v0
+                code_units: vec![0x106e, 0x0000, 0x0000, 0x000c, 0x0011],
+                registers_size: 1,
+                ins_size: 1,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/lang/Thread;".into(),
+            name: "getStackTrace".into(),
+            prototype: "()[Ljava/lang/StackTraceElement;".into(),
+        }];
+        let lookup = HashMap::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(1, &[Value::Object(thread)], 16)
+            .expect("Thread.getStackTrace should return guest frames");
+        let array = match report.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(id)) => id,
+            other => panic!("Expected stack trace array, got {:?}", other),
+        };
+        assert_eq!(vm.heap.array_length(array).unwrap(), 1);
+        let frame = vm.heap.get_array_element(array, 0).unwrap().as_object().unwrap();
+        assert_eq!(vm.heap.get(frame).unwrap().class_descriptor(), "Ljava/lang/StackTraceElement;");
+        let declaring = match vm.heap.get_instance_field(frame, "declaringClass").unwrap() {
+            Value::Object(id) => vm.heap.get_string(id).unwrap(),
+            other => panic!("Expected declaring class string, got {:?}", other),
+        };
+        assert_eq!(declaring, "test.Caller");
+        let method = match vm.heap.get_instance_field(frame, "methodName").unwrap() {
+            Value::Object(id) => vm.heap.get_string(id).unwrap(),
+            other => panic!("Expected method name string, got {:?}", other),
+        };
+        assert_eq!(method, "capture");
+    }
+
 }
