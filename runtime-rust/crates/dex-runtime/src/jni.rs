@@ -1073,6 +1073,60 @@ impl JniNativeRegistry {
             },
         );
 
+        // StackTraceElement accessors used by Kotlin's null-parameter diagnostics
+        // after Thread.getStackTrace has materialized guest DEX frames.
+        self.register("Ljava/lang/StackTraceElement;", "getClassName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.getClassName receiver is null")?;
+            match env.get_object_field(receiver, "declaringClass")? {
+                Value::Object(id) if id != 0 => Ok(Some(Value::Object(id))),
+                _ => Err("StackTraceElement has no declaringClass".into()),
+            }
+        });
+        self.register("Ljava/lang/StackTraceElement;", "getMethodName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.getMethodName receiver is null")?;
+            match env.get_object_field(receiver, "methodName")? {
+                Value::Object(id) if id != 0 => Ok(Some(Value::Object(id))),
+                _ => Err("StackTraceElement has no methodName".into()),
+            }
+        });
+        self.register("Ljava/lang/StackTraceElement;", "getFileName", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.getFileName receiver is null")?;
+            Ok(Some(env.get_object_field(receiver, "fileName")?))
+        });
+        self.register("Ljava/lang/StackTraceElement;", "getLineNumber", "()I", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.getLineNumber receiver is null")?;
+            Ok(Some(env.get_object_field(receiver, "lineNumber")?))
+        });
+        self.register("Ljava/lang/StackTraceElement;", "isNativeMethod", "()Z", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.isNativeMethod receiver is null")?;
+            env.heap.get(receiver).map_err(|error| format!("Invalid StackTraceElement: {:?}", error))?;
+            Ok(Some(Value::Int(0)))
+        });
+        self.register("Ljava/lang/StackTraceElement;", "toString", "()Ljava/lang/String;", |env, args| {
+            let receiver = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("StackTraceElement.toString receiver is null")?;
+            let class_name = match env.get_object_field(receiver, "declaringClass")? {
+                Value::Object(id) if id != 0 => env.get_string_utf(id)?.to_owned(),
+                _ => return Err("StackTraceElement has no declaringClass".into()),
+            };
+            let method_name = match env.get_object_field(receiver, "methodName")? {
+                Value::Object(id) if id != 0 => env.get_string_utf(id)?.to_owned(),
+                _ => return Err("StackTraceElement has no methodName".into()),
+            };
+            let file_name = match env.get_object_field(receiver, "fileName")? {
+                Value::Object(id) if id != 0 => env.get_string_utf(id)?.to_owned(),
+                _ => "Unknown Source".to_owned(),
+            };
+            let line = env.get_object_field(receiver, "lineNumber")?.as_int();
+            let location = if line >= 0 { format!("{}:{}", file_name, line) } else { file_name };
+            Ok(Some(Value::Object(env.new_string_utf(&format!("{}.{}({})", class_name, method_name, location))?)))
+        });
+
         // Core java.lang.String operations used by ordinary Activity input handlers.
         self.register("Ljava/lang/String;", "equals", "(Ljava/lang/Object;)Z", |env, args| {
             let Some(receiver) = args.first().and_then(|value| value.as_object()) else {
