@@ -110,6 +110,30 @@ pub struct ArtVm<'a> {
     class_mirrors: HashMap<String, u32>,
 }
 
+fn allocate_reflective_array(
+    heap: &mut ManagedHeap,
+    component_descriptor: &str,
+    dimensions: &[i32],
+    depth: usize,
+) -> Result<u32, String> {
+    let remaining_dimensions = dimensions.len().checked_sub(depth)
+        .filter(|count| *count > 0)
+        .ok_or("Invalid reflective array dimension depth")?;
+    let descriptor = format!("{}{}", "[".repeat(remaining_dimensions), component_descriptor);
+    let length = *dimensions.get(depth).ok_or("Missing reflective array dimension")?;
+    let array = heap.allocate_array(&descriptor, length)
+        .map_err(|error| format!("Reflective array allocation failed for {}: {:?}", descriptor, error))?;
+
+    if depth + 1 < dimensions.len() {
+        for index in 0..length {
+            let child = allocate_reflective_array(heap, component_descriptor, dimensions, depth + 1)?;
+            heap.set_array_element(array, index, Value::Object(child))
+                .map_err(|error| format!("Reflective nested array initialization failed: {:?}", error))?;
+        }
+    }
+    Ok(array)
+}
+
 fn decode_invoke_arguments(
     registers: &RegisterFile,
     register_indices: &[u16],
@@ -1450,6 +1474,88 @@ impl<'a> ArtVm<'a> {
                     if native_handler.is_none() {
                         native_handler = self.jni.find_unique_framework_signature(target_name, target_proto).cloned();
                     }
+                    // java.lang.reflect.Array.newInstance(Class, int[]) is used by
+                    // support libraries such as AppCompat. Class mirrors retain the
+                    // exact DEX descriptor, so array rank and primitive/reference
+                    // component types can be constructed without guessing.
+                    if target_method.is_none()
+                        && target_class == "Ljava/lang/reflect/Array;"
+                        && target_name == "newInstance"
+                        && target_proto == "(Ljava/lang/Class;[I)Ljava/lang/Object;"
+                    {
+                        let class_mirror = args.first().and_then(Value::as_object)
+                            .filter(|id| *id != 0)
+                            .ok_or_else(|| format!("Array.newInstance received a null Class at PC {}", pc))?;
+                        if self.heap.get(class_mirror)
+                            .map_err(|error| format!("Array.newInstance Class lookup failed: {:?}", error))?
+                            .class_descriptor() != "Ljava/lang/Class;" {
+                            return Err(format!("Array.newInstance received a non-Class object at PC {}", pc));
+                        }
+                        let descriptor_id = match self.heap.get_instance_field(
+                            class_mirror, "__stride_represented_class_descriptor"
+                        ).map_err(|error| format!("Array.newInstance Class descriptor lookup failed: {:?}", error))? {
+                            Value::Object(id) if id != 0 => id,
+                            _ => return Err(format!("Array.newInstance Class mirror has no represented descriptor at PC {}", pc)),
+                        };
+                        let component_descriptor = self.heap.get_string(descriptor_id)
+                            .map_err(|error| format!("Array.newInstance component descriptor is invalid: {:?}", error))?
+                            .to_owned();
+                        let valid_component = matches!(
+                            component_descriptor.as_str(),
+                            "Z" | "B" | "C" | "S" | "I" | "J" | "F" | "D"
+                        ) || component_descriptor.starts_with('[')
+                            || (component_descriptor.starts_with('L') && component_descriptor.ends_with(';'));
+                        if !valid_component || component_descriptor == "V" {
+                            return Err(format!(
+                                "Array.newInstance received invalid component descriptor {:?} at PC {}",
+                                component_descriptor, pc
+                            ));
+                        }
+                        let dimensions_id = args.get(1).and_then(Value::as_object)
+                            .filter(|id| *id != 0)
+                            .ok_or_else(|| format!("Array.newInstance received null dimensions at PC {}", pc))?;
+                        let dimensions_length = self.heap.array_length(dimensions_id)
+                            .map_err(|error| format!("Array.newInstance dimensions are not an int array: {:?}", error))?;
+                        if dimensions_length == 0 || dimensions_length > 255 {
+                            return Err(format!(
+                                "Array.newInstance requires 1..=255 dimensions, received {} at PC {}",
+                                dimensions_length, pc
+                            ));
+                        }
+                        let dimensions_descriptor = self.heap.get(dimensions_id)
+                            .map_err(|error| format!("Array.newInstance dimensions lookup failed: {:?}", error))?
+                            .class_descriptor().to_owned();
+                        if dimensions_descriptor != "[I" {
+                            return Err(format!(
+                                "Array.newInstance dimensions must be int[], received {} at PC {}",
+                                dimensions_descriptor, pc
+                            ));
+                        }
+                        let mut dimensions = Vec::with_capacity(dimensions_length);
+                        for index in 0..dimensions_length {
+                            let dimension = match self.heap.get_array_element(dimensions_id, index as i32)
+                                .map_err(|error| format!("Array.newInstance dimension read failed: {:?}", error))? {
+                                Value::Int(value) => value,
+                                other => return Err(format!(
+                                    "Array.newInstance dimension {} is not an int: {:?}", index, other
+                                )),
+                            };
+                            if dimension < 0 {
+                                return Err(format!(
+                                    "Array.newInstance dimension {} is negative ({}) at PC {}",
+                                    index, dimension, pc
+                                ));
+                            }
+                            dimensions.push(dimension);
+                        }
+                        let array = allocate_reflective_array(
+                            self.heap, &component_descriptor, &dimensions, 0
+                        )?;
+                        pending_result = Some(Value::Object(array));
+                        pc += 3;
+                        continue;
+                    }
+
                     // Executors.newFixedThreadPool(int, ThreadFactory) is part of the
                     // Java boot-library surface used by AndroidX ArchTaskExecutor during
                     // Activity construction. Represent the pool as a managed guest object;
@@ -4150,6 +4256,59 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn reflective_array_new_instance_builds_typed_multidimensional_arrays() {
+        let mut heap = ManagedHeap::default();
+        let mut hierarchy = ClassHierarchy::new();
+        let mut monitors = MonitorTable::new();
+        let mut jni = JniNativeRegistry::new();
+        let class_mirror = heap.allocate_instance("Ljava/lang/Class;").unwrap();
+        let descriptor = heap.allocate_string("I").unwrap();
+        heap.set_instance_field(
+            class_mirror, "__stride_represented_class_descriptor", Value::Object(descriptor)
+        ).unwrap();
+        let dimensions = heap.allocate_array("[I", 2).unwrap();
+        heap.set_array_element(dimensions, 0, Value::Int(2)).unwrap();
+        heap.set_array_element(dimensions, 1, Value::Int(3)).unwrap();
+        let methods = HashMap::from([(
+            1u32,
+            MethodCode {
+                class_descriptor: "Ltest/ReflectiveArrayCaller;".into(),
+                name: "create".into(),
+                prototype: "(Ljava/lang/Class;[I)Ljava/lang/Object;".into(),
+                // invoke-static {v1, v2}; move-result-object v0; return-object v0
+                code_units: vec![0x2071, 0x0000, 0x0021, 0x000c, 0x0011],
+                registers_size: 3,
+                ins_size: 2,
+                try_blocks: vec![],
+            },
+        )]);
+        let references = vec![MethodReference {
+            method_index: 0,
+            class_descriptor: "Ljava/lang/reflect/Array;".into(),
+            name: "newInstance".into(),
+            prototype: "(Ljava/lang/Class;[I)Ljava/lang/Object;".into(),
+        }];
+        let lookup = HashMap::new();
+        let mut vm = ArtVm::new(&mut heap, &mut hierarchy, &mut monitors, &mut jni, &methods, &[]);
+        vm.attach_method_resolver(&references, &lookup);
+
+        let report = vm.execute_method(
+            1, &[Value::Object(class_mirror), Value::Object(dimensions)], 16
+        ).expect("reflective array creation should execute");
+        let outer = match report.stop_reason {
+            ExecutionStopReason::ReturnedValue(Value::Object(id)) => id,
+            other => panic!("Expected reflective array object, got {:?}", other),
+        };
+        assert_eq!(vm.heap.get(outer).unwrap().class_descriptor(), "[[I");
+        assert_eq!(vm.heap.array_length(outer).unwrap(), 2);
+        let first = vm.heap.get_array_element(outer, 0).unwrap().as_object().unwrap();
+        let second = vm.heap.get_array_element(outer, 1).unwrap().as_object().unwrap();
+        assert_ne!(first, second, "each nested array must have independent storage");
+        assert_eq!(vm.heap.get(first).unwrap().class_descriptor(), "[I");
+        assert_eq!(vm.heap.array_length(first).unwrap(), 3);
+    }
 
     #[test]
     fn const_class_materializes_and_reuses_managed_class_mirror() {
