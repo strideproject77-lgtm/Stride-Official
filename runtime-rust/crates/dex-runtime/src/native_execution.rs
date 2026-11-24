@@ -692,6 +692,54 @@ mod tests {
     use super::*;
 
     #[test]
+    fn maps_adjacent_rx_and_rw_segments_without_creating_guest_rwx() {
+        let load_bias = 0x0000_7000_0000_0000u64;
+        let rx = PageProtection { readable: true, writable: false, executable: true };
+        let rw = PageProtection { readable: true, writable: true, executable: false };
+        let module = LoadedNativeModule {
+            name: "libsegment-fixture.so".into(),
+            architecture: ElfArchitecture::Aarch64,
+            plan: NativeImagePlan {
+                load_bias,
+                image_virtual_start: 0,
+                image_size: 0x4000,
+                pages: vec![stride_native_loader::PlannedPage {
+                    image_offset: 0,
+                    protection: PageProtection { readable: true, writable: true, executable: true },
+                }],
+                segment_copies: vec![
+                    stride_native_loader::SegmentCopy {
+                        file_offset: 0, image_offset: 0, file_size: 0x1000,
+                        memory_size: 0x1000, protection: rx,
+                    },
+                    stride_native_loader::SegmentCopy {
+                        file_offset: 0x1000, image_offset: 0x1000, file_size: 0x1000,
+                        memory_size: 0x1000, protection: rw,
+                    },
+                ],
+                architecture: ElfArchitecture::Aarch64,
+            },
+            mapped_image: vec![0; 0x4000],
+            relocations: Vec::new(),
+            dynamic_symbols: Vec::new(),
+            load_bias,
+            exported_symbols: HashMap::new(),
+            needed_libraries: Vec::new(),
+            dynamic_tags: Vec::new(),
+            has_jni_onload: false,
+            jni_onload_address: None,
+        };
+
+        let image = NativeGuestImage::from_linked_module(&module).unwrap();
+        assert!(image.is_executable_address(load_bias));
+        assert!(!image.is_executable_address(load_bias + 0x1000));
+        assert!(image.memory.read_u32(load_bias).is_ok());
+        assert!(image.memory.write_u32(load_bias, 1).is_err());
+        assert!(image.memory.read_u32(load_bias + 0x1000).is_ok());
+        assert!(image.memory.write_u32(load_bias + 0x1000, 1).is_ok());
+    }
+
+    #[test]
     fn validates_jni_method_descriptors_strictly() {
         for valid in ["()V", "(I)I", "(Ljava/lang/String;[I)Z", "([[Ljava/lang/Object;)Ljava/lang/String;"] {
             assert!(is_valid_jni_method_descriptor(valid), "expected valid descriptor: {valid}");
