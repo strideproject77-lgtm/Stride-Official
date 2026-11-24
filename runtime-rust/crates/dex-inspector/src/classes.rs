@@ -609,7 +609,8 @@ mod tests {
         let mut bytes = vec![0u8; data_offset];
         bytes[string_table_start..string_table_start + 4]
             .copy_from_slice(&(data_offset as u32).to_le_bytes());
-        bytes.extend_from_slice(&[3, 0xed, 0xa0, 0x80, 0]);
+        // The ULEB128 prefix counts UTF-16 code units, not encoded bytes.
+        bytes.extend_from_slice(&[1, 0xed, 0xa0, 0x80, 0]);
         assert_eq!(
             dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0).unwrap(),
             "\u{fffd}"
@@ -623,7 +624,8 @@ mod tests {
         let mut bytes = vec![0u8; data_offset];
         bytes[string_table_start..string_table_start + 4]
             .copy_from_slice(&(data_offset as u32).to_le_bytes());
-        bytes.extend_from_slice(&[3, 0xed, 0xb0, 0x80, 0]);
+        // An isolated low surrogate is also exactly one UTF-16 code unit.
+        bytes.extend_from_slice(&[1, 0xed, 0xb0, 0x80, 0]);
         assert_eq!(
             dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0).unwrap(),
             "\u{fffd}"
