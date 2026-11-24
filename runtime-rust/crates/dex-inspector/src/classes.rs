@@ -15,6 +15,7 @@ pub enum ClassReadError {
     InvalidTable,
     InvalidIndex,
     InvalidClassData,
+    InvalidClassDataAt { class_index: u32, offset: u32 },
     InvalidUleb128,
     InvalidCodeItem,
     InvalidInstructions,
@@ -484,7 +485,13 @@ fn inspect_classes_internal(bytes: &[u8], validate_code_items: bool) -> Result<C
             class_data(
                 b, data_off, id, &fields, &methods, &string_ids, &types, &protos,
                 field_count, method_count, string_count, type_count, validate_code_items,
-            )?
+            ).map_err(|error| match error {
+                ClassReadError::InvalidClassData => ClassReadError::InvalidClassDataAt {
+                    class_index: id,
+                    offset: data_off,
+                },
+                other => other,
+            })?
         };
         class.descriptor = type_descriptor(b, &string_ids, &types, string_count, type_count, id)?;
         class.access_flags = flags;
@@ -629,6 +636,17 @@ mod tests {
         assert_eq!(
             dex_string(&bytes, &(string_table_start..string_table_start + 4), 1, 0).unwrap(),
             "\u{fffd}"
+        );
+    }
+
+    #[test]
+    fn malformed_class_data_reports_owning_class_and_offset() {
+        let mut bytes = sample(0);
+        let defs = 0x70 + 8 + 8 + 12 + 8;
+        bytes[defs + 24..defs + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(
+            inspect_classes_for_loading(&bytes).unwrap_err(),
+            ClassReadError::InvalidClassDataAt { class_index: 0, offset: u32::MAX }
         );
     }
 
