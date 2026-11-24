@@ -992,6 +992,87 @@ impl JniNativeRegistry {
             },
         );
 
+        // java.lang.reflect.Array: allocate real managed arrays from a Class mirror.
+        self.register(
+            "Ljava/lang/reflect/Array;",
+            "newInstance",
+            "(Ljava/lang/Class;[I)Ljava/lang/Object;",
+            |env, args| {
+                let class_id = args.first().and_then(Value::as_object)
+                    .filter(|id| *id != 0).ok_or("Array.newInstance component Class is null")?;
+                let descriptor_id = match env.get_object_field(
+                    class_id, "__stride_represented_class_descriptor"
+                )? {
+                    Value::Object(id) if id != 0 => id,
+                    _ => return Err("Array.newInstance received a Class without a represented descriptor".into()),
+                };
+                let component = env.get_string_utf(descriptor_id)?.to_owned();
+                let valid_component = matches!(component.as_str(), "Z" | "B" | "C" | "S" | "I" | "J" | "F" | "D")
+                    || (component.starts_with('L') && component.ends_with(';'))
+                    || component.starts_with('[');
+                if !valid_component {
+                    return Err(format!("Array.newInstance received invalid component descriptor {}", component));
+                }
+                let dimensions_id = args.get(1).and_then(Value::as_object)
+                    .filter(|id| *id != 0).ok_or("Array.newInstance dimensions are null")?;
+                let dimensions = env.get_int_array_elements(dimensions_id)?;
+                if dimensions.is_empty() || dimensions.len() > 255 {
+                    return Err("Array.newInstance requires between 1 and 255 dimensions".into());
+                }
+                let mut level_count = 1usize;
+                let mut total_references = 0usize;
+                for dimension in &dimensions {
+                    let length = usize::try_from(*dimension)
+                        .map_err(|_| format!("Array.newInstance received negative dimension {}", dimension))?;
+                    level_count = level_count.checked_mul(length)
+                        .ok_or("Array.newInstance dimensions overflow")?;
+                    total_references = total_references.checked_add(level_count)
+                        .ok_or("Array.newInstance allocation size overflow")?;
+                    if total_references > 1_000_000 {
+                        return Err("Array.newInstance exceeds the managed array allocation limit".into());
+                    }
+                }
+
+                fn allocate_dimensions(
+                    env: &mut JniEnv<'_>,
+                    component: &str,
+                    dimensions: &[i32],
+                    depth: usize,
+                ) -> Result<u32, String> {
+                    let remaining = dimensions.len() - depth;
+                    let descriptor = format!("{}{}", "[".repeat(remaining), component);
+                    let array_id = env.heap.allocate_array(&descriptor, dimensions[depth])
+                        .map_err(|error| format!("Array.newInstance allocation failed: {error:?}"))?;
+                    if depth + 1 < dimensions.len() {
+                        for index in 0..dimensions[depth] {
+                            let child = allocate_dimensions(env, component, dimensions, depth + 1)?;
+                            env.heap.set_array_element(array_id, index, Value::Object(child))
+                                .map_err(|error| format!("Array.newInstance child assignment failed: {error:?}"))?;
+                        }
+                    }
+                    Ok(array_id)
+                }
+
+                env.local_refs.try_reserve(1)
+                    .map_err(|_| "Array.newInstance local-reference allocation failed".to_owned())?;
+                let array_id = allocate_dimensions(env, &component, &dimensions, 0)?;
+                env.local_refs.push(array_id);
+                Ok(Some(Value::Object(array_id)))
+            },
+        );
+        self.register(
+            "Ljava/lang/reflect/Array;",
+            "getLength",
+            "(Ljava/lang/Object;)I",
+            |env, args| {
+                let array_id = args.first().and_then(Value::as_object)
+                    .filter(|id| *id != 0).ok_or("Array.getLength array is null")?;
+                let length = env.array_length(array_id)?;
+                Ok(Some(Value::Int(i32::try_from(length)
+                    .map_err(|_| "Array.getLength result exceeds Java int range")?)))
+            },
+        );
+
         // Core java.lang.String operations used by ordinary Activity input handlers.
         self.register("Ljava/lang/String;", "equals", "(Ljava/lang/Object;)Z", |env, args| {
             let Some(receiver) = args.first().and_then(|value| value.as_object()) else {
@@ -3254,5 +3335,56 @@ mod tests {
             .unwrap().and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.get_string_utf(rendered).unwrap(), "12.500000");
     }
+
+    #[test]
+    fn reflect_array_new_instance_builds_multidimensional_managed_arrays() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let component = env.heap.allocate_instance("Ljava/lang/Class;").unwrap();
+        let descriptor = env.new_string_utf("I").unwrap();
+        env.set_object_field(
+            component, "__stride_represented_class_descriptor", Value::Object(descriptor)
+        ).unwrap();
+        let dimensions = env.new_int_array(2).unwrap();
+        env.heap.set_array_element(dimensions, 0, Value::Int(2)).unwrap();
+        env.heap.set_array_element(dimensions, 1, Value::Int(3)).unwrap();
+        let new_instance = registry.find(
+            "Ljava/lang/reflect/Array;",
+            "newInstance",
+            "(Ljava/lang/Class;[I)Ljava/lang/Object;",
+        ).unwrap().clone();
+        let outer = new_instance(
+            &mut env, &[Value::Object(component), Value::Object(dimensions)]
+        ).unwrap().and_then(Value::as_object).unwrap();
+        assert_eq!(env.heap.get(outer).unwrap().class_descriptor(), "[[I");
+        assert_eq!(env.array_length(outer).unwrap(), 2);
+        let inner = env.heap.get_array_element(outer, 0).unwrap().as_object().unwrap();
+        assert_eq!(env.heap.get(inner).unwrap().class_descriptor(), "[I");
+        assert_eq!(env.array_length(inner).unwrap(), 3);
+    }
+
+    #[test]
+    fn reflect_array_new_instance_rejects_negative_dimensions() {
+        let registry = JniNativeRegistry::new();
+        let mut heap = ManagedHeap::default();
+        let mut env = JniEnv::new(&mut heap);
+        let component = env.heap.allocate_instance("Ljava/lang/Class;").unwrap();
+        let descriptor = env.new_string_utf("Ljava/lang/String;").unwrap();
+        env.set_object_field(
+            component, "__stride_represented_class_descriptor", Value::Object(descriptor)
+        ).unwrap();
+        let dimensions = env.new_int_array(1).unwrap();
+        env.heap.set_array_element(dimensions, 0, Value::Int(-1)).unwrap();
+        let new_instance = registry.find(
+            "Ljava/lang/reflect/Array;",
+            "newInstance",
+            "(Ljava/lang/Class;[I)Ljava/lang/Object;",
+        ).unwrap().clone();
+        assert!(new_instance(
+            &mut env, &[Value::Object(component), Value::Object(dimensions)]
+        ).is_err());
+    }
+
 
 }
