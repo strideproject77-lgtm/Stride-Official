@@ -120,6 +120,9 @@ struct StrideAppLibraryScreen: View {
             }
         }
         .preferredColorScheme(.dark)
+        .sheet(item: $selectedCategory) { selected in
+            categoryDetail(selected)
+        }
     }
 
     private var libraryBackdrop: some View {
@@ -178,7 +181,7 @@ struct StrideAppLibraryScreen: View {
         }
         .padding(.horizontal, 16)
         .frame(height: 49)
-        .background(.ultraThinMaterial, in: Capsule())
+        .strideLiquidGlass(in: Capsule())
         .overlay(Capsule().stroke(.white.opacity(0.28), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.18), radius: 12, y: 5)
     }
@@ -203,7 +206,7 @@ struct StrideAppLibraryScreen: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+        .strideLiquidGlass(in: RoundedRectangle(cornerRadius: 23, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).stroke(.white.opacity(0.20), lineWidth: 0.8))
         .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
     }
@@ -234,15 +237,12 @@ struct StrideAppLibraryScreen: View {
         }
         .padding(11)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .strideLiquidGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(.white.opacity(0.18), lineWidth: 0.8))
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .onTapGesture {
             // Category cards expand through a dedicated full-screen sheet below.
             selectedCategory = category
-        }
-        .sheet(item: $selectedCategory) { selected in
-            categoryDetail(selected)
         }
     }
 
@@ -398,5 +398,17 @@ private struct StrideAppLibraryIcon: View {
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+    }
+}
+
+
+private extension View {
+    @ViewBuilder
+    func strideLiquidGlass<S: Shape>(in shape: S) -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: shape)
+        } else {
+            self.background(.ultraThinMaterial, in: shape)
+        }
     }
 }
