@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import PhotosUI
 
 /// Independent iPhone-style launcher surface. The original Stride Home remains a separate,
 /// selectable experience; this view only presents packages already imported into Stride.
@@ -219,7 +220,10 @@ struct StrideIOSHomeScreen: View {
                         .buttonStyle(.plain)
                     }
                     Button {
-                        showPhotoPicker = true
+                        showWallpaperGallery = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showPhotoPicker = true
+                        }
                     } label: {
                         VStack(spacing: 10) {
                             Image(systemName: "photo.on.rectangle.angled")
@@ -256,7 +260,7 @@ struct StrideIOSHomeScreen: View {
                         Text("Automatic").tag("automatic")
                         Text("Dark tint").tag("dark")
                         Text("Color tint").tag("tinted")
-                        Text("Clear glass").tag("clear")
+                        Text("Glass overlay").tag("clear")
                     }
                     .pickerStyle(.inline)
                 }
@@ -806,7 +810,7 @@ private struct StrideLauncherIcon: View {
                                 .blendMode(.color)
                         } else if appearance == "clear" {
                             RoundedRectangle(cornerRadius: size * 0.225, style: .continuous)
-                                .fill(.ultraThinMaterial.opacity(0.26))
+                                .fill(Color.white.opacity(0.14))
                         }
                     }
             } else {
