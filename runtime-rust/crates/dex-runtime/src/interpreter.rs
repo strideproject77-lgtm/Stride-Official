@@ -234,6 +234,21 @@ impl<'a> ArtVm<'a> {
         }
     }
 
+    fn get_or_create_class_mirror(&mut self, descriptor: &str) -> Result<u32, String> {
+        if let Some(id) = self.class_mirrors.get(descriptor).copied() {
+            if self.heap.contains(id) { return Ok(id); }
+        }
+        let mirror = self.heap.allocate_instance("Ljava/lang/Class;")
+            .map_err(|error| format!("Class mirror allocation failed: {:?}", error))?;
+        let represented = self.heap.allocate_string(descriptor)
+            .map_err(|error| format!("Class descriptor allocation failed: {:?}", error))?;
+        self.heap.set_instance_field(
+            mirror, "__stride_represented_class_descriptor", Value::Object(represented)
+        ).map_err(|error| format!("Class mirror initialization failed: {:?}", error))?;
+        self.class_mirrors.insert(descriptor.to_owned(), mirror);
+        Ok(mirror)
+    }
+
     /// Attaches the session recorder without coupling standalone VM tests to a global logger.
     pub fn attach_diagnostics(&mut self, diagnostics: &'a RuntimeDiagnostics) {
         self.diagnostics = Some(diagnostics);
@@ -582,23 +597,7 @@ impl<'a> ArtVm<'a> {
                             type_index, pc, method_class, method_name, method_proto
                         ))?;
 
-                    let mirror_id = match self.class_mirrors.get(&descriptor).copied() {
-                        Some(id) if self.heap.contains(id) => id,
-                        _ => {
-                            // A Class mirror is a real managed java.lang.Class instance.
-                            // Keep the represented DEX descriptor in a managed String field
-                            // so reflection bridges can consume it without guessing.
-                            let mirror = self.heap.allocate_instance("Ljava/lang/Class;")
-                                .map_err(|error| format!("Class mirror allocation failed: {:?}", error))?;
-                            let represented = self.heap.allocate_string(&descriptor)
-                                .map_err(|error| format!("Class descriptor allocation failed: {:?}", error))?;
-                            self.heap.set_instance_field(
-                                mirror, "__stride_represented_class_descriptor", Value::Object(represented)
-                            ).map_err(|error| format!("Class mirror initialization failed: {:?}", error))?;
-                            self.class_mirrors.insert(descriptor, mirror);
-                            mirror
-                        }
-                    };
+                    let mirror_id = self.get_or_create_class_mirror(&descriptor)?;
                     rf.write_object(a8, mirror_id).map_err(|e| format!("Invalid reg {}", e))?;
                     pc += 2;
                 }
@@ -1551,6 +1550,101 @@ impl<'a> ArtVm<'a> {
                         let array = allocate_reflective_array(
                             self.heap, &component_descriptor, &dimensions, 0
                         )?;
+                        pending_result = Some(Value::Object(array));
+                        pc += 3;
+                        continue;
+                    }
+
+                    // Class.forName is used by apps that keep framework and application
+                    // class names in metadata instead of emitting const-class instructions.
+                    // Resolve the binary name against the package's DEX type inventory and
+                    // return the same stable Class mirror used by const-class.
+                    if target_class == "Ljava/lang/Class;"
+                        && target_name == "forName"
+                        && matches!(
+                            target_proto,
+                            "(Ljava/lang/String;)Ljava/lang/Class;"
+                                | "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;"
+                        )
+                    {
+                        let name_id = args.first().and_then(Value::as_object)
+                            .filter(|id| *id != 0)
+                            .ok_or_else(|| format!("Class.forName received a null name at PC {}", pc))?;
+                        let binary_name = self.heap.get_string(name_id)
+                            .map_err(|error| format!("Class.forName name is not a String at PC {}: {:?}", pc, error))?
+                            .to_owned();
+                        let descriptor = if binary_name.starts_with('[') {
+                            binary_name.replace('.', "/")
+                        } else {
+                            format!("L{};", binary_name.replace('.', "/"))
+                        };
+                        let valid_descriptor = descriptor.starts_with('[')
+                            || (descriptor.starts_with('L') && descriptor.ends_with(';')
+                                && descriptor.len() > 2);
+                        if !valid_descriptor {
+                            return Err(format!("Class.forName received invalid class name {:?} at PC {}", binary_name, pc));
+                        }
+                        let known = self.type_descriptors
+                            .is_some_and(|types| types.iter().any(|candidate| candidate == &descriptor))
+                            || self.hierarchy.get_class(&descriptor).is_some();
+                        if !known {
+                            return Err(format!(
+                                "Class.forName could not resolve {} ({} is absent from the loaded DEX type inventory) at PC {}",
+                                binary_name, descriptor, pc
+                            ));
+                        }
+                        let mirror = self.get_or_create_class_mirror(&descriptor)?;
+                        pending_result = Some(Value::Object(mirror));
+                        pc += 3;
+                        continue;
+                    }
+
+                    // Thread.getStackTrace exposes the active guest DEX call frames.
+                    // The interpreter records exceptional unwind frames; the current
+                    // executing caller is added explicitly so callers never receive a
+                    // fabricated success-shaped null result.
+                    if target_class == "Ljava/lang/Thread;"
+                        && target_name == "getStackTrace"
+                        && target_proto == "()[Ljava/lang/StackTraceElement;"
+                    {
+                        let receiver = args.first().and_then(Value::as_object)
+                            .filter(|id| *id != 0)
+                            .ok_or_else(|| format!("Thread.getStackTrace receiver is null at PC {}", pc))?;
+                        if !self.heap.contains(receiver) {
+                            return Err(format!("Thread.getStackTrace receiver is invalid at PC {}", pc));
+                        }
+                        let mut frames = trace.frames.clone();
+                        frames.push(crate::exceptions::StackFrameInfo {
+                            class_descriptor: method_class.clone(),
+                            method_name: method_name.clone(),
+                            prototype: method_proto.clone(),
+                            code_unit_offset: pc,
+                        });
+                        let array = self.heap.allocate_array(
+                            "[Ljava/lang/StackTraceElement;", frames.len() as i32
+                        ).map_err(|error| format!("Thread.getStackTrace array allocation failed: {:?}", error))?;
+                        for (index, frame) in frames.iter().rev().enumerate() {
+                            let element = self.heap.allocate_instance("Ljava/lang/StackTraceElement;")
+                                .map_err(|error| format!("StackTraceElement allocation failed: {:?}", error))?;
+                            let class_name = frame.class_descriptor
+                                .strip_prefix('L').unwrap_or(&frame.class_descriptor)
+                                .strip_suffix(';').unwrap_or(&frame.class_descriptor)
+                                .replace('/', ".");
+                            let class_string = self.heap.allocate_string(&class_name)
+                                .map_err(|error| format!("StackTraceElement class allocation failed: {:?}", error))?;
+                            let method_string = self.heap.allocate_string(&frame.method_name)
+                                .map_err(|error| format!("StackTraceElement method allocation failed: {:?}", error))?;
+                            self.heap.set_instance_field(element, "declaringClass", Value::Object(class_string))
+                                .map_err(|error| format!("StackTraceElement class field failed: {:?}", error))?;
+                            self.heap.set_instance_field(element, "methodName", Value::Object(method_string))
+                                .map_err(|error| format!("StackTraceElement method field failed: {:?}", error))?;
+                            self.heap.set_instance_field(element, "fileName", Value::Null)
+                                .map_err(|error| format!("StackTraceElement file field failed: {:?}", error))?;
+                            self.heap.set_instance_field(element, "lineNumber", Value::Int(-1))
+                                .map_err(|error| format!("StackTraceElement line field failed: {:?}", error))?;
+                            self.heap.set_array_element(array, index as i32, Value::Object(element))
+                                .map_err(|error| format!("Thread.getStackTrace element assignment failed: {:?}", error))?;
+                        }
                         pending_result = Some(Value::Object(array));
                         pc += 3;
                         continue;
