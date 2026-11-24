@@ -310,6 +310,7 @@ fn get_or_create_main_thread(
     let thread_id = env.heap.allocate_instance("Ljava/lang/Thread;")
         .map_err(|error| format!("main Thread allocation failed: {error:?}"))?;
     env.set_object_field(thread_id, "mStrideThreadId", Value::Long(1))?;
+    env.set_object_field(thread_id, "mStrideAlive", Value::Int(1))?;
     env.set_object_field(looper_id, "mThread", Value::Object(thread_id))?;
     Ok(thread_id)
 }
@@ -330,6 +331,7 @@ fn get_or_create_looper_thread(
     // Looper-created thread object a deterministic identity and keep the main
     // Looper/currentThread object stable across calls.
     env.set_object_field(thread, "mStrideThreadId", Value::Long(1))?;
+    env.set_object_field(thread, "mStrideAlive", Value::Int(1))?;
     env.set_object_field(looper_id, "mThread", Value::Object(thread))?;
     Ok(thread)
 }
@@ -394,7 +396,8 @@ pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef
             .filter(|id| *id != 0).ok_or("Thread.isAlive receiver is null")?;
         env.heap.get(thread_id)
             .map_err(|error| format!("Thread.isAlive receiver is invalid: {error:?}"))?;
-        Ok(Some(Value::Int(1)))
+        let alive = env.get_object_field(thread_id, "mStrideAlive")?.as_int();
+        Ok(Some(Value::Int(i32::from(alive != 0))))
     });
 
     let shared = main.clone();
@@ -496,6 +499,25 @@ mod tests {
         assert_eq!(looper_thread, current);
         assert_eq!(looper_thread, again);
         assert_eq!(heap.get(looper_thread).unwrap().class_descriptor(), "Ljava/lang/Thread;");
+    }
+
+    #[test]
+    fn thread_is_alive_distinguishes_unstarted_and_runtime_main_threads() {
+        let mut registry = JniNativeRegistry::new();
+        register_looper_jni(&mut registry, Arc::new(Mutex::new(None)), Arc::new(Mutex::new(Vec::new())));
+        let mut heap = ManagedHeap::default();
+        let unstarted = heap.allocate_instance("Ljava/lang/Thread;").unwrap();
+        let is_alive = registry.find("Ljava/lang/Thread;", "isAlive", "()Z").unwrap().clone();
+        assert_eq!(
+            is_alive(&mut JniEnv::new(&mut heap), &[Value::Object(unstarted)]).unwrap(),
+            Some(Value::Int(0))
+        );
+        let current = registry.find("Ljava/lang/Thread;", "currentThread", "()Ljava/lang/Thread;")
+            .unwrap().clone()(&mut JniEnv::new(&mut heap), &[]).unwrap().unwrap().as_object().unwrap();
+        assert_eq!(
+            is_alive(&mut JniEnv::new(&mut heap), &[Value::Object(current)]).unwrap(),
+            Some(Value::Int(1))
+        );
     }
 
     #[test]
