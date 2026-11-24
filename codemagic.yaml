@@ -4,6 +4,13 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
 
+    # Reuse Rust downloads/toolchains and build outputs between Codemagic runs.
+    cache_paths:
+      - $HOME/.cargo/registry
+      - $HOME/.cargo/git
+      - $HOME/.rustup/toolchains
+      - runtime-rust/target
+
     # Manual-only: choose CodeMagic from its dashboard when you want this builder.
     # GitHub Actions remains independently available for normal CI and manual IPA builds.
 
@@ -14,7 +21,8 @@ workflows:
         STRIDE_REPOSITORY: strideproject77-lgtm/Stride-Official
         STRIDE_LOG_BRANCH: stride-codemagic-logs
         STRIDE_BUNDLE_ID: com.strideproject.stride
-      xcode: latest
+      # Match the known-good Infinity runner image to avoid moving Xcode versions.
+      xcode: 26.2
       cocoapods: default
 
     scripts:
@@ -138,8 +146,12 @@ workflows:
           echo "Source commit: ${CM_COMMIT:-unknown}"
           echo "Codemagic build: ${CM_BUILD_NUMBER:-unknown}"
 
-          # Install Rust with the official rustup bootstrapper.
-          # Homebrew's current rustup formula is keg-only and no longer ships rustup-init.
+          # Keep Homebrew setup from spending time on automatic update/cleanup.
+          export HOMEBREW_NO_AUTO_UPDATE=1
+          export HOMEBREW_NO_INSTALL_CLEANUP=1
+
+          # Install Rust with the official rustup bootstrapper only when absent.
+          # Cached stable toolchains and targets are reused on subsequent builds.
           export PATH="$HOME/.cargo/bin:$PATH"
           if ! command -v rustup >/dev/null 2>&1; then
             echo "Rustup not found; installing with the official installer."
@@ -147,14 +159,24 @@ workflows:
             export PATH="$HOME/.cargo/bin:$PATH"
           fi
           command -v rustup
-          rustup toolchain install stable --profile minimal
-          rustup target add aarch64-apple-ios --toolchain stable
+          if ! rustup toolchain list | grep -Eq '^stable(-|$)'; then
+            rustup toolchain install stable --profile minimal
+          else
+            echo "Stable Rust toolchain already available; reusing cache."
+          fi
+          if ! rustup target list --toolchain stable --installed | grep -Fxq 'aarch64-apple-ios'; then
+            rustup target add aarch64-apple-ios --toolchain stable
+          else
+            echo "iOS ARM64 Rust target already available; reusing cache."
+          fi
           rustup default stable
           rustc --version
           cargo --version
 
           if ! command -v xcodegen >/dev/null 2>&1; then
             brew install xcodegen
+          else
+            echo "XcodeGen already available; skipping installation."
           fi
           xcodegen --version
           xcodebuild -version
