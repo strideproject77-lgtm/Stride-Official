@@ -3356,7 +3356,7 @@ mod tests {
         ).unwrap().clone();
         let outer = new_instance(
             &mut env, &[Value::Object(component), Value::Object(dimensions)]
-        ).unwrap().and_then(Value::as_object).unwrap();
+        ).unwrap().and_then(|value| value.as_object()).unwrap();
         assert_eq!(env.heap.get(outer).unwrap().class_descriptor(), "[[I");
         assert_eq!(env.array_length(outer).unwrap(), 2);
         let inner = env.heap.get_array_element(outer, 0).unwrap().as_object().unwrap();
