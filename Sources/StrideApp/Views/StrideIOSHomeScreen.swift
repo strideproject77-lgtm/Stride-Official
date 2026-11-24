@@ -11,6 +11,7 @@ struct StrideIOSHomeScreen: View {
     let onDelete: (ImportedAPK) -> Void
     let onImport: () -> Void
     let onSettings: () -> Void
+    let onExitHomeScreen: () -> Void
 
     @AppStorage("stride.iosHome.wallpaper") private var wallpaper = "dusk"
     @State private var searchText = ""
@@ -89,11 +90,14 @@ struct StrideIOSHomeScreen: View {
                 HStack {
                     Spacer()
                     Menu {
-                        Button(action: onImport) {
-                            Label("Add App", systemImage: "plus")
+                        Button(action: onExitHomeScreen) {
+                            Label("Classic Stride Home", systemImage: "square.grid.2x2")
                         }
                         Button(action: onSettings) {
                             Label("Stride Settings", systemImage: "gearshape")
+                        }
+                        Button(action: onImport) {
+                            Label("Add App", systemImage: "plus")
                         }
                     } label: {
                         Image(systemName: "ellipsis")
