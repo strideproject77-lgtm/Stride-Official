@@ -5,7 +5,9 @@
 //! integer/control-flow/memory subset over Stride-owned guest memory. Unknown
 //! instructions fail closed; host pointers and host code execution are never used.
 
-pub const MAX_GUEST_MEMORY: usize = 64 * 1024 * 1024;
+// Unity IL2CPP images can exceed 80 MiB before the guest stack is added.
+// Keep a finite per-memory-region cap while allowing those legitimate images.
+pub const MAX_GUEST_MEMORY: usize = 128 * 1024 * 1024;
 pub const MAX_INSTRUCTIONS_PER_RUN: u64 = 10_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
