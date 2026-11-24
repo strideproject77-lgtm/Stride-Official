@@ -273,8 +273,10 @@ impl AndroidRuntime {
             }
         }
 
-        // 2. Execute static initializers (DT_INIT/DT_INIT_ARRAY) and JNI_OnLoad in topological order
-        if unresolved_modules == 0 && relocation_issues.is_empty() {
+        // 2. Execute static initializers (DT_INIT/DT_INIT_ARRAY) and JNI_OnLoad
+        // per dependency closure. A broken optional library must not prevent an
+        // unrelated, fully linked module from initializing.
+        {
             let loaded_order_clone = self.native_linker.loaded_order.clone();
             for root_soname in &loaded_order_clone {
                 let init_order = match self.native_linker.dependency_initialization_order(root_soname) {
@@ -291,6 +293,46 @@ impl AndroidRuntime {
                         continue;
                     }
                 };
+
+                let mut blocked_reason = None;
+                for dependency in &init_order {
+                    match self.native_linker.unresolved_dependencies(dependency) {
+                        Ok(missing) if !missing.is_empty() => {
+                            blocked_reason = Some(format!(
+                                "{} still requires unloaded dependencies: {}",
+                                dependency, missing.join(", ")
+                            ));
+                            break;
+                        }
+                        Err(error) => {
+                            blocked_reason = Some(format!(
+                                "Could not inspect dependencies for {}: {}",
+                                dependency, error
+                            ));
+                            break;
+                        }
+                        _ => {}
+                    }
+                    let prefix = format!("{}:", dependency);
+                    if let Some(issue) = relocation_issues.iter().find(|issue| issue.starts_with(&prefix)) {
+                        blocked_reason = Some(format!(
+                            "{} has unresolved relocations: {}",
+                            dependency, issue
+                        ));
+                        break;
+                    }
+                }
+                if let Some(reason) = blocked_reason {
+                    self.diagnostics.record_detailed(
+                        DiagnosticSeverity::MissingApi,
+                        "NativeExecution",
+                        "NATIVE_INITIALIZATION_BLOCKED",
+                        &format!("Skipping native initialization for {} because its dependency closure is incomplete", root_soname),
+                        Some(&reason),
+                        Some("Resolve every dependency and relocation in this module's dependency closure"),
+                    );
+                    continue;
+                }
 
                 for soname in init_order {
                     if let Some(image_arc) = self.native_images.get(&soname).cloned() {
