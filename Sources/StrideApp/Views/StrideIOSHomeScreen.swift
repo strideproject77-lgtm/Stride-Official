@@ -58,25 +58,29 @@ struct StrideIOSHomeScreen: View {
     private var wallpaperBackground: some View {
         GeometryReader { geometry in
             ZStack {
-                LinearGradient(colors: wallpaperColors, startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle()
-                    .fill(RadialGradient(colors: [Color(red: 0.38, green: 0.78, blue: 1).opacity(0.78), .clear],
-                                         center: .center, startRadius: 2, endRadius: geometry.size.width * 0.72))
-                    .frame(width: geometry.size.width * 1.15, height: geometry.size.width * 1.15)
-                    .blur(radius: 18)
-                    .offset(x: geometry.size.width * 0.34, y: -geometry.size.height * 0.25)
-                Ellipse()
-                    .fill(RadialGradient(colors: [Color(red: 0.78, green: 0.40, blue: 1).opacity(0.72), .clear],
-                                         center: .center, startRadius: 2, endRadius: geometry.size.width * 0.62))
-                    .frame(width: geometry.size.width * 1.1, height: geometry.size.height * 0.56)
-                    .blur(radius: 24)
-                    .offset(x: -geometry.size.width * 0.30, y: geometry.size.height * 0.23)
-                Ellipse()
-                    .fill(RadialGradient(colors: [Color.white.opacity(0.28), .clear],
-                                         center: .center, startRadius: 1, endRadius: geometry.size.width * 0.44))
-                    .frame(width: geometry.size.width * 0.9, height: geometry.size.height * 0.28)
-                    .blur(radius: 28)
-                    .offset(x: geometry.size.width * 0.12, y: geometry.size.height * 0.02)
+                if wallpaper == "black" {
+                    Color.black
+                } else {
+                    LinearGradient(colors: wallpaperColors, startPoint: .topLeading, endPoint: .bottomTrailing)
+                    Circle()
+                        .fill(RadialGradient(colors: [Color(red: 0.38, green: 0.78, blue: 1).opacity(0.78), .clear],
+                                             center: .center, startRadius: 2, endRadius: geometry.size.width * 0.72))
+                        .frame(width: geometry.size.width * 1.15, height: geometry.size.width * 1.15)
+                        .blur(radius: 18)
+                        .offset(x: geometry.size.width * 0.34, y: -geometry.size.height * 0.25)
+                    Ellipse()
+                        .fill(RadialGradient(colors: [Color(red: 0.78, green: 0.40, blue: 1).opacity(0.72), .clear],
+                                             center: .center, startRadius: 2, endRadius: geometry.size.width * 0.62))
+                        .frame(width: geometry.size.width * 1.1, height: geometry.size.height * 0.56)
+                        .blur(radius: 24)
+                        .offset(x: -geometry.size.width * 0.30, y: geometry.size.height * 0.23)
+                    Ellipse()
+                        .fill(RadialGradient(colors: [Color.white.opacity(0.28), .clear],
+                                             center: .center, startRadius: 1, endRadius: geometry.size.width * 0.44))
+                        .frame(width: geometry.size.width * 0.9, height: geometry.size.height * 0.28)
+                        .blur(radius: 28)
+                        .offset(x: geometry.size.width * 0.12, y: geometry.size.height * 0.02)
+                }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
@@ -89,34 +93,6 @@ struct StrideIOSHomeScreen: View {
             wallpaperBackground
 
             VStack(spacing: 0) {
-                // Keep a persistent escape hatch from the iPhone-style launcher.
-                // Users can return to the regular Stride interface or open Settings.
-                HStack {
-                    Spacer()
-                    Menu {
-                        Button(action: onExitHomeScreen) {
-                            Label("Classic Stride Home", systemImage: "square.grid.2x2")
-                        }
-                        Button(action: onSettings) {
-                            Label("Stride Settings", systemImage: "gearshape")
-                        }
-                        Button(action: onImport) {
-                            Label("Add App", systemImage: "plus")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
-                            .background(.ultraThinMaterial, in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
-                            .contentShape(Circle())
-                    }
-                    .accessibilityLabel("Home Screen options")
-                }
-                .padding(.horizontal, 18)
-                .padding(.top, 6)
-
                 launcherPages
                     .padding(.top, 4)
                     .frame(maxHeight: .infinity)
@@ -165,6 +141,30 @@ struct StrideIOSHomeScreen: View {
                     .padding(.horizontal, 17)
                     .padding(.bottom, 7)
             }
+        }
+        .overlay(alignment: .topTrailing) {
+            // Overlay the return menu in the status-bar safe area so it does not
+            // push the first icon row down from the native iPhone layout.
+            Menu {
+                Button(action: onExitHomeScreen) {
+                    Label("Classic Stride Home", systemImage: "square.grid.2x2")
+                }
+                Button(action: onSettings) {
+                    Label("Stride Settings", systemImage: "gearshape")
+                }
+                Button(action: onImport) {
+                    Label("Add App", systemImage: "plus")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .frame(width: 34, height: 34)
+                    .contentShape(Circle())
+            }
+            .accessibilityLabel("Home Screen options")
+            .padding(.trailing, 14)
+            .padding(.top, 2)
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: isSearchPresented)
