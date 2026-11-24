@@ -11,12 +11,13 @@ impl PageProtection{
  // This is a guest-page permission summary, not a host mmap request. Android
  // PT_LOAD segments are commonly 4 KiB aligned while iOS pages are 16 KiB;
  // adjacent RX and RW segments can therefore share one planned iOS page.
- // Preserve the union here and enforce host W^X only in a future executable
- // mapping backend. The current materializer is a non-executable Vec<u8>.
+ // Preserve the union only as a coarse iOS-page summary. Exact PT_LOAD
+ // permissions are retained on SegmentCopy and enforced by the guest mapper
+ // at segment granularity, so adjacent RX/RW segments never become guest RWX.
  fn merge(&mut self,other:Self){self.readable|=other.readable;self.writable|=other.writable;self.executable|=other.executable;}
 }
 #[derive(Debug,Clone,PartialEq,Eq)]
-pub struct SegmentCopy{pub file_offset:u64,pub image_offset:u64,pub file_size:u64,pub memory_size:u64}
+pub struct SegmentCopy{pub file_offset:u64,pub image_offset:u64,pub file_size:u64,pub memory_size:u64,pub protection:PageProtection}
 #[derive(Debug,Clone,PartialEq,Eq)]
 pub struct PlannedPage{pub image_offset:u64,pub protection:PageProtection}
 #[derive(Debug,Clone,PartialEq,Eq)]
@@ -54,7 +55,7 @@ pub fn plan_native_image(info:&ElfProgramInfo,load_bias:u64)->Result<NativeImage
   while page<last{page_map.entry(page).or_default().merge(protection);page=page.checked_add(IOS_PAGE_SIZE).ok_or(LoadPlanError::AddressOverflow)?;}
   let offset=s.virtual_address.checked_sub(image_start).ok_or(LoadPlanError::SegmentOutsideImage)?;
   if offset.checked_add(s.memory_size).filter(|e|*e<=image_size).is_none(){return Err(LoadPlanError::SegmentOutsideImage);}
-  copies.push(SegmentCopy{file_offset:s.file_offset,image_offset:offset,file_size:s.file_size,memory_size:s.memory_size});
+  copies.push(SegmentCopy{file_offset:s.file_offset,image_offset:offset,file_size:s.file_size,memory_size:s.memory_size,protection});
  }
  let pages=page_map.into_iter().map(|(address,protection)|PlannedPage{image_offset:address-image_start,protection}).collect();
  Ok(NativeImagePlan{load_bias,image_virtual_start:image_start,image_size,pages,segment_copies:copies,architecture:info.identity.architecture})
@@ -96,7 +97,7 @@ pub fn materialize_native_image(bytes:&[u8],plan:&NativeImagePlan)->Result<Vec<u
  fn image(segments:Vec<LoadSegment>)->ElfProgramInfo{ElfProgramInfo{identity:ElfIdentity{class:ElfClass::Elf64,architecture:ElfArchitecture::Aarch64},byte_order:ElfByteOrder::Little,entry:0x1000,segments,dynamic_segment:None}}
  fn seg(offset:u64,address:u64,file:u64,memory:u64,flags:u32)->LoadSegment{LoadSegment{file_offset:offset,virtual_address:address,file_size:file,memory_size:memory,flags,alignment:0x1000}}
  #[test]fn plans_ios_pages(){let i=image(vec![seg(0,0x1000,0x1800,0x1800,5),seg(0x4000,0x5000,0x800,0x2000,6)]);let p=plan_native_image(&i,0x1_0000_0000).unwrap();assert_eq!(p.image_virtual_start,0);assert_eq!(p.image_size,IOS_PAGE_SIZE*2);assert_eq!(p.pages.len(),2);assert!(p.pages.iter().all(|x|!(x.protection.writable&&x.protection.executable)));}
- #[test]fn combines_permissions_when_android_segments_share_one_ios_page(){let i=image(vec![seg(0,0x1000,0x1000,0x1000,5),seg(0x1000,0x2000,0x1000,0x1000,6)]);let p=plan_native_image(&i,0).unwrap();assert_eq!(p.pages.len(),1);assert!(p.pages[0].protection.readable);assert!(p.pages[0].protection.writable);assert!(p.pages[0].protection.executable);}
+ #[test]fn combines_page_summary_but_preserves_segment_wx_permissions(){let i=image(vec![seg(0,0x1000,0x1000,0x1000,5),seg(0x1000,0x2000,0x1000,0x1000,6)]);let p=plan_native_image(&i,0).unwrap();assert_eq!(p.pages.len(),1);assert!(p.pages[0].protection.readable);assert!(p.pages[0].protection.writable);assert!(p.pages[0].protection.executable);assert_eq!(p.segment_copies.len(),2);assert!(p.segment_copies[0].protection.executable);assert!(!p.segment_copies[0].protection.writable);assert!(p.segment_copies[1].protection.writable);assert!(!p.segment_copies[1].protection.executable);}
  #[test]fn rejects_bad_alignment(){let mut s=seg(0,0x1000,0x100,0x100,5);s.alignment=3;assert_eq!(plan_native_image(&image(vec![s]),0),Err(LoadPlanError::InvalidAlignment));}
  #[test]fn rejects_empty_image(){assert_eq!(plan_native_image(&image(vec![]),0),Err(LoadPlanError::NoLoadableSegments));}
  #[test]fn rejects_address_overflow(){let i=image(vec![seg(0,u64::MAX-10,0,32,4)]);assert_eq!(plan_native_image(&i,0),Err(LoadPlanError::AddressOverflow));}
