@@ -44,7 +44,7 @@ struct StrideIOSHomeScreen: View {
     // apps automatically extend the Home Screen only when the current page fills.
     private var pages: [[ImportedAPK]] {
         let populated = stridePages(filteredPackages, size: 24)
-        let requiredPageCount = max(1, storedPageCount, populated.count)
+        let requiredPageCount = max(1, max(storedPageCount, populated.count))
         return populated + Array(repeating: [], count: requiredPageCount - populated.count)
     }
 
