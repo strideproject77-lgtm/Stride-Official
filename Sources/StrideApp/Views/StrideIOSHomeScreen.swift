@@ -17,27 +17,64 @@ struct StrideIOSHomeScreen: View {
     @State private var searchText = ""
     @State private var isSearchPresented = false
     @State private var selectedPage = 0
+    @State private var isEditingIcons = false
+    @State private var isJiggling = false
+    @State private var draggedPackagePath: String?
+    @AppStorage("stride.iosHome.appOrder") private var storedAppOrder = ""
+    @AppStorage("stride.iosHome.pageCount") private var storedPageCount = 1
     @FocusState private var searchFocused: Bool
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 18), count: 4)
 
-    private var filteredPackages: [ImportedAPK] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return packages }
-        return packages.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+    private var orderedPackages: [ImportedAPK] {
+        let paths = storedAppOrder.split(separator: "\n").map(String.init)
+        let byPath = Dictionary(uniqueKeysWithValues: packages.map { ($0.packageDirectoryURL.path, $0) })
+        let saved = paths.compactMap { byPath[$0] }
+        let savedPaths = Set(saved.map { $0.packageDirectoryURL.path })
+        return saved + packages.filter { !savedPaths.contains($0.packageDirectoryURL.path) }
     }
 
-    // A 4 × 6 page mirrors the standard iPhone Home Screen grid.
+    private var filteredPackages: [ImportedAPK] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return orderedPackages }
+        return orderedPackages.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+    }
+
+    // One page is created initially. Additional pages are user-created; imported
+    // apps automatically extend the Home Screen only when the current page fills.
     private var pages: [[ImportedAPK]] {
         let populated = stridePages(filteredPackages, size: 24)
-        // Keep three real swipe pages available, even when the library has fewer
-        // than 49 apps. This mirrors the three-page Home Screen requested.
-        let requiredPageCount = max(3, populated.count)
+        let requiredPageCount = max(1, storedPageCount, populated.count)
         return populated + Array(repeating: [], count: requiredPageCount - populated.count)
     }
 
     private var dockPackages: [ImportedAPK] {
-        Array(packages.prefix(4))
+        Array(orderedPackages.prefix(4))
+    }
+
+    private func persistOrder(_ values: [ImportedAPK]) {
+        storedAppOrder = values.map { $0.packageDirectoryURL.path }.joined(separator: "\n")
+    }
+
+    private func addHomeScreenPage() {
+        storedPageCount = max(1, pages.count) + 1
+        selectedPage = storedPageCount - 1
+    }
+
+    private func movePackage(path: String, to destinationIndex: Int) {
+        guard searchText.isEmpty,
+              let sourceIndex = orderedPackages.firstIndex(where: { $0.packageDirectoryURL.path == path }) else { return }
+        var values = orderedPackages
+        let moved = values.remove(at: sourceIndex)
+        let safeIndex = min(max(0, destinationIndex), values.count)
+        values.insert(moved, at: safeIndex)
+        persistOrder(values)
+    }
+
+    private func finishIconEditing() {
+        isEditingIcons = false
+        isJiggling = false
+        draggedPackagePath = nil
     }
 
     private var wallpaperColors: [Color] {
@@ -114,8 +151,8 @@ struct StrideIOSHomeScreen: View {
                         .tracking(1.1)
                         .foregroundStyle(.white.opacity(0.68))
                         .padding(.bottom, 8)
-                } else if pages.count > 1 {
-                    pageIndicator
+                } else {
+                    pageControls
                         .padding(.bottom, 9)
                 }
 
@@ -146,8 +183,14 @@ struct StrideIOSHomeScreen: View {
             // Overlay the return menu in the status-bar safe area so it does not
             // push the first icon row down from the native iPhone layout.
             Menu {
-                Button(action: onExitHomeScreen) {
-                    Label("Classic Stride Home", systemImage: "square.grid.2x2")
+                if isEditingIcons {
+                    Button(action: finishIconEditing) {
+                        Label("Done", systemImage: "checkmark")
+                    }
+                } else {
+                    Button(action: onExitHomeScreen) {
+                        Label("Classic Stride Home", systemImage: "square.grid.2x2")
+                    }
                 }
                 Button(action: onSettings) {
                     Label("Stride Settings", systemImage: "gearshape")
@@ -169,6 +212,10 @@ struct StrideIOSHomeScreen: View {
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.2), value: isSearchPresented)
         .onChange(of: searchText) { _ in selectedPage = 0 }
+        .onChange(of: packages.map { $0.packageDirectoryURL.path }) { _ in
+            let required = max(1, (orderedPackages.count + 23) / 24)
+            if storedPageCount < required { storedPageCount = required }
+        }
         .onChange(of: isSearchPresented) { presented in
             if presented {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -266,12 +313,17 @@ struct StrideIOSHomeScreen: View {
                             let iconSize = min(64, max(52, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
                             LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
                                 ForEach(entry.element) { item in
-                                    appIcon(item, size: iconSize)
+                                    appIcon(item, size: iconSize, globalIndex: entry.offset * 24 + entry.element.firstIndex(of: item)!)
                                 }
                             }
                             .padding(.horizontal, horizontalInset)
                             .padding(.top, 15)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                            .contentShape(Rectangle())
+                            .onDrop(of: ["public.text"], delegate: StrideHomePageDropDelegate(
+                                destinationIndex: entry.offset * 24 + entry.element.count,
+                                onDrop: movePackage
+                            ))
                         }
                         .tag(entry.offset)
                     }
@@ -282,7 +334,7 @@ struct StrideIOSHomeScreen: View {
         }
     }
 
-    private func appIcon(_ item: ImportedAPK, size: CGFloat) -> some View {
+    private func appIcon(_ item: ImportedAPK, size: CGFloat, globalIndex: Int) -> some View {
         Button { onSelect(item) } label: {
             VStack(spacing: 5) {
                 StrideLauncherIcon(data: item.iconData, accent: accent, size: size)
@@ -297,6 +349,24 @@ struct StrideIOSHomeScreen: View {
             }
             .contentShape(Rectangle())
         }
+        .rotationEffect(.degrees(isJiggling ? (globalIndex.isMultiple(of: 2) ? 1.7 : -1.7) : 0))
+        .animation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true), value: isJiggling)
+        .gesture(LongPressGesture(minimumDuration: 0.38).onChanged { _ in
+            guard !isJiggling else { return }
+            isJiggling = true
+        }.onEnded { _ in
+            isEditingIcons = true
+        })
+        .onDrag {
+            draggedPackagePath = item.packageDirectoryURL.path
+            isEditingIcons = true
+            isJiggling = true
+            return NSItemProvider(object: item.packageDirectoryURL.path as NSString)
+        }
+        .onDrop(of: ["public.text"], delegate: StrideHomeItemDropDelegate(
+            destinationIndex: globalIndex,
+            onDrop: movePackage
+        ))
         .buttonStyle(.plain)
         .contextMenu {
             Button { onQuickLaunch(item) } label: {
@@ -313,15 +383,35 @@ struct StrideIOSHomeScreen: View {
         .accessibilityHint("Opens app details. Touch and hold for app actions.")
     }
 
-    private var pageIndicator: some View {
-        HStack(spacing: 7) {
-            ForEach(pages.indices, id: \.self) { index in
-                Capsule()
-                    .fill(index == selectedPage ? Color.white : Color.white.opacity(0.38))
-                    .frame(width: index == selectedPage ? 17 : 6, height: 6)
+    private var pageControls: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 7) {
+                ForEach(pages.indices, id: \.self) { index in
+                    Capsule()
+                        .fill(index == selectedPage ? Color.white : Color.white.opacity(0.38))
+                        .frame(width: index == selectedPage ? 17 : 6, height: 6)
+                        .contentShape(Rectangle().inset(by: -8))
+                        .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { selectedPage = index } }
+                }
+            }
+            .accessibilityLabel("Home Screen page \(selectedPage + 1) of \(pages.count)")
+
+            Button(action: addHomeScreenPage) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 22, height: 22)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(Color.white.opacity(0.24), lineWidth: 0.8))
+            }
+            .accessibilityLabel("Add Home Screen page")
+
+            if isEditingIcons {
+                Button("Done", action: finishIconEditing)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
             }
         }
-        .accessibilityLabel("Home Screen page \(selectedPage + 1) of \(pages.count)")
     }
 
     private var dock: some View {
@@ -379,6 +469,43 @@ struct StrideIOSHomeScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 30)
+    }
+}
+
+
+private struct StrideHomeItemDropDelegate: DropDelegate {
+    let destinationIndex: Int
+    let onDrop: (String, Int) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: ["public.text"]).first else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let path = object as? String else { return }
+            DispatchQueue.main.async { onDrop(path, destinationIndex) }
+        }
+        return true
+    }
+}
+
+private struct StrideHomePageDropDelegate: DropDelegate {
+    let destinationIndex: Int
+    let onDrop: (String, Int) -> Void
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: ["public.text"]).first else { return false }
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let path = object as? String else { return }
+            DispatchQueue.main.async { onDrop(path, destinationIndex) }
+        }
+        return true
     }
 }
 
