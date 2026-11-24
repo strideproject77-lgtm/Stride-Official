@@ -53,9 +53,10 @@ final class StrideDiagnostics: ObservableObject {
     private var lastSessionAPKName: String?
     private let flushBatchSize = 16
     private var sequence: UInt64 = 0
-    private let capacity = 2000
+    private let capacity = 8192
     private var sessionStartedAt = Date()
     private var sessionIsActive = false
+    private var lifecycleObservers: [NSObjectProtocol] = []
 
     private var documentsURL: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -107,8 +108,46 @@ final class StrideDiagnostics: ObservableObject {
     private init() {
         openLog()
         detectUncleanPreviousSession()
+        installLifecycleObservers()
         record(.info, stage: "BOOT", code: "DIAG_READY",
                "Unified diagnostics initialized; persistent log: stride-diagnostics.log")
+    }
+
+    private func installLifecycleObservers() {
+        let center = NotificationCenter.default
+        let watched: [(Notification.Name, String, Severity, String)] = [
+            (UIApplication.willResignActiveNotification, "APP_WILL_RESIGN_ACTIVE", .info,
+             "Host app is about to resign active; guest execution may be interrupted"),
+            (UIApplication.didEnterBackgroundNotification, "APP_ENTERED_BACKGROUND", .warning,
+             "Host app entered background; iOS may suspend guest execution"),
+            (UIApplication.willEnterForegroundNotification, "APP_WILL_ENTER_FOREGROUND", .info,
+             "Host app is returning to foreground"),
+            (UIApplication.didReceiveMemoryWarningNotification, "HOST_MEMORY_WARNING", .warning,
+             "iOS delivered a memory warning to Stride"),
+            (UIApplication.willTerminateNotification, "HOST_WILL_TERMINATE", .warning,
+             "iOS notified Stride that the host process is terminating")
+        ]
+        for (name, code, severity, message) in watched {
+            lifecycleObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.sessionIsActive else { return }
+                    self.record(severity, stage: "HOST_LIFECYCLE", code: code, message)
+                    self.flush()
+                }
+            })
+        }
+        lifecycleObservers.append(center.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.sessionIsActive else { return }
+                self.record(.warning, stage: "HOST_RESOURCE", code: "THERMAL_STATE_CHANGED",
+                            "Thermal state changed during guest session: \(ProcessInfo.processInfo.thermalState)")
+                self.flush()
+            }
+        })
     }
 
     nonisolated static func recordAsync(severity: String, stage: String, code: String,
@@ -275,6 +314,17 @@ final class StrideDiagnostics: ObservableObject {
             let findings = classify(lines)
             let assessment = primaryAssessment(findings)
             let observedStages = stageCoverage(lines)
+            let stageCounts = Dictionary(grouping: entries, by: { $0.stage })
+                .map { (stage: $0.key, count: $0.value.count,
+                        errors: $0.value.filter { $0.severity == .error || $0.severity == .fatal }.count) }
+                .sorted { $0.stage < $1.stage }
+            let structuredStageSummary = stageCounts.isEmpty
+                ? "(No structured host-stage events were retained.)"
+                : stageCounts.map { "\($0.stage): \($0.count) event(s), \($0.errors) error/fatal" }.joined(separator: "\n")
+            let hostLifecycleSignals = entries.filter { $0.stage == "HOST_LIFECYCLE" || $0.stage == "HOST_RESOURCE" }
+            let lifecycleSummary = hostLifecycleSignals.isEmpty
+                ? "(No host lifecycle or thermal interruption signals were recorded.)"
+                : hostLifecycleSignals.map(\.line).joined(separator: "\n")
             let resolvedPackage = packageName != "Not resolved" ? packageName :
                 (lines.first(where: { $0.contains("Android package identity:") })?
                     .components(separatedBy: "Android package identity:").last?
@@ -332,6 +382,14 @@ final class StrideDiagnostics: ObservableObject {
             DEVICE / EXECUTION ENVIRONMENT
             ========================================
             \(deviceEnvironment)
+
+            HOST LIFECYCLE / RESOURCE INTERRUPTIONS
+            ========================================
+            \(lifecycleSummary)
+
+            STRUCTURED HOST EVENT COUNTS BY STAGE
+            ========================================
+            \(structuredStageSummary)
 
             LAUNCH STAGE COVERAGE (presence of log evidence only; not proof of successful completion)
             ========================================
@@ -407,6 +465,9 @@ final class StrideDiagnostics: ObservableObject {
             "CPU cores: \(ProcessInfo.processInfo.activeProcessorCount) active / \(ProcessInfo.processInfo.processorCount) logical",
             "Thermal state at export: \(thermal)",
             "Low Power Mode at export: \(ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")",
+            "Host application state: \(UIApplication.shared.applicationState == .active ? "Active" : (UIApplication.shared.applicationState == .inactive ? "Inactive" : "Background"))",
+            "Maximum display refresh rate: \(screen.maximumFramesPerSecond) Hz",
+            "Display gamut: \(screen.traitCollection.displayGamut == .P3 ? "Display P3" : "sRGB / other")",
             "Free app-container filesystem space: \(freeBytes.map { ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "Unavailable")",
             "Preferred language: \(Locale.preferredLanguages.first ?? "Unknown")",
             "Time zone: \(TimeZone.current.identifier)"
