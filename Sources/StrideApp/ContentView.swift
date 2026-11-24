@@ -74,7 +74,8 @@ struct ContentView: View {
                                 },
                                 onDelete: { pendingDelete = $0 },
                                 onImport: { showingImporter = true },
-                                onSettings: { selectedTab = 2 }
+                                onSettings: { selectedTab = 2 },
+                                onExitHomeScreen: { homeExperience = "classic"; selectedTab = 0 }
                             )
                         } else {
                             home
