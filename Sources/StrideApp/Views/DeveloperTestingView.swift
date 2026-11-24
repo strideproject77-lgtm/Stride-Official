@@ -1,3 +1,4 @@
+#if STRIDE_DEVELOPER_MODE
 import SwiftUI
 import UIKit
 
@@ -192,3 +193,5 @@ struct DeveloperTestingView: View {
         }
     }
 }
+
+#endif
