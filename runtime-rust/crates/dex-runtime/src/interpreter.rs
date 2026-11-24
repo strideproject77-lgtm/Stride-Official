@@ -1584,9 +1584,18 @@ impl<'a> ArtVm<'a> {
                         if !valid_descriptor {
                             return Err(format!("Class.forName received invalid class name {:?} at PC {}", binary_name, pc));
                         }
-                        let known = self.type_descriptors
-                            .is_some_and(|types| types.iter().any(|candidate| candidate == &descriptor))
-                            || self.hierarchy.get_class(&descriptor).is_some();
+                        let component_descriptor = descriptor.trim_start_matches('[');
+                        let primitive_array_component = matches!(
+                            component_descriptor, "Z" | "B" | "C" | "S" | "I" | "J" | "F" | "D"
+                        );
+                        let known_in_current_dex = self.type_descriptors
+                            .is_some_and(|types| types.iter().any(|candidate| candidate == component_descriptor));
+                        let known_in_other_dex = self.dex_inventories
+                            .is_some_and(|inventories| inventories.iter().any(|inventory| {
+                                inventory.type_descriptors.iter().any(|candidate| candidate == component_descriptor)
+                            }));
+                        let known = primitive_array_component || known_in_current_dex || known_in_other_dex
+                            || self.hierarchy.get_class(component_descriptor).is_some();
                         if !known {
                             return Err(format!(
                                 "Class.forName could not resolve {} ({} is absent from the loaded DEX type inventory) at PC {}",
