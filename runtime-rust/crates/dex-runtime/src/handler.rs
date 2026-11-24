@@ -297,6 +297,23 @@ fn get_or_create_main_looper(
     Ok(id)
 }
 
+fn get_or_create_main_thread(
+    env: &mut crate::jni::JniEnv<'_>,
+    shared: &MainLooperRef,
+) -> Result<u32, String> {
+    let looper_id = get_or_create_main_looper(env, shared)?;
+    if let Value::Object(thread_id) = env.get_object_field(looper_id, "mThread")? {
+        if env.heap.contains(thread_id) {
+            return Ok(thread_id);
+        }
+    }
+    let thread_id = env.heap.allocate_instance("Ljava/lang/Thread;")
+        .map_err(|error| format!("main Thread allocation failed: {error:?}"))?;
+    env.set_object_field(thread_id, "mStrideThreadId", Value::Long(1))?;
+    env.set_object_field(looper_id, "mThread", Value::Object(thread_id))?;
+    Ok(thread_id)
+}
+
 /// Registers correctly typed Looper object-returning methods and Handler
 /// constructors. Scheduling remains owned by the runtime event pump.
 pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef, runnables: RunnableQueue) {
@@ -312,6 +329,55 @@ pub fn register_looper_jni(registry: &mut JniNativeRegistry, main: MainLooperRef
             },
         );
     }
+
+    let shared = main.clone();
+    registry.register(
+        "Landroid/os/Looper;",
+        "getThread",
+        "()Ljava/lang/Thread;",
+        move |env, args| {
+            let looper_id = args.first().and_then(Value::as_object)
+                .filter(|id| *id != 0).ok_or("Looper.getThread receiver is null")?;
+            env.heap.get(looper_id)
+                .map_err(|error| format!("Looper.getThread receiver is invalid: {error:?}"))?;
+            if let Value::Object(thread_id) = env.get_object_field(looper_id, "mThread")? {
+                if env.heap.contains(thread_id) {
+                    return Ok(Some(Value::Object(thread_id)));
+                }
+            }
+            let thread_id = get_or_create_main_thread(env, &shared)?;
+            env.set_object_field(looper_id, "mThread", Value::Object(thread_id))?;
+            Ok(Some(Value::Object(thread_id)))
+        },
+    );
+
+    let shared = main.clone();
+    registry.register(
+        "Ljava/lang/Thread;",
+        "currentThread",
+        "()Ljava/lang/Thread;",
+        move |env, _args| {
+            let thread_id = get_or_create_main_thread(env, &shared)?;
+            Ok(Some(Value::Object(thread_id)))
+        },
+    );
+    registry.register("Ljava/lang/Thread;", "getId", "()J", |env, args| {
+        let thread_id = args.first().and_then(Value::as_object)
+            .filter(|id| *id != 0).ok_or("Thread.getId receiver is null")?;
+        let id = env.get_object_field(thread_id, "mStrideThreadId")?;
+        Ok(Some(Value::Long(match id {
+            Value::Long(value) => value,
+            Value::Int(value) => i64::from(value),
+            _ => 0,
+        })))
+    });
+    registry.register("Ljava/lang/Thread;", "isAlive", "()Z", |env, args| {
+        let thread_id = args.first().and_then(Value::as_object)
+            .filter(|id| *id != 0).ok_or("Thread.isAlive receiver is null")?;
+        env.heap.get(thread_id)
+            .map_err(|error| format!("Thread.isAlive receiver is invalid: {error:?}"))?;
+        Ok(Some(Value::Int(1)))
+    });
 
     let shared = main.clone();
     registry.register("Landroid/os/Handler;", "<init>", "()V", move |env, args| {
@@ -484,4 +550,36 @@ mod tests {
         let results = coord.tick_all();
         assert_eq!(results[0].1.len(), 2);
     }
+    #[test]
+    fn looper_get_thread_matches_thread_current_thread() {
+        let mut registry = JniNativeRegistry::new();
+        register_looper_jni(
+            &mut registry,
+            Arc::new(Mutex::new(None)),
+            Arc::new(Mutex::new(Vec::new())),
+        );
+        let mut heap = ManagedHeap::default();
+        let get_main = registry.find(
+            "Landroid/os/Looper;", "getMainLooper", "()Landroid/os/Looper;"
+        ).unwrap().clone();
+        let looper = get_main(
+            &mut crate::jni::JniEnv::new(&mut heap), &[]
+        ).unwrap().and_then(Value::as_object).unwrap();
+        let get_thread = registry.find(
+            "Landroid/os/Looper;", "getThread", "()Ljava/lang/Thread;"
+        ).unwrap().clone();
+        let looper_thread = get_thread(
+            &mut crate::jni::JniEnv::new(&mut heap), &[Value::Object(looper)]
+        ).unwrap().and_then(Value::as_object).unwrap();
+        let current_thread = registry.find(
+            "Ljava/lang/Thread;", "currentThread", "()Ljava/lang/Thread;"
+        ).unwrap().clone();
+        let current = current_thread(
+            &mut crate::jni::JniEnv::new(&mut heap), &[]
+        ).unwrap().and_then(Value::as_object).unwrap();
+        assert_eq!(looper_thread, current);
+        assert_eq!(heap.get(current).unwrap().class_descriptor(), "Ljava/lang/Thread;");
+    }
+
+
 }
