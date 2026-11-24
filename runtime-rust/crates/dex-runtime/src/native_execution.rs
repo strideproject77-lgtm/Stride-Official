@@ -658,10 +658,10 @@ impl NativeGuestImage {
         Ok((vm_struct_addr, env_struct_addr))
     }
     pub fn is_executable_address(&self, address: u64) -> bool {
-        self.plan.pages.iter().any(|page| {
-            if !page.protection.executable { return false; }
-            let start = self.report.image_base.saturating_add(page.image_offset);
-            let end = start.saturating_add(stride_native_loader::IOS_PAGE_SIZE);
+        self.plan.segment_copies.iter().any(|segment| {
+            if !segment.protection.executable { return false; }
+            let start = self.report.image_base.saturating_add(segment.image_offset);
+            let end = start.saturating_add(segment.memory_size);
             address >= start && address < end
         })
     }
