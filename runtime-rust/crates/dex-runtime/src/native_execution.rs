@@ -275,9 +275,10 @@ impl NativeGuestImage {
         const JNI_VERSION_1_1: u32 = 0x0001_0001;
         const JNI_VERSION_1_2: u32 = 0x0001_0002;
         const JNI_VERSION_1_4: u32 = 0x0001_0004;
+        const JNI_VERSION_1_6: u32 = 0x0001_0006;
         let value = version as u32;
         match value {
-            JNI_VERSION_1_1 | JNI_VERSION_1_2 | JNI_VERSION_1_4 => Ok(value),
+            JNI_VERSION_1_1 | JNI_VERSION_1_2 | JNI_VERSION_1_4 | JNI_VERSION_1_6 => Ok(value),
             _ => Err(NativeExecutionError::UnsupportedJniVersion(value)),
         }
     }
@@ -816,6 +817,11 @@ mod tests {
         let reports = image.run_initializers(&mut cpu, 1000).unwrap();
         assert!(reports.is_empty(), "repeat execution must return empty without error");
         assert_eq!(image.stage, NativeLibraryStage::RelocationsApplied);
+    }
+
+    #[test]
+    fn accepts_jni_version_1_6_returned_by_modern_android_libraries() {
+        assert_eq!(NativeGuestImage::validate_jni_version(0x0001_0006).unwrap(), 0x0001_0006);
     }
 
     #[test]
