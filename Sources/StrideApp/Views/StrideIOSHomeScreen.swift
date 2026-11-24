@@ -494,36 +494,43 @@ struct StrideIOSHomeScreen: View {
     }
 
     private var launcherPages: some View {
-        Group {
-            if filteredPackages.isEmpty {
-                emptyState
-            } else {
-                TabView(selection: $selectedPage) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { entry in
-                        GeometryReader { geometry in
-                            let horizontalInset: CGFloat = 18
-                            let spacing: CGFloat = 18
-                            let iconSize = min(largeIcons ? 70 : 64, max(largeIcons ? 62 : 52, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
-                            LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
-                                ForEach(entry.element) { item in
-                                    appIcon(item, size: iconSize, globalIndex: entry.offset * 24 + entry.element.firstIndex(of: item)!)
-                                }
-                            }
-                            .padding(.horizontal, horizontalInset)
-                            .padding(.top, 15)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            .contentShape(Rectangle())
-                            .onDrop(of: ["public.text"], delegate: StrideHomePageDropDelegate(
-                                destinationIndex: entry.offset * 24 + entry.element.count,
-                                onDrop: movePackage
-                            ))
+        TabView(selection: $selectedPage) {
+            ForEach(Array(pages.enumerated()), id: \.offset) { entry in
+                GeometryReader { geometry in
+                    let horizontalInset: CGFloat = 18
+                    let spacing: CGFloat = 18
+                    let iconSize = min(largeIcons ? 66 : 60, max(largeIcons ? 60 : 56, (geometry.size.width - horizontalInset * 2 - spacing * 3) / 4))
+                    LazyVGrid(columns: columns, alignment: .center, spacing: 20) {
+                        ForEach(entry.element) { item in
+                            appIcon(item, size: iconSize, globalIndex: entry.offset * 24 + entry.element.firstIndex(of: item)!)
                         }
-                        .tag(entry.offset)
                     }
+                    .padding(.horizontal, horizontalInset)
+                    .padding(.top, 15)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .contentShape(Rectangle())
+                    .onDrop(of: ["public.text"], delegate: StrideHomePageDropDelegate(
+                        destinationIndex: entry.offset * 24 + entry.element.count,
+                        onDrop: movePackage
+                    ))
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .animation(.easeInOut(duration: 0.2), value: selectedPage)
+                .tag(entry.offset)
             }
+
+            StrideAppLibraryScreen(
+                packages: orderedPackages,
+                accent: accent,
+                onSelect: onSelect,
+                onQuickLaunch: onQuickLaunch,
+                onDelete: onDelete,
+                onImport: onImport
+            )
+            .tag(pages.count)
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .animation(.easeInOut(duration: 0.2), value: selectedPage)
+        .onChange(of: pages.count) { count in
+            if selectedPage > count { selectedPage = count }
         }
     }
 
@@ -581,29 +588,33 @@ struct StrideIOSHomeScreen: View {
     private var pageControls: some View {
         HStack(spacing: 12) {
             HStack(spacing: 7) {
-                ForEach(pages.indices, id: \.self) { index in
+                ForEach(0...pages.count, id: \.self) { index in
                     Capsule()
                         .fill(index == selectedPage ? Color.white : Color.white.opacity(0.38))
                         .frame(width: index == selectedPage ? 17 : 6, height: 6)
                         .contentShape(Rectangle().inset(by: -8))
                         .onTapGesture { withAnimation(.easeInOut(duration: 0.2)) { selectedPage = index } }
                         .onDrop(of: ["public.text"], delegate: StrideHomeItemDropDelegate(
-                            destinationIndex: index * 24,
+                            destinationIndex: min(index, pages.count - 1) * 24,
                             onDrop: movePackage
                         ))
                 }
             }
-            .accessibilityLabel("Home Screen page \(selectedPage + 1) of \(pages.count)")
+            .accessibilityLabel(selectedPage == pages.count
+                ? "App Library"
+                : "Home Screen page \(selectedPage + 1) of \(pages.count)")
 
-            Button(action: addHomeScreenPage) {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 22)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(Color.white.opacity(0.24), lineWidth: 0.8))
+            if selectedPage < pages.count {
+                Button(action: addHomeScreenPage) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.24), lineWidth: 0.8))
+                }
+                .accessibilityLabel("Add Home Screen page")
             }
-            .accessibilityLabel("Add Home Screen page")
 
             if isEditingIcons {
                 Button("Done", action: finishIconEditing)
@@ -617,7 +628,7 @@ struct StrideIOSHomeScreen: View {
         HStack(spacing: 0) {
             ForEach(dockPackages) { item in
                 Button { onSelect(item) } label: {
-                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 64, appearance: iconAppearance)
+                    StrideLauncherIcon(data: item.iconData, accent: accent, size: 60, appearance: iconAppearance)
                         .frame(maxWidth: .infinity)
                         .shadow(color: .black.opacity(0.26), radius: 5, y: 2)
                 }
@@ -639,7 +650,7 @@ struct StrideIOSHomeScreen: View {
                 .accessibilityLabel("Import your first app")
             }
         }
-        .frame(height: 64)
+        .frame(height: 60)
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
         // Native SwiftUI material samples the wallpaper behind the dock and
