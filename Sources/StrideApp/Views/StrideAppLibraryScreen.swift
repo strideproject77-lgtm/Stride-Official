@@ -243,15 +243,13 @@ struct StrideAppLibraryScreen: View {
         }
         .sheet(item: $selectedCategory) { selected in
             categoryDetail(selected)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
         }
     }
 
     @State private var selectedCategory: LibraryCategory?
 
     private func categoryDetail(_ category: LibraryCategory) -> some View {
-        NavigationStack {
+        NavigationView {
             ScrollView {
                 LazyVGrid(columns: twoColumns, spacing: 18) {
                     ForEach(category.apps) { item in
@@ -278,7 +276,7 @@ struct StrideAppLibraryScreen: View {
             .navigationTitle(category.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") { selectedCategory = nil }
                 }
             }
