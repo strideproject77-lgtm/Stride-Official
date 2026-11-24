@@ -1,3 +1,4 @@
+#if STRIDE_DEVELOPER_MODE
 import Foundation
 import SwiftUI
 import UIKit
@@ -401,3 +402,5 @@ final class DeveloperBatchTestRunner: ObservableObject {
         }
     }
 }
+
+#endif
