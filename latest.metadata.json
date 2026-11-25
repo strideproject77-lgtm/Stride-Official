@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "aggregate_bytes": 347797,
+  "aggregate_lines": 2910,
+  "aggregate_sha256": "44b3bdf69732e7a827827d0d0955e216c9f476cd12d965482aae0a341ab71fd4",
+  "max_part_bytes": 3145728,
+  "part_count": 1,
+  "log_parts": [
+    {
+      "path": "latest",
+      "bytes": 347797,
+      "sha256": "44b3bdf69732e7a827827d0d0955e216c9f476cd12d965482aae0a341ab71fd4"
+    }
+  ]
+}
